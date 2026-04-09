@@ -1,0 +1,38 @@
+trigger,response,action
+hello,Hey! What do you need?,None
+hi,Hey! What do you need?,None
+hey,Hey! What's up?,None
+hey aura,I'm here. What do you need?,None
+good morning,Good morning! Ready when you are.,None
+good night,Good night. See you tomorrow.,None
+how are you,I'm running at full capacity. What do you need?,None
+what is your name,I'm AURA. Your personal AI companion.,None
+who are you,I'm AURA built to be always one step ahead.,None
+what time is it,TIME_FUNCTION,None
+what is the date,DATE_FUNCTION,None
+open chrome,OPEN_CHROME,open_chrome
+open notepad,OPEN_NOTEPAD,open_notepad
+open calculator,OPEN_CALCULATOR,open_calculator
+shut down aura,Shutting down. Goodbye.,EXIT
+bye,Goodbye. I'll be here when you need me.,EXIT
+goodbye,Goodbye. I'll be here when you need me.,EXIT
+thanks,Anytime.,None
+thank you,Anytime. That's what I'm here for.,None
+whats your name,I'm AURA. Your personal AI companion.,None
+ur name,I'm AURA. Your personal AI companion.,None
+aura who are you,I'm AURA — built to be always one step ahead.,None
+# step 0a — check CSV
+csv_response = check_csv(query)
+if csv_response:
+    print(f"[AURA] CSV match found")
+    store.save_conversation("user", query)
+    store.save_conversation("aura", csv_response)
+    return csv_response
+
+# step 0b — check commands
+cmd_response = handle_command(query)
+if cmd_response:
+    print(f"[AURA] Command handled")
+    store.save_conversation("user", query)
+    store.save_conversation("aura", cmd_response)
+    return cmd_response

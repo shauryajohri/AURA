@@ -1,10 +1,22 @@
 # Virtual Environment
+.venv/
 venv/
+env/
+
+# Environment variables
 .env
 
 # Python cache
 __pycache__/
 *.pyc
+
+# Build / distribution
+build/
+dist/
+*.egg-info/
+
+# Logs
+*.log
 
 # OS files
 .DS_Store

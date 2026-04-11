@@ -4,6 +4,7 @@ from core.ai_router import call_claude, route
 from memory import store
 from modules.csv_handler import check_csv
 from modules.command_handler import handle_command
+from core.personality import INTENT_PROMPT, VERIFY_PROMPT, ANTICIPATE_PROMPT, SHOULD_RESPOND_PROMPT
 # stores last screen context
 _last_context = {
     "app": "unknown",
@@ -138,3 +139,31 @@ def process(query: str) -> str:
         final_answer += f"\n\n[You might also want to know: {follow_up}]"
 
     return final_answer
+
+
+def should_respond(text: str) -> bool:
+    # always respond to direct commands
+    csv_match = check_csv(text)
+    if csv_match:
+        return True
+
+    cmd_match = handle_command(text)
+    if cmd_match:
+        return True
+
+    # ask Ollama if this needs a response
+    prompt = SHOULD_RESPOND_PROMPT.format(text=text)
+
+    # use a quick direct call without full Donna pipeline
+    try:
+        import ollama
+        response = ollama.chat(
+            model="phi3",
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        answer = response['message']['content'].strip().upper()
+        return "YES" in answer
+    except:
+        return True  # default to responding if unsure

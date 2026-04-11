@@ -1,14 +1,14 @@
+import sys
+from PyQt6.QtWidgets import QApplication
 from core.brain import process
+from modules.voice_output import speak
+from ui.app import AuraApp
 
-print("AURA Backend Test — type 'quit' to exit\n")
-
-while True:
-    user_input = input("You: ").strip()
-    if user_input.lower() == "quit":
-        print("[AURA] Shutting down.")
-        break
-    if not user_input:
-        continue
-
-    response = process(user_input)
-    print(f"\nAURA: {response}\n")
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = AuraApp(
+        brain_process=process,
+        speak_fn=speak
+    )
+    window.show()
+    sys.exit(app.exec())

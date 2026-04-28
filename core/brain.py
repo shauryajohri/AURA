@@ -5,6 +5,7 @@ from memory import store
 from modules.csv_handler import check_csv
 from modules.command_handler import handle_command
 from core.personality import INTENT_PROMPT, VERIFY_PROMPT, ANTICIPATE_PROMPT, SHOULD_RESPOND_PROMPT
+from modules.screen_reader import get_screen_context
 # stores last screen context
 _last_context = {
     "app": "unknown",
@@ -65,15 +66,19 @@ def anticipate(answer: str) -> str | None:
 
 
 def build_context_prompt(query: str) -> str:
+    # get live screen context
+    ctx = get_screen_context()
+    update_context(ctx)
+
     history_text = ""
     if _history:
-        last = _history[-3:]  # last 3 exchanges only
+        last = _history[-3:]
         history_text = "\n".join([f"{h['role']}: {h['text']}" for h in last])
 
     return f"""
-User's current app: {_last_context['app']}
-Screen content: {_last_context['visible_text'][:400]}
-Clipboard: {_last_context['clipboard'][:200]}
+User's current app: {ctx['app']}
+Screen content: {ctx['visible_text'][:400]}
+Clipboard: {ctx['clipboard'][:200]}
 
 Recent conversation:
 {history_text}
@@ -137,6 +142,15 @@ def process(query: str) -> str:
     # attach follow-up suggestion if exists
     if follow_up:
         final_answer += f"\n\n[You might also want to know: {follow_up}]"
+
+        # step 0c — handle recall
+        if intent == "RECALL":
+            from modules.knowledge import recall
+            query_words = query.lower().replace("what did i save about", "").strip()
+            result = recall(query_words)
+            store.save_conversation("user", query)
+            store.save_conversation("aura", result)
+            return result
 
     return final_answer
 

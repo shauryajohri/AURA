@@ -28,9 +28,10 @@ def check_csv(query: str) -> str | None:
     if query_clean in _responses:
         return _process(query_clean)
 
-    # partial match — check if query contains a trigger
+    # only match if trigger is more than 3 chars
+    # and query starts with or equals the trigger
     for trigger in _responses:
-        if trigger in query_clean:
+        if len(trigger) > 3 and query_clean == trigger:
             return _process(trigger)
 
     return None  # no match — pass to Ollama
@@ -65,5 +66,13 @@ def _process(trigger: str) -> str:
         import subprocess
         subprocess.Popen("calc.exe")
         return "Opening Calculator."
+
+    if response == "SAVE_CLIPBOARD":
+        from modules.knowledge import save_from_clipboard
+        return save_from_clipboard()
+
+    if response == "LIST_SAVED":
+        from modules.knowledge import list_saved
+        return list_saved()
 
     return response

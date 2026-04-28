@@ -3,11 +3,21 @@ import threading
 import time
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout,
-    QHBoxLayout, QTextEdit, QLineEdit, QPushButton,
+    QHBoxLayout, QLineEdit, QPushButton,
     QScrollArea, QLabel, QFrame
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QColor, QPalette
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject, QThread
+from PyQt6.QtGui import QFont
+
+class VoiceWorker(QThread):
+    heard = pyqtSignal(str)
+
+    def run(self):
+        from modules.voice_input import listen
+        while True:
+            text = listen()
+            if text:
+                self.heard.emit(text)
 
 class MessageBubble(QLabel):
     def __init__(self, text: str, is_user: bool):
@@ -15,7 +25,6 @@ class MessageBubble(QLabel):
         self.setWordWrap(True)
         self.setMaximumWidth(400)
         self.setFont(QFont("Segoe UI", 11))
-
         if is_user:
             self.setStyleSheet("""
                 QLabel {
@@ -40,25 +49,21 @@ class ChatArea(QScrollArea):
         super().__init__()
         self.setWidgetResizable(True)
         self.setStyleSheet("background-color: #0D1117; border: none;")
-
         self.container = QWidget()
         self.container.setStyleSheet("background-color: #0D1117;")
         self.layout = QVBoxLayout(self.container)
         self.layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.layout.setSpacing(8)
         self.layout.setContentsMargins(16, 16, 16, 16)
-
         self.setWidget(self.container)
 
     def add_message(self, text: str, is_user: bool):
         row = QHBoxLayout()
         bubble = MessageBubble(text, is_user)
-
         if is_user:
             row.addStretch()
             row.addWidget(bubble)
         else:
-            # AURA label
             name = QLabel("AURA")
             name.setFont(QFont("Segoe UI", 9))
             name.setStyleSheet("color: #00E5FF; padding: 0 4px;")
@@ -70,28 +75,13 @@ class ChatArea(QScrollArea):
             wrapper.setLayout(col)
             row.addWidget(wrapper)
             row.addStretch()
-
         frame = QFrame()
         frame.setLayout(row)
         frame.setStyleSheet("background: transparent;")
         self.layout.addWidget(frame)
-
-        # scroll to bottom
         QTimer.singleShot(100, lambda: self.verticalScrollBar().setValue(
             self.verticalScrollBar().maximum()
         ))
-
-
-class VoiceWorker(QThread):
-    heard = pyqtSignal(str)
-
-    def run(self):
-        from modules.voice_input import listen
-        while True:
-            text = listen()
-            if text:
-                self.heard.emit(text)
-
 
 class AuraApp(QMainWindow):
     add_message_signal = pyqtSignal(str, bool)
@@ -104,6 +94,13 @@ class AuraApp(QMainWindow):
         self.add_message_signal.connect(self._add_message)
         self._setup_ui()
         self._setup_voice()
+
+        # start proactive suggestions
+        from modules.proactive import start_proactive_loop
+        start_proactive_loop(
+            speak_fn=self.speak_fn,
+            on_suggestion_fn=lambda text: self.add_message_signal.emit(text, False)
+        )
 
     def _setup_ui(self):
         self.setWindowTitle("AURA")
@@ -121,26 +118,20 @@ class AuraApp(QMainWindow):
         header.setFixedHeight(60)
         header.setStyleSheet("background-color: #141D2B; border-bottom: 1px solid #1E2D45;")
         header_layout = QHBoxLayout(header)
-
-        # orb indicator
         self.orb = QLabel("●")
         self.orb.setFont(QFont("Arial", 18))
         self.orb.setStyleSheet("color: #00E5FF;")
-
         title = QLabel("AURA")
         title.setFont(QFont("Arial Black", 16))
         title.setStyleSheet("color: #FFFFFF;")
-
         self.status = QLabel("Listening...")
         self.status.setFont(QFont("Segoe UI", 10))
         self.status.setStyleSheet("color: #8B949E;")
-
         header_layout.addWidget(self.orb)
         header_layout.addWidget(title)
         header_layout.addStretch()
         header_layout.addWidget(self.status)
         header_layout.setContentsMargins(16, 0, 16, 0)
-
         main_layout.addWidget(header)
 
         # chat area
@@ -155,7 +146,6 @@ class AuraApp(QMainWindow):
         input_layout.setContentsMargins(12, 10, 12, 10)
         input_layout.setSpacing(8)
 
-        # voice toggle
         self.voice_btn = QPushButton("🎤")
         self.voice_btn.setFixedSize(44, 44)
         self.voice_btn.setStyleSheet("""
@@ -164,13 +154,10 @@ class AuraApp(QMainWindow):
                 border-radius: 22px;
                 font-size: 18px;
             }
-            QPushButton:hover {
-                background-color: #00B8D9;
-            }
+            QPushButton:hover { background-color: #00B8D9; }
         """)
         self.voice_btn.clicked.connect(self._toggle_voice)
 
-        # text input
         self.text_input = QLineEdit()
         self.text_input.setPlaceholderText("Type a message...")
         self.text_input.setFont(QFont("Segoe UI", 11))
@@ -185,7 +172,6 @@ class AuraApp(QMainWindow):
         """)
         self.text_input.returnPressed.connect(self._send_text)
 
-        # send button
         send_btn = QPushButton("➤")
         send_btn.setFixedSize(44, 44)
         send_btn.setStyleSheet("""
@@ -195,19 +181,15 @@ class AuraApp(QMainWindow):
                 border-radius: 22px;
                 font-size: 16px;
             }
-            QPushButton:hover {
-                background-color: #007A63;
-            }
+            QPushButton:hover { background-color: #007A63; }
         """)
         send_btn.clicked.connect(self._send_text)
 
         input_layout.addWidget(self.voice_btn)
         input_layout.addWidget(self.text_input)
         input_layout.addWidget(send_btn)
-
         main_layout.addWidget(input_area)
 
-        # welcome message
         QTimer.singleShot(500, lambda: self._add_message(
             "Hey! I'm AURA. You can type or talk to me.", False
         ))
@@ -262,17 +244,9 @@ class AuraApp(QMainWindow):
         ).start()
 
     def _process_and_reply(self, text: str):
-        self.add_message_signal.emit("...", False)
         self.status.setText("Thinking...")
         self.orb.setStyleSheet("color: #A855F7;")
-
         response = self.brain_process(text)
-
-        # remove typing indicator — hacky but works
-        self.chat.layout.removeItem(
-            self.chat.layout.itemAt(self.chat.layout.count() - 1)
-        )
-
         self.add_message_signal.emit(response, False)
         self.speak_fn(response)
         self.status.setText("Listening...")

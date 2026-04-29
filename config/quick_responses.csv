@@ -26,3 +26,7 @@ save this,SAVE_CLIPBOARD,None
 remember this,SAVE_CLIPBOARD,None
 what did i save,LIST_SAVED,None
 show my saves,LIST_SAVED,None
+forex report,FOREX_REPORT,None
+forex,FOREX_REPORT,None
+market report,FOREX_REPORT,None
+show pairs,FOREX_REPORT,None

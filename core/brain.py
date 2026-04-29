@@ -105,6 +105,14 @@ def process(query: str) -> str:
         store.save_conversation("user", query)
         store.save_conversation("aura", cmd_response)
         return cmd_response
+    # forex quick price
+    if any(pair in query.lower() for pair in ["eurusd", "gbpusd", "usdjpy", "eur/usd", "gbp/usd", "gold"]):
+        from modules.forex_report import get_quick_price
+        pair = query.lower()
+        result = get_quick_price(pair)
+        store.save_conversation("user", query)
+        store.save_conversation("aura", result)
+        return result
 
     # step 1 — classify intent
     intent = classify_intent(query)
@@ -153,6 +161,7 @@ def process(query: str) -> str:
             return result
 
     return final_answer
+
 
 
 def should_respond(text: str) -> bool:

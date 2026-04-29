@@ -74,5 +74,9 @@ def _process(trigger: str) -> str:
     if response == "LIST_SAVED":
         from modules.knowledge import list_saved
         return list_saved()
+    
+    if response == "FOREX_REPORT":
+        from modules.forex_report import generate_report
+    return generate_report()
 
     return response

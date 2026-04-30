@@ -30,3 +30,4 @@ forex report,FOREX_REPORT,None
 forex,FOREX_REPORT,None
 market report,FOREX_REPORT,None
 show pairs,FOREX_REPORT,None
+SYSTEM = "You are AURA. Be short, casual, human. Max 10 words."

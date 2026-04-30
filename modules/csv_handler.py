@@ -24,17 +24,16 @@ _responses = load_responses()
 def check_csv(query: str) -> str | None:
     query_clean = query.lower().strip()
 
-    # exact match first
+    # exact match only
     if query_clean in _responses:
         return _process(query_clean)
 
-    # only match if trigger is more than 3 chars
-    # and query starts with or equals the trigger
+    # only match triggers longer than 4 chars AND full word match
     for trigger in _responses:
-        if len(trigger) > 3 and query_clean == trigger:
+        if len(trigger) > 4 and trigger == query_clean:
             return _process(trigger)
 
-    return None  # no match — pass to Ollama
+    return None
 
 def _process(trigger: str) -> str:
     entry = _responses[trigger]
@@ -76,7 +75,10 @@ def _process(trigger: str) -> str:
         return list_saved()
     
     if response == "FOREX_REPORT":
-        from modules.forex_report import generate_report
-    return generate_report()
+        try:
+            from modules.forex_report import generate_report
+            return generate_report()
+        except Exception as e:
+            return f"Forex report unavailable: {str(e)}"
 
     return response

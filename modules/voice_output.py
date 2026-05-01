@@ -1,11 +1,51 @@
 import asyncio
+import time
 import edge_tts
 import pygame
 import tempfile
 import os
 import re
 import random
+import threading
+import pyttsx3
+_is_speaking = False
+_muted       = False
+_stop_flag   = False
+_engine      = None
+_lock        = threading.Lock()
+_engine = None
+TTS_RATE   = int(os.getenv("TTS_RATE", "175"))
+TTS_VOLUME = float(os.getenv("TTS_VOLUME", "1.0"))
+TTS_VOICE  = os.getenv("TTS_VOICE", "zira")
 
+def _get_engine():
+    global _engine
+    if _engine is None:
+        _engine = pyttsx3.init()
+        _engine.setProperty("rate", TTS_RATE)
+        _engine.setProperty("volume", TTS_VOLUME)
+        
+        voices = _engine.getProperty("voices")
+        
+        # print all available voices so you can see them
+        print("[AURA TTS] Available voices:")
+        for i, v in enumerate(voices):
+            print(f"  [{i}] {v.name} — {v.id}")
+        
+        # lock to Zira only — ignore everything else
+        zira = None
+        for v in voices:
+            if "zira" in v.name.lower():
+                zira = v
+                break
+        
+        if zira:
+            _engine.setProperty("voice", zira.id)
+            print(f"[AURA TTS] Voice locked: {zira.name}")
+        else:
+            print("[AURA TTS] Zira not found — using default")
+            
+    return _engine
 # Voice map based on tone
 VOICE_MAP = {
     "normal":  "en-US-AriaNeural",
@@ -142,3 +182,41 @@ def speak(text: str):
             engine.stop()
         except:
             pass
+    
+def speak_chunk(chunk) -> bool:
+    global _is_speaking
+    if _muted or _stop_flag:
+        return False
+    if chunk.pause_before > 0:
+        time.sleep(chunk.pause_before)
+    if _stop_flag:
+        return False
+    _is_speaking = True
+    print(f"[AURA] [{chunk.tone}] {chunk.text}")
+    _speak_text(chunk.text)
+    if chunk.pause_after > 0 and not _stop_flag:
+        time.sleep(chunk.pause_after)
+    _is_speaking = False
+    return True
+
+
+def speak_chunks(chunks: list):
+    def _worker():
+        global _is_speaking
+        _is_speaking = True
+        for chunk in chunks:
+            if _stop_flag or _muted:
+                break
+            speak_chunk(chunk)
+        _is_speaking = False
+    threading.Thread(target=_worker, daemon=True).start()
+
+def _speak_text(text: str):
+    with _lock:
+        engine = _get_engine()
+        try:
+            engine.say(text)
+            engine.runAndWait()
+        except RuntimeError:
+            global _engine
+            _engine = None

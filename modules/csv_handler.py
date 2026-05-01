@@ -1,6 +1,7 @@
 import csv
 import os
 import datetime
+import random
 
 CSV_PATH = os.path.join("config", "quick_responses.csv")
 
@@ -11,10 +12,12 @@ def load_responses() -> dict:
             reader = csv.DictReader(f)
             for row in reader:
                 trigger = row["trigger"].lower().strip()
-                responses[trigger] = {
+                if trigger not in responses:
+                    responses[trigger] = []
+                responses[trigger].append({
                     "response": row["response"],
                     "action": row["action"]
-                }
+                })
     except FileNotFoundError:
         print("[AURA] CSV file not found")
     return responses
@@ -23,23 +26,17 @@ _responses = load_responses()
 
 def check_csv(query: str) -> str | None:
     query_clean = query.lower().strip()
-
-    # exact match only
     if query_clean in _responses:
-        return _process(query_clean)
-
-    # only match triggers longer than 4 chars AND full word match
-    for trigger in _responses:
-        if len(trigger) > 4 and trigger == query_clean:
-            return _process(trigger)
-
+        print(f"[DEBUG] CSV match: '{query_clean}'")
+        # pick random response from all options for this trigger
+        entry = random.choice(_responses[query_clean])
+        return _process(entry)
+    print(f"[DEBUG] No CSV match → LLM")
     return None
 
-def _process(trigger: str) -> str:
-    entry = _responses[trigger]
+def _process(entry: dict) -> str:
     response = entry["response"]
 
-    # handle special functions
     if response == "TIME_FUNCTION":
         now = datetime.datetime.now()
         return f"It's {now.strftime('%I:%M %p')}."
@@ -54,7 +51,7 @@ def _process(trigger: str) -> str:
             subprocess.Popen("chrome.exe")
             return "Opening Chrome."
         except:
-            return "Couldn't find Chrome on your system."
+            return "Couldn't find Chrome."
 
     if response == "OPEN_NOTEPAD":
         import subprocess
@@ -73,12 +70,13 @@ def _process(trigger: str) -> str:
     if response == "LIST_SAVED":
         from modules.knowledge import list_saved
         return list_saved()
-    
+
     if response == "FOREX_REPORT":
         try:
             from modules.forex_report import generate_report
             return generate_report()
         except Exception as e:
             return f"Forex report unavailable: {str(e)}"
+    
 
     return response

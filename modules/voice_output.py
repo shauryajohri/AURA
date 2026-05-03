@@ -220,3 +220,12 @@ def _speak_text(text: str):
         except RuntimeError:
             global _engine
             _engine = None
+
+def speak_chunks(chunks):
+    import time
+    for chunk in chunks:
+        if chunk.pause_before > 0:
+            time.sleep(chunk.pause_before)
+        speak(chunk.text)
+        if chunk.pause_after > 0:
+            time.sleep(chunk.pause_after)

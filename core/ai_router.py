@@ -4,16 +4,45 @@ from core.personality import DONNA_SYSTEM_PROMPT
 
 
 def clean_response(text: str) -> str:
-    text = re.sub(r"```[\s\S]*?```", "", text)   # strip code blocks
+    # 1. Strip code blocks and markdown
+    text = re.sub(r"```[\s\S]*?```", "", text)
     text = re.sub(r"\*\*.*?\*\*", "", text)
-    text = re.sub(r"Note:.*", "", text, flags=re.DOTALL)
-    text = re.sub(r"Instructions:.*", "", text, flags=re.DOTALL)
-    text = re.sub(r"\[.*?\]", "", text)
-    text = re.sub(r"User:.*", "", text, flags=re.DOTALL)
-    text = re.sub(r"AURA:.*", "", text, flags=re.DOTALL)
-    sentences = [s.strip() for s in text.split(".") if s.strip()]
+    text = re.sub(r"\[.*?\]\(.*?\)", "", text)  # markdown links
+
+    # 2. Remove entire lines that are meta-leaks
+    leak_patterns = [
+        r"^.*User is .*$",
+        r"^.*User asks.*$",
+        r"^.*AURA:.*$",
+        r"^.*Screen content.*$",
+        r"^.*Current app.*$",
+        r"^.*Note:.*$",
+        r"^.*Instructions:.*$",
+        r"^.*Certainly.*$",
+        r"^.*Of course.*$",
+        r"^.*As an AI.*$",
+        r"^.*I notice you.*$",
+        r"^.*You seem to be.*$",
+    ]
+    for pattern in leak_patterns:
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE | re.MULTILINE)
+
+    # 3. Strip "Also —" or "Also -" follow-ups that came from anticipate
+    text = re.sub(r"Also\s*[-—]\s*.*$", "", text, flags=re.IGNORECASE)
+
+    # 4. Remove role prefixes like "User says:", "Assistant:"
+    text = re.sub(r"^(User|Assistant|AI|AURA|Bot)\s*:\s*", "", text, flags=re.IGNORECASE)
+
+    # 5. Remove surrounding quotes
+    text = text.strip().strip('"').strip("'").strip()
+
+    # 6. Collapse multiple lines and spaces
+    text = re.sub(r"\s+", " ", text).strip()
+
+    # 7. Split into sentences, keep max 2
+    sentences = [s.strip() for s in text.split('.') if s.strip()]
     result = ". ".join(sentences[:2])
-    if result and not result.endswith("."):
+    if result and not result.endswith(('.', '?', '!')):
         result += "."
     return result.strip()
 

@@ -43,6 +43,111 @@ def init_db():
     conn.close()
 
 
+def analyze_conversation_patterns(limit: int = 50) -> dict:
+    """Extract patterns from recent conversations for personality awareness"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT role, message FROM conversations
+        ORDER BY created_at DESC
+        LIMIT ?
+    ''', (limit,))
+
+    conversations = list(reversed(cursor.fetchall()))
+    conn.close()
+
+    if not conversations:
+        return {
+            'topics': [],
+            'preferred_style': 'brief',
+            'humor_score': 5,
+            'tech_level': 'intermediate'
+        }
+
+    # Extract topics from conversation
+    topics = []
+    tech_keywords = {
+        'code', 'bug', 'error', 'debug', 'function', 'variable', 'class',
+        'api', 'database', 'server', 'javascript', 'python', 'react', 'node'
+    }
+    casual_indicators = {'how are you', 'what are you', 'tell me about'}
+    coding_count = 0
+    casual_count = 0
+    question_count = 0
+
+    for role, message in conversations:
+        if role == 'user':
+            lower = message.lower()
+            question_count += lower.count('?')
+
+            for keyword in tech_keywords:
+                if keyword in lower:
+                    coding_count += 1
+                    if keyword not in topics:
+                        topics.append(keyword)
+
+            for casual in casual_indicators:
+                if casual in lower:
+                    casual_count += 1
+
+    # Infer preferences
+    total = len(conversations) // 2
+    tech_ratio = coding_count / max(total, 1)
+    casual_ratio = casual_count / max(total, 1)
+
+    preferred_style = "detailed" if tech_ratio > 0.3 else "brief"
+    humor_score = min(10, max(1, 7 - int(tech_ratio * 5)))
+    tech_level = "advanced" if tech_ratio > 0.5 else ("intermediate" if tech_ratio > 0.2 else "beginner")
+
+    return {
+        'topics': list(set(topics)),
+        'preferred_style': preferred_style,
+        'humor_score': humor_score,
+        'tech_level': tech_level,
+        'coding_frequency': round(tech_ratio, 2),
+        'question_frequency': round(question_count / max(len(conversations), 1), 2)
+    }
+
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS knowledge (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            title       TEXT NOT NULL,
+            content     TEXT NOT NULL,
+            summary     TEXT,
+            tags        TEXT,
+            source      TEXT DEFAULT 'user',
+            created_at  TEXT
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS reminders (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            text        TEXT NOT NULL,
+            remind_at   TEXT NOT NULL,
+            done        INTEGER DEFAULT 0,
+            created_at  TEXT
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS conversations (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            role        TEXT NOT NULL,
+            message     TEXT NOT NULL,
+            created_at  TEXT
+        )
+    ''')
+
+    conn.commit()
+    conn.close()
+
+
 def save_entry(title: str, content: str, summary: str = "",
                tags: str = "general", source: str = "user"):
     conn = sqlite3.connect(DB_PATH)
@@ -143,3 +248,135 @@ def get_recent_conversations(limit: int = 10) -> list:
 
 # initialize database on import
 init_db()
+
+def init_tasks():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS tasks (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            title       TEXT NOT NULL,
+            priority    TEXT DEFAULT 'medium',
+            status      TEXT DEFAULT 'pending',
+            created_at  TEXT,
+            done_at     TEXT
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS interaction_patterns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            aura_response TEXT NOT NULL,
+            user_follow_up TEXT NOT NULL,
+            frequency INTEGER DEFAULT 1,
+            success_rate REAL DEFAULT 0.5,
+            last_seen TEXT
+        )
+    ''')
+
+    conn.commit()
+    conn.close()
+
+def add_task(title: str, priority: str = "medium") -> int:
+    import time
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO tasks (title, priority, status, created_at)
+        VALUES (?, ?, 'pending', ?)
+    ''', (title, priority, time.strftime("%Y-%m-%dT%H:%M:%S")))
+    task_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return task_id
+
+def get_tasks(status: str = None) -> list:
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    if status:
+        cursor.execute('SELECT * FROM tasks WHERE status=? ORDER BY created_at', (status,))
+    else:
+        cursor.execute('SELECT * FROM tasks ORDER BY status DESC, created_at')
+    results = cursor.fetchall()
+    conn.close()
+    return results
+
+def complete_task(task_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute('''
+        UPDATE tasks SET status='done', done_at=?
+        WHERE id=?
+    ''', (datetime.datetime.now().isoformat(), task_id))
+    conn.commit()
+    conn.close()
+
+def delete_task(task_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute('DELETE FROM tasks WHERE id=?', (task_id,))
+    conn.commit()
+    conn.close()
+
+def get_pending_tasks() -> list:
+    return get_tasks(status='pending')
+
+def get_task_summary() -> str:
+    pending = get_tasks('pending')
+    done    = get_tasks('done')
+    if not pending:
+        return "No pending tasks. All clear."
+    summary = f"{len(pending)} tasks pending, {len(done)} done today. "
+    summary += "Pending: " + ", ".join([t[1] for t in pending])
+    return summary
+
+def log_interaction_pattern(aura_response: str, user_follow_up: str, success: bool = True):
+    """Log a follow-up pattern to learn from user behavior"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT id, frequency, success_rate FROM interaction_patterns
+        WHERE aura_response=? AND user_follow_up=?
+    ''', (aura_response[:100], user_follow_up[:100]))
+
+    existing = cursor.fetchone()
+
+    if existing:
+        pattern_id, freq, rate = existing
+        new_freq = freq + 1
+        new_success = ((rate * freq) + (1 if success else 0)) / new_freq
+        cursor.execute('''
+            UPDATE interaction_patterns
+            SET frequency=?, success_rate=?, last_seen=?
+            WHERE id=?
+        ''', (new_freq, new_success, datetime.datetime.now().isoformat(), pattern_id))
+    else:
+        cursor.execute('''
+            INSERT INTO interaction_patterns
+            (aura_response, user_follow_up, frequency, success_rate, last_seen)
+            VALUES (?, ?, 1, ?, ?)
+        ''', (aura_response[:100], user_follow_up[:100], 1.0 if success else 0.0,
+              datetime.datetime.now().isoformat()))
+
+    conn.commit()
+    conn.close()
+
+def get_learned_follow_ups(aura_response: str, limit: int = 3) -> list:
+    """Get the most likely follow-ups based on learned patterns"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT user_follow_up, frequency, success_rate
+        FROM interaction_patterns
+        WHERE aura_response LIKE ?
+        ORDER BY (frequency * success_rate) DESC
+        LIMIT ?
+    ''', (f"%{aura_response[:50]}%", limit))
+
+    results = cursor.fetchall()
+    conn.close()
+
+    return results if results else []
+
+init_db()
+init_tasks()

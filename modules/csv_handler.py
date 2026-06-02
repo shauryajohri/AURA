@@ -1,16 +1,22 @@
+import sqlite3
+import datetime
+import os
 import csv
 import os
 import datetime
 import random
+from urllib import response
 
 CSV_PATH = os.path.join("config", "quick_responses.csv")
 
 def load_responses() -> dict:
     responses = {}
     try:
-        with open(CSV_PATH, "r") as f:
+        with open(CSV_PATH, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
+                if "trigger" not in row:
+                    continue
                 trigger = row["trigger"].lower().strip()
                 if trigger not in responses:
                     responses[trigger] = []
@@ -20,21 +26,26 @@ def load_responses() -> dict:
                 })
     except FileNotFoundError:
         print("[AURA] CSV file not found")
+    except Exception as e:
+        print(f"[AURA] CSV load error: {e}")
     return responses
 
 _responses = load_responses()
+total_entries = sum(len(v) for v in _responses.values())
+print(f"[AURA] CSV loaded: {total_entries} entries ({len(_responses)} unique triggers)")
 
 def check_csv(query: str) -> str | None:
     query_clean = query.lower().strip()
+
     if query_clean in _responses:
         print(f"[DEBUG] CSV match: '{query_clean}'")
-        # pick random response from all options for this trigger
-        entry = random.choice(_responses[query_clean])
-        return _process(entry)
-    print(f"[DEBUG] No CSV match → LLM")
+        return _process(query_clean)
+
     return None
 
-def _process(entry: dict) -> str:
+def _process(trigger: str) -> str:
+    entries = _responses[trigger]
+    entry = random.choice(entries)
     response = entry["response"]
 
     if response == "TIME_FUNCTION":
@@ -51,7 +62,7 @@ def _process(entry: dict) -> str:
             subprocess.Popen("chrome.exe")
             return "Opening Chrome."
         except:
-            return "Couldn't find Chrome."
+            return "Couldn't find Chrome on your system."
 
     if response == "OPEN_NOTEPAD":
         import subprocess
@@ -77,6 +88,13 @@ def _process(entry: dict) -> str:
             return generate_report()
         except Exception as e:
             return f"Forex report unavailable: {str(e)}"
-    
+
+    if response == "LIST_TASKS":
+        from modules.tasks import handle_list_tasks
+        return handle_list_tasks()
+
+    if response == "WHAT_TODO":
+        from modules.tasks import handle_what_to_do
+        return handle_what_to_do("")
 
     return response

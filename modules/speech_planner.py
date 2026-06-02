@@ -2,6 +2,13 @@ import re
 import random
 from dataclasses import dataclass
 from typing import List
+import datetime
+
+try:
+    from core.personality_state import get_tone_modifiers
+except:
+    def get_tone_modifiers():
+        return {'tones': [], 'energy_level': 5}
 
 @dataclass
 class SpeechChunk:
@@ -114,6 +121,9 @@ _TONE_RULES = [
     (r"\b(warning|careful|important|critical|error)\b",     "serious"),
     (r"\b(great|perfect|awesome|nice|well done)\b",         "warm"),
     (r"[!]{2,}|\b(now|immediately|urgent|quick)\b",         "urgent"),
+    (r"[?]\s*$",                                            "questioning"),
+    (r"\.\.\.+$",                                           "uncertain"),
+    (r"\b(negative|bad|wrong|failed|fail)\b.*[?]",          "frustrated"),
 ]
 
 
@@ -122,16 +132,29 @@ def _classify_tone(text: str) -> str:
     for pattern, tone in _TONE_RULES:
         if re.search(pattern, lower):
             return tone
+
+    modifiers = get_tone_modifiers()
+
+    if modifiers.get('energy_level', 5) < 3:
+        return "tired"
+    if modifiers.get('frustration', 0) > 7:
+        return "sympathetic"
+
     return "normal"
 
 
 _TONE_TIMING = {
-    "thinking": {"speed": 0.87, "extra_pause": 0.05, "before": 0.04},
-    "tease":    {"speed": 0.95, "extra_pause": 0.03, "before": 0.0},
-    "serious":  {"speed": 0.91, "extra_pause": 0.04, "before": 0.03},
-    "warm":     {"speed": 1.03, "extra_pause": 0.0,  "before": 0.0},
-    "urgent":   {"speed": 1.10, "extra_pause": 0.0,  "before": 0.0},
-    "normal":   {"speed": 1.00, "extra_pause": 0.0,  "before": 0.0},
+    "thinking":      {"speed": 0.87, "extra_pause": 0.05, "before": 0.04},
+    "tease":         {"speed": 0.95, "extra_pause": 0.03, "before": 0.0},
+    "serious":       {"speed": 0.91, "extra_pause": 0.04, "before": 0.03},
+    "warm":          {"speed": 1.03, "extra_pause": 0.0,  "before": 0.0},
+    "urgent":        {"speed": 1.10, "extra_pause": 0.0,  "before": 0.0},
+    "questioning":   {"speed": 0.98, "extra_pause": 0.06, "before": 0.0},
+    "uncertain":     {"speed": 0.90, "extra_pause": 0.08, "before": 0.02},
+    "frustrated":    {"speed": 0.88, "extra_pause": 0.04, "before": 0.03},
+    "tired":         {"speed": 0.80, "extra_pause": 0.10, "before": 0.05},
+    "sympathetic":   {"speed": 0.92, "extra_pause": 0.05, "before": 0.02},
+    "normal":        {"speed": 1.00, "extra_pause": 0.0,  "before": 0.0},
 }
 
 

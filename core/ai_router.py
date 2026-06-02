@@ -71,11 +71,43 @@ CRITICAL OUTPUT RULES:
         return "CONNECTION_ERROR"
 
 
+def call_ollama_streaming(prompt: str, system: str = DONNA_SYSTEM_PROMPT):
+    """Stream response from Ollama, yielding chunks as they arrive"""
+    try:
+        strict_system = system + """
+CRITICAL OUTPUT RULES:
+- Max 2 short sentences. That's it.
+- No bullet points. No markdown. No headers.
+- No meta text. No "User:" or "AURA:" prefixes.
+- Talk like a friend texting — casual and direct.
+- Never start your reply with a quote mark.
+"""
+        response = ollama.chat(
+            model="phi3",
+            messages=[
+                {"role": "system", "content": strict_system},
+                {"role": "user",   "content": prompt}
+            ],
+            stream=True
+        )
+        for chunk in response:
+            content = chunk.get("message", {}).get("content", "")
+            if content:
+                yield content
+    except Exception as e:
+        print(f"[AURA] Ollama streaming error: {e}")
+        yield "CONNECTION_ERROR"
+
+
 def call_claude(prompt: str, system: str = DONNA_SYSTEM_PROMPT) -> str:
     return call_ollama(prompt, system)
 
 
 def route(intent: str, prompt: str) -> str:
-    # all routes use Ollama for now
-    # Phase 3 will add Claude for CODING/SEARCH
     return call_ollama(prompt)
+
+
+def route_streaming(intent: str, prompt: str):
+    """Route with streaming - yields text chunks as they arrive"""
+    for chunk in call_ollama_streaming(prompt):
+        yield chunk

@@ -72,15 +72,18 @@ class AuraApp(QMainWindow):
     add_msg_signal      = pyqtSignal(str, bool)
     set_status_signal   = pyqtSignal(str)
     refresh_tasks_signal = pyqtSignal()
+    stream_chunk_signal = pyqtSignal(str)
 
     def __init__(self, brain_process=None, speak_fn=None):
         super().__init__()
         self.brain_process = brain_process
         self.speak_fn      = speak_fn
         self.voice_on      = True
+        self.current_stream_bubble = None
         self.add_msg_signal.connect(self._add_bubble)
         self.set_status_signal.connect(self._set_status)
         self.refresh_tasks_signal.connect(self._refresh_tasks)
+        self.stream_chunk_signal.connect(self._on_stream_chunk)
         self._build()
         self._setup_voice()
         QTimer.singleShot(400, lambda: self._add_bubble(
@@ -276,16 +279,32 @@ class AuraApp(QMainWindow):
 
     def _process(self, text: str):
         self.set_status_signal.emit("Thinking...")
-        try:
-            response = (self.brain_process(text)
-                        if self.brain_process else f"Echo: {text}")
-        except Exception as e:
-            response = f"Error: {e}"
-        self.add_msg_signal.emit(response, False)
-        self.set_status_signal.emit("Listening..." if self.voice_on else "Voice off")
-        if self.speak_fn:
-            self.speak_fn(response)
-        self.refresh_tasks_signal.emit()
+        self._add_bubble(text, True)
+        self.current_stream_bubble = None
+
+        def on_chunk(chunk: str):
+            self.stream_chunk_signal.emit(chunk)
+
+        def worker():
+            try:
+                from core.brain import process_streaming
+                response = process_streaming(text, on_chunk=on_chunk)
+            except Exception as e:
+                response = f"Error: {e}"
+                self.add_msg_signal.emit(response, False)
+                self.set_status_signal.emit("Listening..." if self.voice_on else "Voice off")
+                return
+
+            self.current_stream_bubble = None
+            self.set_status_signal.emit("Listening..." if self.voice_on else "Voice off")
+            if self.speak_fn:
+                threading.Thread(
+                    target=self.speak_fn,
+                    args=(response,),
+                    daemon=True).start()
+            self.refresh_tasks_signal.emit()
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _add_bubble(self, text: str, is_user: bool):
         w = Bubble(text, is_user)
@@ -295,6 +314,18 @@ class AuraApp(QMainWindow):
 
     def _set_status(self, text: str):
         self.status_lbl.setText(text)
+
+    def _on_stream_chunk(self, chunk: str):
+        if not self.current_stream_bubble:
+            self.current_stream_bubble = Bubble("", False)
+            self.chat_l.insertWidget(self.chat_l.count() - 1, self.current_stream_bubble)
+
+        current_text = self.current_stream_bubble.layout().itemAt(1).widget().text()
+        new_text = current_text + chunk
+        self.current_stream_bubble.layout().itemAt(1).widget().setText(new_text)
+
+        QTimer.singleShot(50, lambda: self.scroll.verticalScrollBar().setValue(
+            self.scroll.verticalScrollBar().maximum()))
 
     def _prompt_add_task(self):
         self.text_input.setText("add task ")

@@ -9,4 +9,4 @@ PICOVOICE_KEY = os.getenv("PICOVOICE_KEY", "")
 AURA_NAME = "Aura"
 WAKE_WORD = "aura"
 TTS_RATE = 175
-TTS_VOLUME = 1.0
+TTS_VOLUME = 1.08

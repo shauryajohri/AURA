@@ -1,9 +1,14 @@
 import time
+import datetime
 from core.personality import (
     INTENT_PROMPT, VERIFY_PROMPT, ANTICIPATE_PROMPT,
-    SHOULD_RESPOND_PROMPT, OUTPUT_GUARD_PROMPT
+    SHOULD_RESPOND_PROMPT, OUTPUT_GUARD_PROMPT, DONNA_SYSTEM_PROMPT,
+    INTENT_PERSONALITY_ADJUSTMENTS
 )
 from core.ai_router import call_claude, route
+from core.personality_state import (
+    get_state, update_state, adjust_energy, detect_frustration
+)
 from memory import store
 from modules.csv_handler import check_csv
 from modules.command_handler import handle_command
@@ -70,16 +75,29 @@ def classify_intent(query: str) -> str:
     valid = ["CASUAL", "CODING", "SAVE", "REMINDER", "SEARCH", "COMMAND", "RECALL"]
     return intent if intent in valid else "CASUAL"
 
-def build_context_prompt(query: str) -> str:
+def build_context_prompt(query: str, intent: str = "") -> str:
     history_text = ""
     if _history:
         last = _history[-3:]
         history_text = "\n".join([f"{h['role']}: {h['text']}" for h in last])
+
+    state = get_state()
+
+    personality_adj = ""
+    if intent and intent in INTENT_PERSONALITY_ADJUSTMENTS:
+        personality_adj = f"\n\n[TONE ADJUSTMENT FOR {intent}]\n{INTENT_PERSONALITY_ADJUSTMENTS[intent]}"
+
     return f"""
 Recent conversation:
 {history_text}
 
 User asks: {query}
+
+Personality State:
+- Energy: {state['energy_level']}/10
+- Frustration: {state['frustration']}/10
+- Humor: {state['humor_frequency']}/10
+{personality_adj}
 
 Rules: Max 2 sentences. No quotes. Talk like a friend. Never mention apps or screen content.
 """
@@ -95,18 +113,30 @@ def anticipate(answer: str) -> str | None:
 def process(query: str) -> str:
     print(f"\n[AURA] Processing: '{query}'")
 
-    # in process() — detect task commands
-    if any(w in query.lower() for w in ["add task", "remind me to", "i need to", "todo"]):
-        # extract task name and emit to UI
-        task_text = query.lower()
-        for prefix in ["add task", "remind me to", "i need to", "todo"]:
-            task_text = task_text.replace(prefix, "").strip()
-        store.save_reminder(task_text, datetime.datetime.now())
-        result = f"Added '{task_text}' to your tasks."
-        speak_response(result, "COMMAND")
+    # TIER 1 — instant, no AI
+    # Task handling first
+    query_lower = query.lower()
+    if any(w in query_lower for w in ["add task", "new task", "i need to", "todo", "add a task"]):
+        from modules.tasks import handle_add_task
+        result = handle_add_task(query)
+        store.save_conversation("user", query)
+        store.save_conversation("aura", result)
         return result
 
-    # TIER 1 — instant, no AI
+    if any(w in query_lower for w in ["done with", "completed", "finished", "mark done"]):
+        from modules.tasks import handle_complete_task
+        result = handle_complete_task(query)
+        store.save_conversation("user", query)
+        store.save_conversation("aura", result)
+        return result
+
+    if any(w in query_lower for w in ["remove task", "delete task", "cancel task"]):
+        from modules.tasks import handle_remove_task
+        result = handle_remove_task(query)
+        store.save_conversation("user", query)
+        store.save_conversation("aura", result)
+        return result
+
     csv_response = check_csv(query)
     if csv_response:
         print("[AURA] CSV match")
@@ -148,22 +178,18 @@ def process(query: str) -> str:
         return result
 
     # TIER 3 — LLM
-    full_prompt = build_context_prompt(query)
+    full_prompt = build_context_prompt(query, intent)
     print("[AURA] Routing to AI...")
     answer = route(intent, full_prompt)
 
     if answer.startswith("ERROR") or answer == "CONNECTION_ERROR":
+        detect_frustration(error_count=1)
         return "Connection trouble — one sec."
 
     if answer == "RATE_LIMIT":
         return "Hit my rate limit — give me a moment."
 
     final_answer = guard_output(answer)
-
-    # Classify mode (still needed for UI to know how to speak, maybe pass back via tuple? We'll keep simple)
-    # Not speaking here, so mode classification not needed inside process for speech.
-    # We can simply return the text; UI can speak in CHAT mode always, or we can return mode too.
-    # For simplicity, we'll return just the text, UI speaks as CHAT.
 
     # Anticipate follow‑up
     follow_up = anticipate(final_answer)
@@ -175,6 +201,13 @@ def process(query: str) -> str:
     _history.append({"role": "aura", "text": final_answer})
     store.save_conversation("user", query)
     store.save_conversation("aura", final_answer)
+
+    # Update personality state
+    adjust_energy("success")
+    if intent == "CODING" and ("error" in query.lower() or "bug" in query.lower()):
+        detect_frustration(error_count=1)
+    else:
+        detect_frustration(error_count=0)
 
     return final_answer
 

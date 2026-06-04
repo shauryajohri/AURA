@@ -320,9 +320,14 @@ class AuraApp(QMainWindow):
             self.current_stream_bubble = Bubble("", False)
             self.chat_l.insertWidget(self.chat_l.count() - 1, self.current_stream_bubble)
 
-        current_text = self.current_stream_bubble.layout().itemAt(1).widget().text()
-        new_text = current_text + chunk
-        self.current_stream_bubble.layout().itemAt(1).widget().setText(new_text)
+        # Get the label widget that contains the text
+        bubble_layout = self.current_stream_bubble.layout()
+        if bubble_layout and bubble_layout.count() > 1:
+            label = bubble_layout.itemAt(1).widget()
+            if label:
+                current_text = label.text()
+                new_text = current_text + chunk
+                label.setText(new_text)
 
         QTimer.singleShot(50, lambda: self.scroll.verticalScrollBar().setValue(
             self.scroll.verticalScrollBar().maximum()))

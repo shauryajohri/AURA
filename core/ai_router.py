@@ -1,6 +1,10 @@
 import re
-import ollama
 from core.personality import DONNA_SYSTEM_PROMPT
+
+try:
+    import ollama
+except ModuleNotFoundError:
+    ollama = None
 
 
 def clean_response(text: str) -> str:
@@ -49,6 +53,10 @@ def clean_response(text: str) -> str:
 
 def call_ollama(prompt: str, system: str = DONNA_SYSTEM_PROMPT) -> str:
     try:
+        if ollama is None:
+            print("[AURA] Ollama package is not installed")
+            return "CONNECTION_ERROR"
+
         strict_system = system + """
 CRITICAL OUTPUT RULES:
 - Max 2 short sentences. That's it.
@@ -74,6 +82,11 @@ CRITICAL OUTPUT RULES:
 def call_ollama_streaming(prompt: str, system: str = DONNA_SYSTEM_PROMPT):
     """Stream response from Ollama, yielding chunks as they arrive"""
     try:
+        if ollama is None:
+            print("[AURA] Ollama package is not installed")
+            yield "CONNECTION_ERROR"
+            return
+
         strict_system = system + """
 CRITICAL OUTPUT RULES:
 - Max 2 short sentences. That's it.

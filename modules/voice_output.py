@@ -1,11 +1,19 @@
 import asyncio
-import edge_tts
-import pygame
 import tempfile
 import os
 import re
 import random
 import threading
+
+try:
+    import edge_tts
+except ModuleNotFoundError:
+    edge_tts = None
+
+try:
+    import pygame
+except ModuleNotFoundError:
+    pygame = None
 
 # ── Voice map ─────────────────────────────────────────────────────────────────
 VOICE_MAP = {
@@ -54,6 +62,9 @@ def clean_text(text: str) -> str:
 
 # ── TTS generation ────────────────────────────────────────────────────────────
 async def _generate(text: str, tone: str, path: str):
+    if edge_tts is None:
+        raise RuntimeError("edge_tts is not installed")
+
     voice = VOICE_MAP.get(tone, "en-US-AriaNeural")
     settings = TONE_SETTINGS.get(tone, TONE_SETTINGS["normal"])
     communicate = edge_tts.Communicate(
@@ -74,6 +85,10 @@ def speak(text: str):
     tone = detect_tone(clean)
 
     try:
+        if pygame is None:
+            print("[AURA TTS Error] pygame is not installed")
+            return
+
         # generate audio
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as f:
             tmp_path = f.name

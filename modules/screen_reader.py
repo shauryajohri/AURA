@@ -1,14 +1,38 @@
-import pygetwindow as gw
-import mss
-import pytesseract
-from PIL import Image
-import pyperclip
 import os
 
+try:
+    import pygetwindow as gw
+except ModuleNotFoundError:
+    gw = None
+
+try:
+    import mss
+except ModuleNotFoundError:
+    mss = None
+
+try:
+    import pytesseract
+except ModuleNotFoundError:
+    pytesseract = None
+
+try:
+    from PIL import Image
+except ModuleNotFoundError:
+    Image = None
+
+try:
+    import pyperclip
+except ModuleNotFoundError:
+    pyperclip = None
+
 # tesseract path
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+if pytesseract is not None:
+    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 def get_active_window() -> str:
+    if gw is None:
+        return "unknown"
+
     try:
         win = gw.getActiveWindow()
         if win:
@@ -17,7 +41,10 @@ def get_active_window() -> str:
     except:
         return "unknown"
 
-def take_screenshot() -> Image.Image:
+def take_screenshot():
+    if mss is None or Image is None:
+        raise RuntimeError("screen capture dependencies are not installed")
+
     with mss.mss() as sct:
         monitor = sct.monitors[1]
         screenshot = sct.grab(monitor)
@@ -25,6 +52,9 @@ def take_screenshot() -> Image.Image:
         return img
 
 def extract_text_from_screen() -> str:
+    if pytesseract is None:
+        return ""
+
     try:
         img = take_screenshot()
         # resize for faster OCR
@@ -38,6 +68,9 @@ def extract_text_from_screen() -> str:
         return ""
 
 def get_clipboard() -> str:
+    if pyperclip is None:
+        return ""
+
     try:
         return pyperclip.paste()[:500]
     except:

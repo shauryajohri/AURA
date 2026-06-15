@@ -1,49 +1,25 @@
+import os
 import re
-from core.personality import DONNA_SYSTEM_PROMPT
+import requests
+from core.personality import DONNA_SYSTEM_PROMPT, INTENT_PERSONALITY_ADJUSTMENTS
 
-try:
-    import ollama
-except ModuleNotFoundError:
-    ollama = None
+GROQ_API_KEY = "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"  # get from console.groq.com
+GROQ_MODEL   = "llama-3.3-70b-versatile"
+GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
 
 
 def clean_response(text: str) -> str:
-    # 1. Strip code blocks and markdown
     text = re.sub(r"```[\s\S]*?```", "", text)
     text = re.sub(r"\*\*.*?\*\*", "", text)
-    text = re.sub(r"\[.*?\]\(.*?\)", "", text)  # markdown links
-
-    # 2. Remove entire lines that are meta-leaks
     leak_patterns = [
-        r"^.*User is .*$",
-        r"^.*User asks.*$",
-        r"^.*AURA:.*$",
-        r"^.*Screen content.*$",
-        r"^.*Current app.*$",
-        r"^.*Note:.*$",
-        r"^.*Instructions:.*$",
-        r"^.*Certainly.*$",
-        r"^.*Of course.*$",
-        r"^.*As an AI.*$",
-        r"^.*I notice you.*$",
-        r"^.*You seem to be.*$",
+        r"^.*User is .*$", r"^.*User asks.*$", r"^.*AURA:.*$",
+        r"^.*Certainly.*$", r"^.*Of course.*$", r"^.*As an AI.*$",
     ]
     for pattern in leak_patterns:
         text = re.sub(pattern, "", text, flags=re.IGNORECASE | re.MULTILINE)
-
-    # 3. Strip "Also —" or "Also -" follow-ups that came from anticipate
-    text = re.sub(r"Also\s*[-—]\s*.*$", "", text, flags=re.IGNORECASE)
-
-    # 4. Remove role prefixes like "User says:", "Assistant:"
-    text = re.sub(r"^(User|Assistant|AI|AURA|Bot)\s*:\s*", "", text, flags=re.IGNORECASE)
-
-    # 5. Remove surrounding quotes
+    text = re.sub(r"^(User|Assistant|AURA|Bot)\s*:\s*", "", text, flags=re.IGNORECASE)
     text = text.strip().strip('"').strip("'").strip()
-
-    # 6. Collapse multiple lines and spaces
     text = re.sub(r"\s+", " ", text).strip()
-
-    # 7. Split into sentences, keep max 2
     sentences = [s.strip() for s in text.split('.') if s.strip()]
     result = ". ".join(sentences[:2])
     if result and not result.endswith(('.', '?', '!')):
@@ -51,76 +27,100 @@ def clean_response(text: str) -> str:
     return result.strip()
 
 
-def call_ollama(prompt: str, system: str = DONNA_SYSTEM_PROMPT) -> str:
-    try:
-        if ollama is None:
-            print("[AURA] Ollama package is not installed")
-            return "CONNECTION_ERROR"
+def call_groq(prompt: str, system: str = DONNA_SYSTEM_PROMPT) -> str:
+    strict_system = system + """
 
-        strict_system = system + """
-CRITICAL OUTPUT RULES:
-- Max 2 short sentences. That's it.
-- No bullet points. No markdown. No headers.
-- No meta text. No "User:" or "AURA:" prefixes.
-- Talk like a friend texting — casual and direct.
-- Never start your reply with a quote mark.
+OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
+- MAX 2 sentences. Hard limit.
+- NO emoji. Zero.
+- NO "OMG", "Whoopsie", "Let's", "Together", "Great question", "Certainly"
+- NO made-up context. Only refer to what's in the conversation.
+- Talk like a sharp friend texting. Dry. Direct. No hype.
+- If you don't know something, say so in one line.
 """
-        response = ollama.chat(
-            model="phi3",
-            messages=[
-                {"role": "system", "content": strict_system},
-                {"role": "user",   "content": prompt}
-            ]
+    try:
+        response = requests.post(
+            GROQ_URL,
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": GROQ_MODEL,
+                "messages": [
+                    {"role": "system", "content": strict_system},
+                    {"role": "user",   "content": prompt}
+                ],
+                "max_tokens": 150,
+                "temperature": 0.7,
+                "stream": False
+            },
+            timeout=15
         )
-        raw = response["message"]["content"]
+        data = response.json()
+        print(f"[AURA Groq Debug] Status: {response.status_code} | Response: {data}")  # add this
+        raw = data["choices"][0]["message"]["content"]
         return clean_response(raw)
     except Exception as e:
-        print(f"[AURA] Ollama error: {e}")
+        print(f"[AURA] Groq error: {e}")
         return "CONNECTION_ERROR"
 
+def call_groq_streaming(prompt: str, system: str = DONNA_SYSTEM_PROMPT):
+    strict_system = system + """
 
-def call_ollama_streaming(prompt: str, system: str = DONNA_SYSTEM_PROMPT):
-    """Stream response from Ollama, yielding chunks as they arrive"""
-    try:
-        if ollama is None:
-            print("[AURA] Ollama package is not installed")
-            yield "CONNECTION_ERROR"
-            return
-
-        strict_system = system + """
-CRITICAL OUTPUT RULES:
-- Max 2 short sentences. That's it.
-- No bullet points. No markdown. No headers.
-- No meta text. No "User:" or "AURA:" prefixes.
-- Talk like a friend texting — casual and direct.
-- Never start your reply with a quote mark.
+OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
+- MAX 2 sentences. Hard limit.
+- NO emoji. Zero.
+- NO "OMG", "Whoopsie", "Let's", "Together", "Great question", "Certainly"
+- NO made-up context. Only refer to what's in the conversation.
+- Talk like a sharp friend texting. Dry. Direct. No hype.
 """
-        response = ollama.chat(
-            model="phi3",
-            messages=[
-                {"role": "system", "content": strict_system},
-                {"role": "user",   "content": prompt}
-            ],
+    try:
+        response = requests.post(
+            GROQ_URL,
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": GROQ_MODEL,
+                "messages": [
+                    {"role": "system", "content": strict_system},
+                    {"role": "user",   "content": prompt}
+                ],
+                "max_tokens": 150,
+                "temperature": 0.7,
+                "stream": True
+            },
+            timeout=15,
             stream=True
         )
-        for chunk in response:
-            content = chunk.get("message", {}).get("content", "")
-            if content:
-                yield content
+        for line in response.iter_lines():
+            if line:
+                line = line.decode("utf-8")
+                if line.startswith("data: ") and line != "data: [DONE]":
+                    import json
+                    chunk = json.loads(line[6:])
+                    content = chunk["choices"][0]["delta"].get("content", "")
+                    if content:
+                        yield content
     except Exception as e:
-        print(f"[AURA] Ollama streaming error: {e}")
+        print(f"[AURA] Groq streaming error: {e}")
         yield "CONNECTION_ERROR"
 
 
 def call_claude(prompt: str, system: str = DONNA_SYSTEM_PROMPT) -> str:
-    return call_ollama(prompt, system)
+    return call_groq(prompt, system)
 
 
 def route(intent: str, prompt: str) -> str:
-    return call_ollama(prompt)
+    extra = INTENT_PERSONALITY_ADJUSTMENTS.get(intent, "")
+    system = DONNA_SYSTEM_PROMPT + extra
+    return call_groq(prompt, system)
 
 
 def route_streaming(intent: str, prompt: str):
-    """Route with streaming - yields text chunks as they arrive"""
-    for chunk in call_ollama_streaming(prompt):
+    extra = INTENT_PERSONALITY_ADJUSTMENTS.get(intent, "")
+    system = DONNA_SYSTEM_PROMPT + extra
+    for chunk in call_groq_streaming(prompt, system):
         yield chunk

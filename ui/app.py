@@ -8,6 +8,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
 
+from modules.session_memory import save_on_exit
+
 BG     = "#0D1117"
 BG2    = "#141D2B"
 BORDER = "#1E2D45"
@@ -274,6 +276,12 @@ class AuraApp(QMainWindow):
         self.text_input.clear()
         self._add_bubble(text, True)
         threading.Thread(target=self._process, args=(text,), daemon=True).start()
+
+    def closeEvent(self, event):
+        from modules.session_memory import save_on_exit
+        from core.brain import _history, get_context
+        save_on_exit(_history, get_context().get("app", "unknown"))
+        event.accept()
 
     def _process(self, text: str):
         self.set_status_signal.emit("Thinking...")

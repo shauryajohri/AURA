@@ -2,6 +2,7 @@ import datetime
 import re
 import time
 from core.ai_router import call_claude, route, route_streaming
+from core.thinking import think
 from memory import store
 from modules.csv_handler import check_csv
 from modules.command_handler import handle_command
@@ -70,19 +71,19 @@ def classify_intent(query: str) -> str:
     valid = ["CASUAL", "CODING", "SAVE", "REMINDER", "SEARCH", "COMMAND", "RECALL"]
     return intent if intent in valid else "CASUAL"
 
-def build_context_prompt(query: str) -> str:
+def build_context_prompt(query: str, intent: str, thought_context: str) -> str:
     history_text = ""
     if _history:
         last = _history[-3:]
         history_text = "\n".join([f"{h['role']}: {h['text']}" for h in last])
-    return f"""
-Recent conversation:
+
+    thought_section = f"\nContext: {thought_context}" if thought_context else ""
+
+    return f"""Recent conversation:
 {history_text}
+{thought_section}
 
-User asks: {query}
-
-Rules: Max 2 sentences. No quotes. Talk like a friend. Never mention apps or screen content.
-"""
+{query}"""
 
 def anticipate(answer: str) -> str | None:
     prompt = ANTICIPATE_PROMPT.format(
@@ -162,7 +163,7 @@ def process(query: str) -> str:
         return result
 
     # TIER 3 — LLM
-    full_prompt = build_context_prompt(query)
+    full_prompt = build_context_prompt(query, intent, thought_context)
     print("[AURA] Routing to AI...")
     answer = route(intent, full_prompt)
 
@@ -173,6 +174,7 @@ def process(query: str) -> str:
         return "Hit my rate limit — give me a moment."
 
     final_answer = guard_output(answer)
+    post_think(query, final_answer, intent)
 
     # Classify mode (still needed for UI to know how to speak, maybe pass back via tuple? We'll keep simple)
     # Not speaking here, so mode classification not needed inside process for speech.
@@ -240,6 +242,11 @@ def process_streaming(query: str, on_chunk=None) -> str:
         return result
 
     intent = classify_intent(query)
+    # thinking layer
+    from core.thinking import think, post_think
+    thought_context = think(query, intent, _last_context, _history)
+
+    full_prompt = build_context_prompt(query, intent, thought_context)
 
     if intent in {"RECALL", "SAVE"}:
         result = process(query)
@@ -247,7 +254,9 @@ def process_streaming(query: str, on_chunk=None) -> str:
             on_chunk(result)
         return result
 
-    full_prompt = build_context_prompt(query)
+    from core.thinking import think, post_think
+    thought_context = think(query, intent, _last_context, _history)
+    full_prompt = build_context_prompt(query, intent, thought_context)
     chunks = []
     for chunk in route_streaming(intent, full_prompt):
         chunks.append(chunk)
@@ -261,6 +270,8 @@ def process_streaming(query: str, on_chunk=None) -> str:
         return "Hit my rate limit — give me a moment."
 
     final_answer = guard_output(answer)
+    post_think(query, final_answer, intent)
+    post_think(query, final_answer, intent)
     _history.append({"role": "user", "text": query})
     _history.append({"role": "aura", "text": final_answer})
     store.save_conversation("user", query)

@@ -1,13 +1,10 @@
-import sqlite3
 import datetime
-import os
 import csv
 import os
-import datetime
 import random
-from urllib import response
 
 CSV_PATH = os.path.join("config", "quick_responses.csv")
+NO_ACTION = {"", "none", "null"}
 
 def load_responses() -> dict:
     responses = {}
@@ -15,14 +12,16 @@ def load_responses() -> dict:
         with open(CSV_PATH, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                if "trigger" not in row:
+                trigger = row.get("trigger", "").lower().strip()
+                response = row.get("response", "").strip()
+                action = row.get("action", "").strip()
+                if not trigger or (not response and action.lower() in NO_ACTION):
                     continue
-                trigger = row["trigger"].lower().strip()
                 if trigger not in responses:
                     responses[trigger] = []
                 responses[trigger].append({
-                    "response": row["response"],
-                    "action": row["action"]
+                    "response": response,
+                    "action": action
                 })
     except FileNotFoundError:
         print("[AURA] CSV file not found")
@@ -45,8 +44,18 @@ def check_csv(query: str) -> str | None:
 
 def _process(trigger: str) -> str:
     entries = _responses[trigger]
-    entry = random.choice(entries)
-    response = entry["response"]
+    action_entries = [
+        entry for entry in entries
+        if entry.get("action", "").strip().lower() not in NO_ACTION
+    ]
+    text_entries = [
+        entry for entry in entries
+        if entry.get("response", "").strip()
+    ]
+
+    entry = action_entries[0] if action_entries else random.choice(text_entries)
+    action = entry.get("action", "").strip()
+    response = action if action.lower() not in NO_ACTION else entry["response"]
 
     if response == "TIME_FUNCTION":
         now = datetime.datetime.now()

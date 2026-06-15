@@ -11,6 +11,7 @@ Modes:
   LONG     → offer summary instead
 """
 
+import random
 import re
 
 # code indicators
@@ -121,9 +122,6 @@ _LONG_REPLIES = [
     "got a full answer. want me to summarize?",
     "it's detailed. want just the key points?",
 ]
-
-import random
-
 def get_code_reply() -> str:
     return random.choice(_CODE_REPLIES)
 

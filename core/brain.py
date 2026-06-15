@@ -1,16 +1,13 @@
-import time
 import datetime
-from core.personality import (
-    INTENT_PROMPT, VERIFY_PROMPT, ANTICIPATE_PROMPT,
-    SHOULD_RESPOND_PROMPT, OUTPUT_GUARD_PROMPT
-)
-from core.ai_router import call_claude, route
+import re
+import time
+from core.ai_router import call_claude, route, route_streaming
 from memory import store
 from modules.csv_handler import check_csv
 from modules.command_handler import handle_command
-from modules.screen_reader import get_screen_context
 from modules.speech_planner import plan, debug as plan_debug
 import modules.voice_output as tts
+from core.personality import (INTENT_PROMPT, VERIFY_PROMPT, ANTICIPATE_PROMPT, SHOULD_RESPOND_PROMPT, OUTPUT_GUARD_PROMPT)
 
 DEBUG_SPEECH = True
 
@@ -55,6 +52,8 @@ def guard_output(response: str) -> str:
     if any(x in response for x in ["User is", "User asks", "AURA:", "Current app"]):
         print("[AURA] guard_output: stripping leaked context")
         response = re.sub(r"(User is .+?[,\.])", "", response, flags=re.IGNORECASE)
+        response = re.sub(r"(User asks .+?[,\.])", "", response, flags=re.IGNORECASE)
+        response = re.sub(r"(Current app .+?[,\.])", "", response, flags=re.IGNORECASE)
         response = re.sub(r"(AURA:?\s*)", "", response, flags=re.IGNORECASE)
     sentences = [s.strip() for s in response.split('.') if s.strip()]
     if len(sentences) > 2:
@@ -95,15 +94,29 @@ def anticipate(answer: str) -> str | None:
 
 def process(query: str) -> str:
     print(f"\n[AURA] Processing: '{query}'")
+    query_lower = query.lower()
 
-    # in process() — detect task commands
-    if any(w in query.lower() for w in ["add task", "remind me to", "i need to", "todo"]):
-        # extract task name and emit to UI
-        task_text = query.lower()
-        for prefix in ["add task", "remind me to", "i need to", "todo"]:
-            task_text = task_text.replace(prefix, "").strip()
-        store.save_reminder(task_text, datetime.datetime.now())
-        result = f"Added '{task_text}' to your tasks."
+    if any(w in query_lower for w in ["add task", "new task", "i need to", "todo", "add a task", "remind me to"]):
+        from modules.tasks import handle_add_task
+        result = handle_add_task(query)
+        store.save_conversation("user", query)
+        store.save_conversation("aura", result)
+        speak_response(result, "COMMAND")
+        return result
+
+    if any(w in query_lower for w in ["done with", "completed", "finished", "mark done"]):
+        from modules.tasks import handle_complete_task
+        result = handle_complete_task(query)
+        store.save_conversation("user", query)
+        store.save_conversation("aura", result)
+        speak_response(result, "COMMAND")
+        return result
+
+    if any(w in query_lower for w in ["remove task", "delete task", "cancel task"]):
+        from modules.tasks import handle_remove_task
+        result = handle_remove_task(query)
+        store.save_conversation("user", query)
+        store.save_conversation("aura", result)
         speak_response(result, "COMMAND")
         return result
 
@@ -175,31 +188,83 @@ def process(query: str) -> str:
     _history.append({"role": "aura", "text": final_answer})
     store.save_conversation("user", query)
     store.save_conversation("aura", final_answer)
-    # task commands
+    return final_answer
+
+
+def process_streaming(query: str, on_chunk=None) -> str:
+    print(f"\n[AURA] Streaming: '{query}'")
     query_lower = query.lower()
-    if any(w in query_lower for w in ["add task", "new task", "i need to", "todo", "add a task"]):
-            from modules.tasks import handle_add_task
-            result = handle_add_task(query)
-            store.save_conversation("user", query)
-            store.save_conversation("aura", result)
-            speak_response(result, "COMMAND")
-            return result
+
+    if any(w in query_lower for w in ["add task", "new task", "i need to", "todo", "add a task", "remind me to"]):
+        from modules.tasks import handle_add_task
+        result = handle_add_task(query)
+        store.save_conversation("user", query)
+        store.save_conversation("aura", result)
+        if on_chunk:
+            on_chunk(result)
+        return result
 
     if any(w in query_lower for w in ["done with", "completed", "finished", "mark done"]):
-            from modules.tasks import handle_complete_task
-            result = handle_complete_task(query)
-            store.save_conversation("user", query)
-            store.save_conversation("aura", result)
-            speak_response(result, "COMMAND")
-            return result
+        from modules.tasks import handle_complete_task
+        result = handle_complete_task(query)
+        store.save_conversation("user", query)
+        store.save_conversation("aura", result)
+        if on_chunk:
+            on_chunk(result)
+        return result
 
     if any(w in query_lower for w in ["remove task", "delete task", "cancel task"]):
         from modules.tasks import handle_remove_task
         result = handle_remove_task(query)
         store.save_conversation("user", query)
         store.save_conversation("aura", result)
-        speak_response(result, "COMMAND")
+        if on_chunk:
+            on_chunk(result)
         return result
+
+    instant_response = check_csv(query) or handle_command(query)
+    if instant_response:
+        store.save_conversation("user", query)
+        store.save_conversation("aura", instant_response)
+        if on_chunk:
+            on_chunk(instant_response)
+        return instant_response
+
+    if any(p in query_lower for p in ["eurusd", "gbpusd", "usdjpy", "eur/usd", "gbp/usd", "gold"]):
+        from modules.forex_report import get_quick_price
+        result = get_quick_price(query_lower)
+        store.save_conversation("user", query)
+        store.save_conversation("aura", result)
+        if on_chunk:
+            on_chunk(result)
+        return result
+
+    intent = classify_intent(query)
+
+    if intent in {"RECALL", "SAVE"}:
+        result = process(query)
+        if on_chunk:
+            on_chunk(result)
+        return result
+
+    full_prompt = build_context_prompt(query)
+    chunks = []
+    for chunk in route_streaming(intent, full_prompt):
+        chunks.append(chunk)
+        if on_chunk and chunk not in {"CONNECTION_ERROR", "RATE_LIMIT"}:
+            on_chunk(chunk)
+
+    answer = "".join(chunks).strip()
+    if answer.startswith("ERROR") or answer == "CONNECTION_ERROR":
+        return "Connection trouble — one sec."
+    if answer == "RATE_LIMIT":
+        return "Hit my rate limit — give me a moment."
+
+    final_answer = guard_output(answer)
+    _history.append({"role": "user", "text": query})
+    _history.append({"role": "aura", "text": final_answer})
+    store.save_conversation("user", query)
+    store.save_conversation("aura", final_answer)
     return final_answer
 
 
@@ -219,14 +284,17 @@ def should_respond(text: str) -> bool:
     except:
         return True
 
-def start_proactive(speak_fn=None):
+def start_proactive(speak_fn=None, on_suggestion_fn=None):
     """Start the Donna-style proactive loop."""
     if speak_fn is None:
         def speak_fn(text):
             speak_response(text, mode="CHAT")
     try:
         import modules.proactive as proactive
-        proactive.start_proactive_loop(speak_fn=speak_fn)
+        proactive.start_proactive_loop(
+            speak_fn=speak_fn,
+            on_suggestion_fn=on_suggestion_fn
+        )
         print("[AURA] Proactive module started (Donna is watching)")
     except Exception as e:
         print(f"[AURA] Proactive start error: {e}")

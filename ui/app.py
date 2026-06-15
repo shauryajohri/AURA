@@ -16,7 +16,6 @@ WHITE  = "#FFFFFF"
 MUTED  = "#8B949E"
 GREEN  = "#1D9E75"
 
-
 class VoiceWorker(QThread):
     heard = pyqtSignal(str)
     _running = True
@@ -66,6 +65,7 @@ class Bubble(QFrame):
             row.addWidget(bubble)
             row.addStretch()
         layout.addLayout(row)
+        self.text_label = bubble
 
 
 class AuraApp(QMainWindow):
@@ -256,9 +256,7 @@ class AuraApp(QMainWindow):
             self.voice_worker.heard.connect(self._on_voice)
             self.voice_worker.start()
         else:
-            self.mic_btn.setStyleSheet(f"""
-                QPushButton {{ background: #333; border-radius: 22px; font-size: 18px; }}
-            """)
+            self.mic_btn.setStyleSheet(f"""QPushButton {{ background: #333; border-radius: 22px; font-size: 18px; }}""")
             self.status_lbl.setText("Voice off")
             self.voice_worker.stop()
             self.voice_worker.wait()
@@ -279,10 +277,12 @@ class AuraApp(QMainWindow):
 
     def _process(self, text: str):
         self.set_status_signal.emit("Thinking...")
-        self._add_bubble(text, True)
         self.current_stream_bubble = None
+        streamed = False
 
         def on_chunk(chunk: str):
+            nonlocal streamed
+            streamed = True
             self.stream_chunk_signal.emit(chunk)
 
         def worker():
@@ -297,6 +297,8 @@ class AuraApp(QMainWindow):
 
             self.current_stream_bubble = None
             self.set_status_signal.emit("Listening..." if self.voice_on else "Voice off")
+            if response and not streamed:
+                self.add_msg_signal.emit(response, False)
             if self.speak_fn:
                 threading.Thread(
                     target=self.speak_fn,
@@ -320,14 +322,8 @@ class AuraApp(QMainWindow):
             self.current_stream_bubble = Bubble("", False)
             self.chat_l.insertWidget(self.chat_l.count() - 1, self.current_stream_bubble)
 
-        # Get the label widget that contains the text
-        bubble_layout = self.current_stream_bubble.layout()
-        if bubble_layout and bubble_layout.count() > 1:
-            label = bubble_layout.itemAt(1).widget()
-            if label:
-                current_text = label.text()
-                new_text = current_text + chunk
-                label.setText(new_text)
+        label = self.current_stream_bubble.text_label
+        label.setText(label.text() + chunk)
 
         QTimer.singleShot(50, lambda: self.scroll.verticalScrollBar().setValue(
             self.scroll.verticalScrollBar().maximum()))

@@ -378,5 +378,135 @@ def get_learned_follow_ups(aura_response: str, limit: int = 3) -> list:
 
     return results if results else []
 
+def save_session_snapshot(app: str, summary: str, topics: list):
+    """Save what user was doing when AURA closes"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS session_snapshots (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            app         TEXT,
+            summary     TEXT,
+            topics      TEXT,
+            created_at  TEXT
+        )
+    ''')
+    cursor.execute('''
+        INSERT INTO session_snapshots (app, summary, topics, created_at)
+        VALUES (?, ?, ?, ?)
+    ''', (app, summary, ",".join(topics), datetime.datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+    print(f"[AURA Memory] Session snapshot saved")
+
+def save_session_snapshot(app: str, summary: str, topics: list):
+    """Save what user was doing when AURA closes"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS session_snapshots (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            app         TEXT,
+            summary     TEXT,
+            topics      TEXT,
+            created_at  TEXT
+        )
+    ''')
+    cursor.execute('''
+        INSERT INTO session_snapshots (app, summary, topics, created_at)
+        VALUES (?, ?, ?, ?)
+    ''', (app, summary, ",".join(topics), datetime.datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+    print(f"[AURA Memory] Session snapshot saved")
+
+def get_last_session() -> dict | None:
+    """Retrieve what user was doing in the last session"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT app, summary, topics, created_at
+            FROM session_snapshots
+            ORDER BY created_at DESC
+            LIMIT 1
+        ''')
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {
+            "app": row[0],
+            "summary": row[1],
+            "topics": row[2].split(",") if row[2] else [],
+            "created_at": row[3]
+        }
+    except:
+        conn.close()
+        return None
+    
+def get_last_session() -> dict | None:
+    """Retrieve what user was doing in the last session"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT app, summary, topics, created_at
+            FROM session_snapshots
+            ORDER BY created_at DESC
+            LIMIT 1
+        ''')
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {
+            "app": row[0],
+            "summary": row[1],
+            "topics": row[2].split(",") if row[2] else [],
+            "created_at": row[3]
+        }
+    except:
+        conn.close()
+        return None
+    
+def save_working_memory(data: str):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS working_memory (
+            id         INTEGER PRIMARY KEY,
+            data       TEXT NOT NULL,
+            updated_at TEXT
+        )
+    ''')
+    cursor.execute('''
+        INSERT OR REPLACE INTO working_memory (id, data, updated_at)
+        VALUES (1, ?, ?)
+    ''', (data, datetime.datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+
+def get_working_memory() -> dict | None:
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS working_memory (
+                id         INTEGER PRIMARY KEY CHECK (id = 1),
+                data       TEXT NOT NULL,
+                updated_at TEXT
+            )
+        ''')
+        cursor.execute('SELECT data FROM working_memory WHERE id=1')
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        import json
+        return json.loads(row[0])
+    except:
+        conn.close()
+        return None
 init_db()
 init_tasks()

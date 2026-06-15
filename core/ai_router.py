@@ -1,9 +1,12 @@
 import os
 import re
 import requests
+from dotenv import load_dotenv
 from core.personality import DONNA_SYSTEM_PROMPT, INTENT_PERSONALITY_ADJUSTMENTS
 
-GROQ_API_KEY = "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"  # get from console.groq.com
+load_dotenv()  # must be before os.getenv
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")  # get from console.groq.com
 GROQ_MODEL   = "llama-3.3-70b-versatile"
 GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
 

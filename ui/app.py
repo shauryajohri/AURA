@@ -3,7 +3,7 @@ import threading
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QScrollArea, QFrame
+    QScrollArea, QFrame, QTextEdit
 )
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -20,13 +20,16 @@ GREEN  = "#1D9E75"
 
 class VoiceWorker(QThread):
     heard = pyqtSignal(str)
-    _running = True
+
+    def __init__(self):
+        super().__init__()
+        self._running = True
 
     def run(self):
         try:
             from modules.voice_input import listen
             while self._running:
-                text = listen()
+                text = listen(timeout=1)
                 if text and self._running:
                     self.heard.emit(text)
         except Exception as e:
@@ -34,6 +37,19 @@ class VoiceWorker(QThread):
 
     def stop(self):
         self._running = False
+    class CheckButton(QPushButton):
+            doubleClicked = pyqtSignal()
+
+    def mouseDoubleClickEvent(self, event):
+        self.doubleClicked.emit()
+        super().mouseDoubleClickEvent(event)
+
+class CheckButton(QPushButton):
+    doubleClicked = pyqtSignal()
+
+    def mouseDoubleClickEvent(self, event):
+        self.doubleClicked.emit()
+        super().mouseDoubleClickEvent(event)
 
 
 class Bubble(QFrame):
@@ -69,12 +85,58 @@ class Bubble(QFrame):
         layout.addLayout(row)
         self.text_label = bubble
 
+class CodeBubble(QFrame):
+    def __init__(self, code: str, language: str = "text"):
+        super().__init__()
+        self.setStyleSheet("background: transparent;")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 2, 0, 2)
+
+        header_row = QHBoxLayout()
+        name = QLabel(f"AURA · {language}")
+        name.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        name.setStyleSheet(f"color: {CYAN};")
+        copy_btn = QPushButton("Copy")
+        copy_btn.setFixedHeight(22)
+        copy_btn.setFont(QFont("Segoe UI", 8))
+        copy_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: #1E2D45; color: {CYAN};
+                border-radius: 4px; border: 1px solid {CYAN}; padding: 0 8px;
+            }}
+            QPushButton:hover {{ background: #243850; }}
+        """)
+        copy_btn.clicked.connect(lambda: self._copy_code(code))
+        header_row.addWidget(name)
+        header_row.addStretch()
+        header_row.addWidget(copy_btn)
+        layout.addLayout(header_row)
+
+        code_box = QTextEdit()
+        code_box.setPlainText(code)
+        code_box.setReadOnly(True)
+        code_box.setFont(QFont("Consolas", 10))
+        code_box.setMinimumWidth(420)
+        code_box.setMaximumHeight(min(400, 24 * (code.count("\n") + 3)))
+        code_box.setStyleSheet(f"""
+            QTextEdit {{
+                background: #0A0E14; color: #D4D4D4;
+                border-radius: 8px; padding: 10px;
+                border: 1px solid {BORDER};
+            }}
+        """)
+        layout.addWidget(code_box)
+        self.code_box = code_box
+
+    def _copy_code(self, code: str):
+        QApplication.clipboard().setText(code)
 
 class AuraApp(QMainWindow):
     add_msg_signal      = pyqtSignal(str, bool)
     set_status_signal   = pyqtSignal(str)
     refresh_tasks_signal = pyqtSignal()
     stream_chunk_signal = pyqtSignal(str)
+    add_code_signal     = pyqtSignal(str, str)
 
     def __init__(self, brain_process=None, speak_fn=None):
         super().__init__()
@@ -86,6 +148,7 @@ class AuraApp(QMainWindow):
         self.set_status_signal.connect(self._set_status)
         self.refresh_tasks_signal.connect(self._refresh_tasks)
         self.stream_chunk_signal.connect(self._on_stream_chunk)
+        self.add_code_signal.connect(self._add_code_bubble)
         self._build()
         self._setup_voice()
         QTimer.singleShot(400, lambda: self._add_bubble(
@@ -124,10 +187,12 @@ class AuraApp(QMainWindow):
         vbox.addWidget(header)
 
         # main row
+# main row
         main_row = QHBoxLayout()
         main_row.setContentsMargins(0, 0, 0, 0)
         main_row.setSpacing(0)
         main_row.addWidget(self._build_chat(), 3)
+        main_row.addWidget(self._build_code_panel(), 3)
         main_row.addWidget(self._build_task_panel(), 2)
         main_widget = QWidget()
         main_widget.setLayout(main_row)
@@ -194,6 +259,48 @@ class AuraApp(QMainWindow):
         self.scroll.setWidget(self.chat_w)
         layout.addWidget(self.scroll)
         return panel
+    def _build_code_panel(self) -> QWidget:
+        panel = QWidget()
+        panel.setStyleSheet(f"background: {BG}; border-left: 1px solid {BORDER}; border-right: 1px solid {BORDER};")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        header = QWidget()
+        header.setFixedHeight(48)
+        header.setStyleSheet(f"background: {BG2}; border-bottom: 1px solid {BORDER};")
+        hl = QHBoxLayout(header)
+        hl.setContentsMargins(14, 0, 14, 0)
+        ttl = QLabel("💻  Code")
+        ttl.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        ttl.setStyleSheet(f"color: {WHITE};")
+        hl.addWidget(ttl)
+        hl.addStretch()
+        layout.addWidget(header)
+
+        self.code_scroll = QScrollArea()
+        self.code_scroll.setWidgetResizable(True)
+        self.code_scroll.setStyleSheet(f"""
+            QScrollArea {{ background: {BG}; border: none; }}
+            QScrollBar:vertical {{ width: 4px; background: transparent; }}
+            QScrollBar::handle:vertical {{ background: {BORDER}; border-radius: 2px; }}
+        """)
+        self.code_w = QWidget()
+        self.code_w.setStyleSheet(f"background: {BG};")
+        self.code_l = QVBoxLayout(self.code_w)
+        self.code_l.setContentsMargins(14, 14, 14, 14)
+        self.code_l.setSpacing(10)
+
+        self.code_panel_placeholder = QLabel("Code will show up here when AURA writes some.")
+        self.code_panel_placeholder.setWordWrap(True)
+        self.code_panel_placeholder.setFont(QFont("Segoe UI", 10))
+        self.code_panel_placeholder.setStyleSheet(f"color: {MUTED};")
+        self.code_l.addWidget(self.code_panel_placeholder)
+        self.code_l.addStretch()
+
+        self.code_scroll.setWidget(self.code_w)
+        layout.addWidget(self.code_scroll)
+        return panel
 
     def _build_task_panel(self) -> QWidget:
         panel = QWidget()
@@ -241,27 +348,31 @@ class AuraApp(QMainWindow):
         layout.addWidget(self.task_scroll)
         self._refresh_tasks()
         return panel
-
+    
     def _setup_voice(self):
-        self.voice_worker = VoiceWorker()
-        self.voice_worker.heard.connect(self._on_voice)
-        self.voice_worker.start()
+        self._start_voice_worker()
 
     def _toggle_voice(self):
         self.voice_on = not self.voice_on
         if self.voice_on:
-            self.mic_btn.setStyleSheet(f"""
-                QPushButton {{ background: {CYAN}; border-radius: 22px; font-size: 18px; }}
-            """)
+            self.mic_btn.setStyleSheet(f"""QPushButton {{ background: {CYAN}; border-radius: 22px; font-size: 18px; }}""")
             self.status_lbl.setText("Listening...")
-            self.voice_worker = VoiceWorker()
-            self.voice_worker.heard.connect(self._on_voice)
-            self.voice_worker.start()
+            self._start_voice_worker()
         else:
             self.mic_btn.setStyleSheet(f"""QPushButton {{ background: #333; border-radius: 22px; font-size: 18px; }}""")
             self.status_lbl.setText("Voice off")
             self.voice_worker.stop()
-            self.voice_worker.wait()
+
+    def _start_voice_worker(self):
+        if hasattr(self, "voice_worker") and self.voice_worker.isRunning():
+            self.voice_worker.finished.connect(self._start_voice_worker_now)
+            return
+        self._start_voice_worker_now()
+
+    def _start_voice_worker_now(self):
+        self.voice_worker = VoiceWorker()
+        self.voice_worker.heard.connect(self._on_voice)
+        self.voice_worker.start()
 
     def _on_voice(self, text: str):
         if not self.voice_on:
@@ -282,7 +393,6 @@ class AuraApp(QMainWindow):
         from core.brain import _history, get_context
         save_on_exit(_history, get_context().get("app", "unknown"))
         event.accept()
-
     def _process(self, text: str):
         self.set_status_signal.emit("Thinking...")
         self.current_stream_bubble = None
@@ -293,10 +403,13 @@ class AuraApp(QMainWindow):
             streamed = True
             self.stream_chunk_signal.emit(chunk)
 
+        def on_code(lang: str, code: str):
+            self.add_code_signal.emit(lang, code)
+
         def worker():
             try:
                 from core.brain import process_streaming
-                response = process_streaming(text, on_chunk=on_chunk)
+                response = process_streaming(text, on_chunk=on_chunk, on_code=on_code)
             except Exception as e:
                 response = f"Error: {e}"
                 self.add_msg_signal.emit(response, False)
@@ -321,6 +434,12 @@ class AuraApp(QMainWindow):
         self.chat_l.insertWidget(self.chat_l.count() - 1, w)
         QTimer.singleShot(100, lambda: self.scroll.verticalScrollBar().setValue(
             self.scroll.verticalScrollBar().maximum()))
+    def _add_code_bubble(self, language: str, code: str):
+        self.code_panel_placeholder.hide()
+        w = CodeBubble(code, language)
+        self.code_l.insertWidget(self.code_l.count() - 1, w)
+        QTimer.singleShot(100, lambda: self.code_scroll.verticalScrollBar().setValue(
+            self.code_scroll.verticalScrollBar().maximum()))
 
     def _set_status(self, text: str):
         self.status_lbl.setText(text)
@@ -362,7 +481,7 @@ class AuraApp(QMainWindow):
         rl = QHBoxLayout(row)
         rl.setContentsMargins(10, 8, 10, 8)
         rl.setSpacing(8)
-        check = QPushButton("✓" if status == "done" else "○")
+        check = CheckButton("✓" if status == "done" else "○")
         check.setFixedSize(24, 24)
         check.setStyleSheet(f"""
             QPushButton {{
@@ -376,6 +495,10 @@ class AuraApp(QMainWindow):
         if status != 'done':
             check.clicked.connect(
                 lambda _, tid=task_id, t=title: self._mark_done(tid, t))
+        else:
+            check.setToolTip("Double-click to mark as pending")
+            check.doubleClicked.connect(
+                lambda tid=task_id, t=title: self._unmark_done(tid, t))
         lbl = QLabel(title)
         lbl.setFont(QFont("Segoe UI", 10))
         lbl.setStyleSheet(f"""
@@ -408,6 +531,17 @@ class AuraApp(QMainWindow):
             threading.Thread(
                 target=self.speak_fn,
                 args=(f"Done. '{title}' checked off.",),
+                daemon=True).start()
+
+    def _unmark_done(self, task_id: int, title: str):
+        from memory.store import uncomplete_task
+        uncomplete_task(task_id)
+        self._refresh_tasks()
+        self._add_bubble(f"'{title}' moved back to pending.", False)
+        if self.speak_fn:
+            threading.Thread(
+                target=self.speak_fn,
+                args=(f"Got it, '{title}' is back on your list.",),
                 daemon=True).start()
 
     def _delete_task(self, task_id: int):

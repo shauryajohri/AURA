@@ -2,6 +2,12 @@ import datetime
 import csv
 import os
 import random
+import re
+from urllib import response
+from modules import screen_reader
+
+LOOK_AT_PATTERN = re.compile(r"look at (?P<target>.+?) and (?P<action>.+)", re.IGNORECASE)
+STATUS_TRIGGERS = ["what are you doing", "what are you looking at"]
 
 CSV_PATH = os.path.join("config", "quick_responses.csv")
 NO_ACTION = {"", "none", "null"}
@@ -65,23 +71,10 @@ def _process(trigger: str) -> str:
         now = datetime.datetime.now()
         return f"Today is {now.strftime('%A, %d %B %Y')}."
 
-    if response == "OPEN_CHROME":
-        import subprocess
-        try:
-            subprocess.Popen("chrome.exe")
-            return "Opening Chrome."
-        except:
-            return "Couldn't find Chrome on your system."
-
-    if response == "OPEN_NOTEPAD":
-        import subprocess
-        subprocess.Popen("notepad.exe")
-        return "Opening Notepad."
-
-    if response == "OPEN_CALCULATOR":
-        import subprocess
-        subprocess.Popen("calc.exe")
-        return "Opening Calculator."
+    if response.startswith("OPEN_"):
+        from modules.command_handler import open_app  # deferred import avoids a circular import
+        app_name = response[len("OPEN_"):].replace("_", " ")
+        return open_app(app_name)
 
     if response == "SAVE_CLIPBOARD":
         from modules.knowledge import save_from_clipboard

@@ -310,6 +310,15 @@ def complete_task(task_id: int):
     conn.commit()
     conn.close()
 
+def uncomplete_task(task_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute('''
+        UPDATE tasks SET status='pending', done_at=NULL
+        WHERE id=?
+    ''', (task_id,))
+    conn.commit()
+    conn.close()
+
 def delete_task(task_id: int):
     conn = sqlite3.connect(DB_PATH)
     conn.execute('DELETE FROM tasks WHERE id=?', (task_id,))

@@ -37,13 +37,11 @@ def listen_continuous(callback):
     thread.start()
     return thread
 
-def listen() -> str | None:
+def listen(timeout: float = 1) -> str | None:
     with mic as source:
-        print("[AURA] Listening...")
         try:
-            audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
+            audio = recognizer.listen(source, timeout=timeout, phrase_time_limit=10)
             text = recognizer.recognize_google(audio)
-            print(f"[AURA] Heard: {text}")
             return text
         except sr.WaitTimeoutError:
             return None

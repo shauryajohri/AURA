@@ -3,7 +3,7 @@ from memory.store import (
     add_task, get_tasks, complete_task,
     delete_task, get_pending_tasks, get_task_summary
 )
-from core.ai_router import call_ollama
+from core.ai_router import call_claude
 
 def handle_add_task(query: str) -> str:
     query_clean = query.lower()
@@ -54,7 +54,7 @@ def handle_what_to_do(query: str) -> str:
 
     # ask AI to prioritize
     task_list = "\n".join([f"- {t[1]}" for t in pending])
-    response = call_ollama(f"""
+    response = call_claude(f"""
 The user has these pending tasks:
 {task_list}
 

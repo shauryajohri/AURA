@@ -4,6 +4,9 @@ import subprocess
 import time
 from pathlib import Path
 
+from modules import screen_reader
+from modules.csv_handler import LOOK_AT_PATTERN, STATUS_TRIGGERS
+
 APP_CACHE_TTL = 300
 EXECUTABLE_EXTENSIONS = {".exe", ".bat", ".cmd", ".com"}
 SHORTCUT_EXTENSIONS = {".lnk", ".url"}
@@ -206,6 +209,21 @@ def handle_command(query: str) -> str | None:
         "can you open ", "please open ", "can u open ",
         "open ", "launch ", "start ", "run "
     ]
+    look_match = LOOK_AT_PATTERN.search(q)
+    if look_match:
+        target = look_match.group("target").strip()
+        action = look_match.group("action").strip()
+        window = screen_reader.find_window(target)
+        if not window:
+            return f"I can't find a window for {target} right now."
+        screen_reader.set_current_focus(window.title, action)
+        context = screen_reader.get_screen_context(target)
+        # TODO: hand `context["visible_text"]` to your LLM/thinking module
+        # along with `action` to actually do the debugging analysis.
+        return f"Looking at {window.title} now to {action}."
+
+    if any(trigger in q for trigger in STATUS_TRIGGERS):
+        return screen_reader.describe_current_focus()
     for trigger in open_triggers:
         if trigger in q:
             app_name = q.split(trigger, 1)[1].strip("?. ")

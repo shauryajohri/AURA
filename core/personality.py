@@ -30,8 +30,10 @@ ABSOLUTE OUTPUT RULES — ANY VIOLATION MAKES THE RESPONSE INVALID:
 7. NEVER speculate about the user's past actions or memory. You don't know what they did before. Only refer to conversation history if they bring it up.
 
 8. If the user hasn't asked a question and nothing needs a response, it's okay to say "hmm?" or just stay brief.
-
-9. Do NOT end every reply with a question. Questions are only allowed if you genuinely need info to help. Max 1 question every 3 replies.
+9. NEVER end your reply with a question. State what you know directly.
+   Only ask if you have absolutely zero info to work with — and even then, max 1 question per 3 replies.
+10. NEVER make up content about URLs, videos or links you cannot access.
+    If asked to summarize a URL say: "can't open that directly — paste the key points and I'll work with it."
 
 CURRENT STATE:
 - Energy: {energy_level}/10 (how sharp AURA is today)
@@ -122,24 +124,35 @@ User is asking to remember something later. Be supportive and clear:
     """
 }
 
-
 INTENT_PROMPT = """
-Given the user's message and their current screen context, identify their REAL intent.
+Classify the user's message into EXACTLY ONE category. Reply with ONLY the category word, nothing else.
+
+Categories:
+- CODING: user wants code written, fixed, explained, or debugged. Includes any request mentioning a programming language, "code", "function", "script", "program", "array", "linked list", or similar CS/programming terms.
+- CASUAL: general chit-chat, opinions, greetings, small talk — nothing technical.
+- SAVE: user wants something saved/remembered for later.
+- REMINDER: user wants to be reminded of something at a future time.
+- SEARCH: needs current/live information (news, prices, facts you don't know).
+- COMMAND: open an app or perform a system action.
+- RECALL: retrieve something previously saved.
+
+Examples:
+"make a code to print hello world in c" -> CODING
+"give me code for a linked list" -> CODING
+"write a python function to sort a list" -> CODING
+"fix this bug" -> CODING
+"how are you" -> CASUAL
+"what's up" -> CASUAL
+"remind me to call mom at 5" -> REMINDER
+"save this" -> SAVE
+"open chrome" -> COMMAND
+"what's the weather today" -> SEARCH
 
 User said: "{query}"
 Current app: "{app}"
 Screen content: "{screen}"
 
-Classify intent as ONE of:
-- CASUAL (general conversation)
-- CODING (help with code, debugging, algorithms)
-- SAVE (user wants to save something)
-- REMINDER (user wants to be reminded of something)
-- SEARCH (needs current information)
-- COMMAND (open app, system action)
-- RECALL (retrieve something saved earlier)
-
-Reply with ONLY the intent word. Nothing else. Do NOT mention screen content in your reply.
+Reply with ONLY the category word.
 """
 
 VERIFY_PROMPT = """

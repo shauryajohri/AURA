@@ -1,7 +1,8 @@
 import datetime
 import re
+
 import time
-from core.ai_router import call_claude, route, route_streaming
+from core.ai_router import call_claude, route, route_streaming, extract_code_block, call_classifier
 from core.thinking import think
 from memory import store
 from modules.csv_handler import check_csv
@@ -9,6 +10,7 @@ from modules.command_handler import handle_command
 from modules.speech_planner import plan, debug as plan_debug
 import modules.voice_output as tts
 from core.personality import (INTENT_PROMPT, VERIFY_PROMPT, ANTICIPATE_PROMPT, SHOULD_RESPOND_PROMPT, OUTPUT_GUARD_PROMPT)
+from core.thinking import think, post_think
 
 DEBUG_SPEECH = True
 
@@ -18,6 +20,16 @@ _last_context = {
     "clipboard": ""
 }
 _history = []
+_last_user_message_time = 0
+
+
+def get_last_user_message_time() -> float:
+    return _last_user_message_time
+
+
+def mark_user_active():
+    global _last_user_message_time
+    _last_user_message_time = time.time()
 
 def update_context(ctx: dict):
     global _last_context
@@ -67,7 +79,9 @@ def classify_intent(query: str) -> str:
         app=_last_context["app"],
         screen=_last_context["visible_text"][:300]
     )
-    intent = call_claude(prompt).strip().upper()
+    intent = call_classifier(prompt)
+    intent = re.sub(r"[^A-Z]", "", intent)  # strip punctuation, whitespace, etc.
+    print(f"[AURA] Raw classifier output: '{intent}'")
     valid = ["CASUAL", "CODING", "SAVE", "REMINDER", "SEARCH", "COMMAND", "RECALL"]
     return intent if intent in valid else "CASUAL"
 
@@ -77,10 +91,18 @@ def build_context_prompt(query: str, intent: str, thought_context: str) -> str:
         last = _history[-3:]
         history_text = "\n".join([f"{h['role']}: {h['text']}" for h in last])
 
+    # include screen context
+    screen_info = ""
+    if _last_context.get("app") and _last_context["app"] != "unknown":
+        screen_info = f"\nCurrently on: {_last_context['app']}"
+    if _last_context.get("visible_text"):
+        screen_info += f"\nVisible content: {_last_context['visible_text'][:300]}"
+
     thought_section = f"\nContext: {thought_context}" if thought_context else ""
 
     return f"""Recent conversation:
 {history_text}
+{screen_info}
 {thought_section}
 
 {query}"""
@@ -193,7 +215,8 @@ def process(query: str) -> str:
     return final_answer
 
 
-def process_streaming(query: str, on_chunk=None) -> str:
+def process_streaming(query: str, on_chunk=None, on_code=None) -> str:
+    mark_user_active()
     print(f"\n[AURA] Streaming: '{query}'")
     query_lower = query.lower()
 
@@ -240,23 +263,47 @@ def process_streaming(query: str, on_chunk=None) -> str:
         if on_chunk:
             on_chunk(result)
         return result
-
-    intent = classify_intent(query)
+    import re as _re
+    if _re.search(r'https?://', query):
+        intent = "SEARCH"
+    else:
+        intent = classify_intent(query)
     # thinking layer
-    from core.thinking import think, post_think
-    thought_context = think(query, intent, _last_context, _history)
-
-    full_prompt = build_context_prompt(query, intent, thought_context)
-
+    full_prompt = build_context_prompt(query, intent, "")
     if intent in {"RECALL", "SAVE"}:
         result = process(query)
         if on_chunk:
             on_chunk(result)
         return result
 
-    from core.thinking import think, post_think
-    thought_context = think(query, intent, _last_context, _history)
-    full_prompt = build_context_prompt(query, intent, thought_context)
+    if intent == "CODING":
+        raw_chunks = []
+        for chunk in route_streaming(intent, full_prompt):
+            raw_chunks.append(chunk)
+        raw = "".join(raw_chunks).strip()
+
+        if raw in {"CONNECTION_ERROR", "RATE_LIMIT"}:
+            msg = "Connection trouble — one sec." if raw == "CONNECTION_ERROR" \
+                  else "Hit my rate limit — give me a moment."
+            if on_chunk:
+                on_chunk(msg)
+            return msg
+
+        chat_part, lang, code = extract_code_block(raw)
+        chat_msg = chat_part if chat_part else "Here's the code:"
+
+        if on_chunk:
+            on_chunk(chat_msg)
+        if code and on_code:
+            on_code(lang, code)
+
+        store.save_conversation("user", query)
+        store.save_conversation("aura", chat_msg)
+        _history.append({"role": "user", "text": query})
+        _history.append({"role": "aura", "text": chat_msg})
+        post_think(query, chat_msg, intent)
+        return chat_msg
+
     chunks = []
     for chunk in route_streaming(intent, full_prompt):
         chunks.append(chunk)
@@ -277,7 +324,6 @@ def process_streaming(query: str, on_chunk=None) -> str:
     store.save_conversation("user", query)
     store.save_conversation("aura", final_answer)
     return final_answer
-
 
 def should_respond(text: str) -> bool:
     if check_csv(text):
@@ -309,5 +355,4 @@ def start_proactive(speak_fn=None, on_suggestion_fn=None):
         print("[AURA] Proactive module started (Donna is watching)")
     except Exception as e:
         print(f"[AURA] Proactive start error: {e}")
-        
-#use groq for chats
+    

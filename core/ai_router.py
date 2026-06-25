@@ -271,9 +271,9 @@ def route(intent: str, prompt: str) -> str:
         return call_groq_with_search(prompt, system)
     return call_groq(prompt, system, intent=intent)
 
-def route_streaming(intent: str, prompt: str):
+def route_streaming(intent: str, prompt: str, system_prompt: str | None = None):
     extra = INTENT_PERSONALITY_ADJUSTMENTS.get(intent, "")
-    system = DONNA_SYSTEM_PROMPT + extra
+    system = system_prompt if system_prompt is not None else DONNA_SYSTEM_PROMPT + extra
     for chunk in call_groq_streaming(prompt, system, intent=intent):
         yield chunk
 def call_groq(prompt: str, system: str = DONNA_SYSTEM_PROMPT, intent: str = "CASUAL") -> str:

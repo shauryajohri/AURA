@@ -134,8 +134,20 @@ def handle_focus_command(query: str) -> str | None:
         if trig in q:
             app_phrase = q.split(trig, 1)[1].strip(" .?!")
             if app_phrase:
+                from modules.decision_engine import evaluate_target, clarification_message
+                decision = evaluate_target(app_phrase)
+                print(f"[AURA] Target decision: {decision}")
+
+                if decision["requires_clarification"]:
+                    return clarification_message(decision)
+
+                # Lock onto the short phrase the user said — this stays
+                # robust against title changes (tab switches, etc).
+                # resolved_app is only used for the spoken confirmation,
+                # never as the actual stored lock value.
                 set_app_lock(app_phrase)
-                return f"Locked on to {app_phrase}. Ignoring everything else."
+                confirm_name = decision["resolved_app"] or app_phrase
+                return f"Locked on to {confirm_name}. Ignoring everything else."
 
     return None
 def process(query: str) -> str:
@@ -322,6 +334,12 @@ def process_streaming(query: str, on_chunk=None, on_code=None) -> str:
         return result
 
     if intent == "CODING":
+        from modules.project_context import get_relevant_context
+        project_ctx = get_relevant_context(query)
+        if project_ctx:
+            full_prompt = f"Relevant code from the AURA project:\n{project_ctx}\n\n{full_prompt}"
+            print(f"[AURA] Injected project context ({len(project_ctx)} chars)")
+
         raw_chunks = []
         for chunk in route_streaming(intent, full_prompt):
             raw_chunks.append(chunk)

@@ -260,7 +260,7 @@ def process(query: str) -> str:
     return final_answer
 
 
-def process_streaming(query: str, on_chunk=None, on_code=None) -> str:
+def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: str | None = None) -> str:
     mark_user_active()
     print(f"\n[AURA] Streaming: '{query}'")
     query_lower = query.lower()
@@ -321,12 +321,14 @@ def process_streaming(query: str, on_chunk=None, on_code=None) -> str:
     except Exception as e:
         print(f"[AURA] Screen context refresh error: {e}")
     import re as _re
-    if _re.search(r'https?://', query):
+    if system_prompt is not None:
+        intent = "CODING" if "code" in system_prompt.lower() or "software engineer" in system_prompt.lower() else "CASUAL"
+    elif _re.search(r'https?://', query):
         intent = "SEARCH"
     else:
         intent = classify_intent(query)
     # thinking layer
-    full_prompt = build_context_prompt(query, intent, "")
+    full_prompt = query if system_prompt is not None else build_context_prompt(query, intent, "")
     if intent in {"RECALL", "SAVE"}:
         result = process(query)
         if on_chunk:
@@ -341,7 +343,7 @@ def process_streaming(query: str, on_chunk=None, on_code=None) -> str:
             print(f"[AURA] Injected project context ({len(project_ctx)} chars)")
 
         raw_chunks = []
-        for chunk in route_streaming(intent, full_prompt):
+        for chunk in route_streaming(intent, full_prompt, system_prompt=system_prompt):
             raw_chunks.append(chunk)
         raw = "".join(raw_chunks).strip()
 
@@ -368,7 +370,7 @@ def process_streaming(query: str, on_chunk=None, on_code=None) -> str:
         return chat_msg
 
     chunks = []
-    for chunk in route_streaming(intent, full_prompt):
+    for chunk in route_streaming(intent, full_prompt, system_prompt=system_prompt):
         chunks.append(chunk)
         if on_chunk and chunk not in {"CONNECTION_ERROR", "RATE_LIMIT"}:
             on_chunk(chunk)

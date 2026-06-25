@@ -352,6 +352,12 @@ class MainWindow(QWidget):
         layout.addStretch()
         return panel
 
+    def set_plan_panel(self, panel: QWidget):
+        panel.setParent(self)
+        panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        self._activity_container.insertWidget(0, panel)
+        panel.hide()
+
     # ── Public API ────────────────────────────────────────────────────────
     def append_message(self, text: str, sender: str):
         bubble = ChatBubble(text, sender)

@@ -1,0 +1,17 @@
+[33m6863bc6[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m fix: surface real Groq API errors, add window targeting, proactive offer context
+[33m1b57dd5[m fix: load dotenv before reading API key
+[33mc66a2cc[m feat: add thinking layer, session memory, proactive upgrade, groq integration
+[33m834fed0[m[33m ([m[1;31morigin/main[m[33m)[m Fix quick responses and proactive assistant
+[33me3f4c2f[m Personality update — task system, edge-tts, UI fixes
+[33m6779c66[m Phase 5 — ghost text streaming system with real-time response generation
+[33maa1a75c[m Phase 4 — personality evolution system with adaptive state and intent-coupling
+[33mbf87a91[m Phase 3 — screen reader, knowledge base, proactive suggestions
+[33m36681d8[m Phase 3 — screen reader, knowledge base, proactive suggestions
+[33mf8e1ee2[m Phase 3 — screen reader, knowledge base, proactive suggestions
+[33m29cac84[m Phase 3 complete — forex module with live prices and RSI
+[33ma00c903[m Phase 3 — screen reader, knowledge base, proactive suggestions
+[33m10db222[m Phase 2 complete — chat UI, voice I/O, floating orb
+[33m9b6dc10[m Resolved .gitignore merge conflict
+[33m04b6aee[m Initial commit
+[33m2c9e31b[m Initial commit - AURA backend structure
+[33mda16b3e[m Added gitignore

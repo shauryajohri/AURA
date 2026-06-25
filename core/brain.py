@@ -1,7 +1,7 @@
 import datetime
 import re
-
 import time
+from modules.proactive import set_app_lock, clear_app_lock, get_app_lock
 from core.ai_router import call_claude, route, route_streaming, extract_code_block, call_classifier
 from core.thinking import think
 from memory import store
@@ -115,9 +115,37 @@ def anticipate(answer: str) -> str | None:
     result = call_claude(prompt).strip()
     return None if (result == "NONE" or not result) else result
 
+LOCK_TRIGGERS = ["aura see", "aura watch", "aura focus on", "aura lock to", "aura look at"]
+UNLOCK_PHRASES = [
+    "aura see everything", "aura unlock", "aura stop watching",
+    "aura unfocus", "aura stop focusing", "aura watch everything"
+]
+
+def handle_focus_command(query: str) -> str | None:
+    q = query.lower().strip()
+
+    if any(p in q for p in UNLOCK_PHRASES):
+        if get_app_lock():
+            clear_app_lock()
+            return "Back to watching everything."
+        return None
+
+    for trig in LOCK_TRIGGERS:
+        if trig in q:
+            app_phrase = q.split(trig, 1)[1].strip(" .?!")
+            if app_phrase:
+                set_app_lock(app_phrase)
+                return f"Locked on to {app_phrase}. Ignoring everything else."
+
+    return None
 def process(query: str) -> str:
     print(f"\n[AURA] Processing: '{query}'")
     query_lower = query.lower()
+    focus_response = handle_focus_command(query)
+    if focus_response:
+        store.save_conversation("user", query)
+        store.save_conversation("aura", focus_response)
+        return focus_response
 
     if any(w in query_lower for w in ["add task", "new task", "i need to", "todo", "add a task", "remind me to"]):
         from modules.tasks import handle_add_task
@@ -166,6 +194,11 @@ def process(query: str) -> str:
         return result
 
     # TIER 2 — intent routing
+    try:
+        from modules.screen_reader import get_screen_context
+        update_context(get_screen_context())
+    except Exception as e:
+        print(f"[AURA] Screen context refresh error: {e}")
     intent = classify_intent(query)
     print(f"[AURA] Intent: {intent}")
 
@@ -219,6 +252,13 @@ def process_streaming(query: str, on_chunk=None, on_code=None) -> str:
     mark_user_active()
     print(f"\n[AURA] Streaming: '{query}'")
     query_lower = query.lower()
+    focus_response = handle_focus_command(query)
+    if focus_response:
+        store.save_conversation("user", query)
+        store.save_conversation("aura", focus_response)
+        if on_chunk:
+            on_chunk(focus_response)
+        return focus_response
 
     if any(w in query_lower for w in ["add task", "new task", "i need to", "todo", "add a task", "remind me to"]):
         from modules.tasks import handle_add_task
@@ -263,6 +303,11 @@ def process_streaming(query: str, on_chunk=None, on_code=None) -> str:
         if on_chunk:
             on_chunk(result)
         return result
+    try:
+        from modules.screen_reader import get_screen_context
+        update_context(get_screen_context())
+    except Exception as e:
+        print(f"[AURA] Screen context refresh error: {e}")
     import re as _re
     if _re.search(r'https?://', query):
         intent = "SEARCH"

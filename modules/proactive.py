@@ -305,6 +305,28 @@ def _decide(ctx: dict) -> tuple[str, str]:
 
     return "silent", task
 
+def _decide_locked_distracted(ctx: dict) -> tuple[str, str]:
+    """Decision logic while locked, but the user has actually switched
+    to a different app. This is the main thing the lock is for."""
+    global _last_suggestion_time
+
+    now = time.time()
+    task = ctx.get("app", "unknown")
+
+    try:
+        from core.brain import get_last_user_message_time
+        last_msg_time = get_last_user_message_time()
+        if last_msg_time and (now - last_msg_time) < USER_ACTIVE_SILENCE:
+            return "silent", task
+    except Exception as e:
+        print(f"[AURA Proactive] Active-check error: {e}")
+
+    if now - _last_suggestion_time < LOCKED_CHECKIN_INTERVAL:
+        return "silent", task
+
+    _last_suggestion_time = now
+    return "locked_distracted", task
+
 def _decide_locked(ctx: dict) -> tuple[str, str]:
     """Decision logic while locked onto a single app. Skips the normal
     flow/variety checks — there's only one app, so 'in flow' never applies."""
@@ -415,7 +437,25 @@ LOCKED_IDLE_LINES = [
     "quiet over here on {app}. you still with me?",
     "you locked me onto {app} and then vanished. classic.",
 ]
+LOCKED_DISTRACTED_PROMPT = """You are AURA. The user told you to lock onto {locked_app} and watch only that, but they've now switched away to a different app: {current_app}.
 
+Locked app (what they asked you to watch): {locked_app}
+Current active app (where they actually are): {current_app}
+
+Write ONE short, dry, Donna-style line calling out that they wandered off to {current_app} instead of {locked_app}.
+
+Rules:
+- Max 2 sentences, no quotes around the line
+- Casual, a little teasing, not annoyed
+- Reference both apps by name naturally
+"""
+
+LOCKED_DISTRACTED_LINES = [
+    "you locked me onto {locked_app} and then went straight to {current_app}. okay then.",
+    "still watching {locked_app} like you asked — but you're over on {current_app} now.",
+    "{current_app}? I thought we were doing {locked_app}.",
+    "drifted off to {current_app}, huh. {locked_app}'s still waiting.",
+]
 def _screen_text_is_usable(text: str) -> bool:
     """Reject OCR text that's too short, fragmented, or noisy to safely reference."""
     if not text or len(text.strip()) < 25:
@@ -477,7 +517,24 @@ def generate_message(action: str, task: str, ctx: dict) -> str | None:
         return ai_msg or _pick_line(LOCKED_IDLE_LINES, task)
     elif action == "locked_activity":
         return _ai_generate_message(action, task, ctx, LOCKED_ACTIVITY_PROMPT)
+    elif action == "locked_distracted":
+        current_app = ctx.get("app", "unknown")
+        try:
+            from core.ai_router import call_groq
+            prompt = LOCKED_DISTRACTED_PROMPT.format(
+                locked_app=_locked_app,
+                current_app=current_app
+            )
+            result = call_groq(prompt, intent="CASUAL").strip()
+            result = result.strip('"').strip("'").strip()
+            if result and result.upper() not in {"CONNECTION_ERROR", "RATE_LIMIT", ""}:
+                return result
+        except Exception as e:
+            print(f"[AURA Proactive] AI message error: {e}")
+        line = random.choice(LOCKED_DISTRACTED_LINES)
+        return line.replace("{locked_app}", _locked_app or "that").replace("{current_app}", current_app)
     return None
+    
 
 
 # ── Loop ──────────────────────────────────────────────────────────────────────
@@ -495,11 +552,11 @@ def _loop(speak_fn, on_suggestion_fn=None):
             # app lock — if locked, completely skip cycles where the
             # active app isn't the locked one. No state changes happen
             # for ignored apps, so switching back picks up cleanly.
-            if _locked_app and _locked_app not in ctx.get("app", "").lower():
-                continue
-
             if _locked_app:
-                action, task = _decide_locked(ctx)
+                if _locked_app not in ctx.get("app", "").lower():
+                    action, task = _decide_locked_distracted(ctx)
+                else:
+                    action, task = _decide_locked(ctx)
             else:
                 action, task = _decide(ctx)
             if action == "silent":

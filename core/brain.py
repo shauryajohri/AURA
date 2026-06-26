@@ -334,7 +334,14 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
         if on_chunk:
             on_chunk(observation_followup)
         return observation_followup
-
+    if "afk" in query_lower:
+          from modules.command_handler import describe_afk_status
+          result = describe_afk_status()
+          store.save_conversation("user", query)
+          store.save_conversation("aura", result)
+          if on_chunk:
+              on_chunk(result)
+          return result
     if any(w in query_lower for w in ["add task", "new task", "i need to", "todo", "add a task", "remind me to"]):
         from modules.tasks import handle_add_task
         result = handle_add_task(query)

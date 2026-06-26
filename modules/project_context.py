@@ -175,6 +175,21 @@ def _ensure_index():
     if _index is None:
         _build_or_update_index()
 
+def _extract_task_query(query: str) -> str:
+    """
+    If the query is a compiled prompt from the prompt engine,
+    extract just the Task: line for embedding — not the whole
+    plan text which confuses the retriever.
+    Falls back to the raw query if no Task: line found.
+    """
+    for line in query.splitlines():
+        line = line.strip()
+        if line.startswith("Task:"):
+            task = line[len("Task:"):].strip()
+            if task:
+                return task
+    # Not a compiled prompt — return as-is (normal user message)
+    return query
 
 def get_relevant_context(query: str, top_k: int = TOP_K) -> str:
     """
@@ -192,7 +207,8 @@ def get_relevant_context(query: str, top_k: int = TOP_K) -> str:
 
     try:
         import numpy as np
-        query_vec = model.encode([query], convert_to_numpy=True, show_progress_bar=False)[0]
+        search_query = _extract_task_query(query)
+        query_vec = model.encode([search_query], convert_to_numpy=True, show_progress_bar=False)[0]
 
         scored = []
         for entry in _index:

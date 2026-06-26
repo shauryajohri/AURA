@@ -436,7 +436,7 @@ class MainWindow(QWidget):
 
     def append_code(self, lang: str, code: str):
         header = f"# ── {lang.upper()} ──────────────────────\n" if lang else ""
-        self._code_view.append(header + code + "\n")
+        self._code_view.setPlainText(header + code)
 
     def add_activity_note(self, text: str):
         ts = time.strftime("%H:%M")

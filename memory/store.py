@@ -110,44 +110,6 @@ def analyze_conversation_patterns(limit: int = 50) -> dict:
     }
 
 
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS knowledge (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            title       TEXT NOT NULL,
-            content     TEXT NOT NULL,
-            summary     TEXT,
-            tags        TEXT,
-            source      TEXT DEFAULT 'user',
-            created_at  TEXT
-        )
-    ''')
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS reminders (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            text        TEXT NOT NULL,
-            remind_at   TEXT NOT NULL,
-            done        INTEGER DEFAULT 0,
-            created_at  TEXT
-        )
-    ''')
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS conversations (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            role        TEXT NOT NULL,
-            message     TEXT NOT NULL,
-            created_at  TEXT
-        )
-    ''')
-
-    conn.commit()
-    conn.close()
-
-
 def save_entry(title: str, content: str, summary: str = "",
                tags: str = "general", source: str = "user"):
     conn = sqlite3.connect(DB_PATH)
@@ -245,6 +207,41 @@ def get_recent_conversations(limit: int = 10) -> list:
     results = cursor.fetchall()
     conn.close()
     return list(reversed(results))
+
+
+# ── NEW: curiosity engine read-only helpers ──────────────────────────────────
+# Additive only — nothing above this changes behavior. Both read from the
+# existing `conversations` table, no schema changes.
+
+def get_conversations_since(minutes: int = 60) -> list:
+    """Conversations from the last N minutes — used by curiosity engine
+    for pattern detection without re-reading the whole history each cycle."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cutoff = (datetime.datetime.now() - datetime.timedelta(minutes=minutes)).isoformat()
+    cursor.execute('''
+        SELECT role, message, created_at
+        FROM conversations
+        WHERE created_at >= ?
+        ORDER BY created_at ASC
+    ''', (cutoff,))
+    results = cursor.fetchall()
+    conn.close()
+    return results
+
+
+def count_recent_restarts(window_minutes: int = 60, keyword: str = "restart") -> int:
+    """Lightweight pattern-curiosity helper: counts how many user messages
+    in the recent window mention restart/rerun/crash-adjacent language."""
+    rows = get_conversations_since(window_minutes)
+    keywords = [keyword] if keyword != "restart" else [
+        "restart", "rerun", "crash", "crashed", "won't start", "keeps failing"
+    ]
+    return sum(
+        1 for role, msg, _ in rows
+        if role == "user" and any(k in msg.lower() for k in keywords)
+    )
+
 
 # initialize database on import
 init_db()
@@ -408,26 +405,6 @@ def save_session_snapshot(app: str, summary: str, topics: list):
     conn.close()
     print(f"[AURA Memory] Session snapshot saved")
 
-def save_session_snapshot(app: str, summary: str, topics: list):
-    """Save what user was doing when AURA closes"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS session_snapshots (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            app         TEXT,
-            summary     TEXT,
-            topics      TEXT,
-            created_at  TEXT
-        )
-    ''')
-    cursor.execute('''
-        INSERT INTO session_snapshots (app, summary, topics, created_at)
-        VALUES (?, ?, ?, ?)
-    ''', (app, summary, ",".join(topics), datetime.datetime.now().isoformat()))
-    conn.commit()
-    conn.close()
-    print(f"[AURA Memory] Session snapshot saved")
 
 def get_last_session() -> dict | None:
     """Retrieve what user was doing in the last session"""
@@ -453,32 +430,8 @@ def get_last_session() -> dict | None:
     except:
         conn.close()
         return None
-    
-def get_last_session() -> dict | None:
-    """Retrieve what user was doing in the last session"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    try:
-        cursor.execute('''
-            SELECT app, summary, topics, created_at
-            FROM session_snapshots
-            ORDER BY created_at DESC
-            LIMIT 1
-        ''')
-        row = cursor.fetchone()
-        conn.close()
-        if not row:
-            return None
-        return {
-            "app": row[0],
-            "summary": row[1],
-            "topics": row[2].split(",") if row[2] else [],
-            "created_at": row[3]
-        }
-    except:
-        conn.close()
-        return None
-    
+
+
 def save_working_memory(data: str):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -517,5 +470,6 @@ def get_working_memory() -> dict | None:
     except:
         conn.close()
         return None
+
 init_db()
 init_tasks()

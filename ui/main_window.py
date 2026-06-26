@@ -3,7 +3,8 @@
 import time
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea,
-    QLineEdit, QPushButton, QFrame, QSizePolicy, QSplitter, QTextEdit
+    QLineEdit, QPushButton, QFrame, QSizePolicy, QSplitter, QTextEdit,
+    QStackedWidget
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
@@ -14,6 +15,7 @@ from ui.theme import (
     panel_stylesheet, display_font, body_font, mono_font
 )
 from ui.orb import OrbWidget
+from ui.tasks_panel import TasksPanel
 
 
 class GlassPanel(QFrame):
@@ -104,12 +106,161 @@ class MainWindow(QWidget):
         body.setContentsMargins(16, 12, 16, 16)
         body.setSpacing(14)
 
-        body.addWidget(self._build_orb_panel(), stretch=3)
-        body.addWidget(self._build_conversation_panel(), stretch=5)
-        body.addWidget(self._build_code_panel(), stretch=4)
-        body.addWidget(self._build_memory_panel(), stretch=3)
+        main_stack = self._build_main_stack()
+        left_column = self._build_left_column()
+
+        body.addWidget(left_column, stretch=3)
+        body.addWidget(main_stack, stretch=9)
 
         root.addLayout(body)
+
+    def _build_main_stack(self) -> QWidget:
+        """Center+right area as a QStackedWidget: Chat view (center
+        placeholder + code panel + conversation) on one page, Tasks panel
+        taking over the full area on the other. Nav buttons flip between
+        them; nothing else about either view's internals changes."""
+        self._main_stack = QStackedWidget()
+
+        chat_view = QWidget()
+        chat_layout = QHBoxLayout(chat_view)
+        chat_layout.setContentsMargins(0, 0, 0, 0)
+        chat_layout.setSpacing(14)
+        chat_layout.addWidget(self._build_center_column(), stretch=4)
+        chat_layout.addWidget(self._build_conversation_panel(), stretch=5)
+
+        self._tasks_panel = TasksPanel()
+
+        self._main_stack.addWidget(chat_view)     # index 0
+        self._main_stack.addWidget(self._tasks_panel)  # index 1
+
+        return self._main_stack
+
+    def _build_left_column(self) -> QWidget:
+        """Left sidebar: orb block on top, nav placeholders, Memory & Activity
+        merged in below. Single glass panel, stacked vertically — outline only,
+        no animation, matching the structural placement of the reference's
+        left rail (just without the glow/orbit visuals)."""
+        panel = GlassPanel(radius=20)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(16)
+
+        layout.addWidget(self._build_orb_block())
+        layout.addWidget(self._build_nav_block())
+        layout.addWidget(self._build_memory_block(), stretch=1)
+
+        return panel
+
+    def _build_nav_block(self) -> QWidget:
+        """Nav buttons, stacked. Chat and Tasks actually switch the main
+        view; Home/Memory/Settings stay visual-only placeholders for now."""
+        wrap = QWidget()
+        layout = QVBoxLayout(wrap)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        self._nav_buttons = {}
+        nav_items = ["Home", "Chat", "Tasks", "Memory", "Settings"]
+        for name in nav_items:
+            btn = QPushButton(name)
+            btn.setFixedHeight(38)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(lambda checked=False, n=name: self._on_nav_clicked(n))
+            layout.addWidget(btn)
+            self._nav_buttons[name] = btn
+
+        self._active_nav = "Chat"
+        self._refresh_nav_styles()
+
+        return wrap
+
+    def _on_nav_clicked(self, name: str):
+        if name == "Chat":
+            self._main_stack.setCurrentIndex(0)
+            self._active_nav = "Chat"
+        elif name == "Tasks":
+            self._tasks_panel.refresh()
+            self._main_stack.setCurrentIndex(1)
+            self._active_nav = "Tasks"
+        else:
+            # Home / Memory / Settings: no view wired up yet — just track
+            # which one looks selected.
+            self._active_nav = name
+        self._refresh_nav_styles()
+
+    def _refresh_nav_styles(self):
+        for name, btn in self._nav_buttons.items():
+            btn.setStyleSheet(self._nav_button_style(name == self._active_nav))
+
+    def _nav_button_style(self, active: bool) -> str:
+        if active:
+            return f"""
+                QPushButton {{
+                    background-color: {EVENT_VIOLET};
+                    color: {TEXT_PRIMARY};
+                    border: 1px solid {ACCRETION_BLUE};
+                    border-radius: 8px;
+                    text-align: left;
+                    padding: 0 14px;
+                    font-weight: 600;
+                    font-size: 13px;
+                }}
+            """
+        return f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {TEXT_SECONDARY};
+                border: 1px solid transparent;
+                border-radius: 8px;
+                text-align: left;
+                padding: 0 14px;
+                font-size: 13px;
+            }}
+            QPushButton:hover {{
+                background-color: rgba(255,255,255,0.04);
+                color: {TEXT_PRIMARY};
+            }}
+        """
+
+    def _build_memory_block(self) -> QWidget:
+        """Memory & Activity, merged into the left column instead of its
+        own far-right panel. Same _activity_container and set_plan_panel
+        hookup as before, so app.py's wiring keeps working unchanged."""
+        wrap = QWidget()
+        layout = QVBoxLayout(wrap)
+        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(12)
+
+        header = QLabel("Memory & Activity")
+        header.setFont(display_font(13))
+        header.setStyleSheet(f"color: {TEXT_PRIMARY};")
+        layout.addWidget(header)
+
+        self._activity_container = QVBoxLayout()
+        self._activity_container.setSpacing(8)
+        layout.addLayout(self._activity_container)
+        layout.addStretch()
+        return wrap
+
+    def _build_center_column(self) -> QWidget:
+        """Center column: empty placeholder panel on top, shrunk Code panel
+        on the bottom half."""
+        wrap = QWidget()
+        layout = QVBoxLayout(wrap)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(14)
+
+        layout.addWidget(self._build_placeholder_panel(), stretch=1)
+        layout.addWidget(self._build_code_panel(), stretch=1)
+
+        return wrap
+
+    def _build_placeholder_panel(self) -> QWidget:
+        panel = GlassPanel(radius=20)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.addStretch()
+        return panel
 
     def _build_title_bar(self) -> QWidget:
         bar = QWidget()
@@ -162,14 +313,17 @@ class MainWindow(QWidget):
         btn.clicked.connect(on_click)
         return btn
 
-    def _build_orb_panel(self) -> QWidget:
-        panel = GlassPanel(radius=20)
+    def _build_orb_block(self) -> QWidget:
+        """Orb + presence + voice status + mic, now nested at the top of
+        the left column instead of its own full-height panel. Same widget
+        names/signals as before (_orb_panel_layout, dock_orb, etc.) so
+        app.py's orb docking keeps working unchanged."""
+        panel = QWidget()
         layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(18)
+        layout.setSpacing(14)
         self._orb_panel_layout = layout
-
-        layout.addStretch()
 
         # ── Presence indicator ───────────────────────────────────────────
         presence_row = QHBoxLayout()
@@ -219,7 +373,6 @@ class MainWindow(QWidget):
         self._mic_btn.clicked.connect(self._toggle_mic)
         layout.addWidget(self._mic_btn, alignment=Qt.AlignCenter)
 
-        layout.addStretch()
         return panel
 
     def _set_presence_style(self, state: str):
@@ -280,7 +433,7 @@ class MainWindow(QWidget):
             return
         self._orb.setParent(None)
         self._orb.setWindowFlags(Qt.Widget)
-        self._orb_panel_layout.insertWidget(1, self._orb, alignment=Qt.AlignCenter)
+        self._orb_panel_layout.insertWidget(0, self._orb, alignment=Qt.AlignCenter)
         self._orb.show()
         self._orb.update()
 
@@ -402,23 +555,6 @@ class MainWindow(QWidget):
 
     def _clear_code(self):
         self._code_view.clear()
-
-    def _build_memory_panel(self) -> QWidget:
-        panel = GlassPanel(radius=20)
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
-
-        header = QLabel("Memory & Activity")
-        header.setFont(display_font(13))
-        header.setStyleSheet(f"color: {TEXT_PRIMARY};")
-        layout.addWidget(header)
-
-        self._activity_container = QVBoxLayout()
-        self._activity_container.setSpacing(8)
-        layout.addLayout(self._activity_container)
-        layout.addStretch()
-        return panel
 
     def set_plan_panel(self, panel: QWidget):
         panel.setParent(self)

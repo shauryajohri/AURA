@@ -237,6 +237,13 @@ def process(query: str) -> str:
         store.save_conversation("aura", result)
         speak_response(result, "COMMAND")
         return result
+    if any(w in query_lower for w in ["check for error", "any error", "is there an error", "errors?", "any errors"]):
+        from modules.error_detector import handle_error_check
+        result = handle_error_check(query)
+        store.save_conversation("user", query)
+        store.save_conversation("aura", result)
+        speak_response(result, "COMMAND")
+        return result
 
     # TIER 1 — instant, no AI
     csv_response = check_csv(query)
@@ -363,6 +370,14 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
     if any(w in query_lower for w in ["remove task", "delete task", "cancel task"]):
         from modules.tasks import handle_remove_task
         result = handle_remove_task(query)
+        store.save_conversation("user", query)
+        store.save_conversation("aura", result)
+        if on_chunk:
+            on_chunk(result)
+        return result
+    if any(w in query_lower for w in ["check for error", "any error", "is there an error", "errors?", "any errors"]):
+        from modules.error_detector import handle_error_check
+        result = handle_error_check(query)
         store.save_conversation("user", query)
         store.save_conversation("aura", result)
         if on_chunk:

@@ -45,6 +45,7 @@ if __name__ == "__main__":
 
     start_proactive(
         speak_fn=speak,
-        on_suggestion_fn=bridge.suggestionReceived.emit
+        on_suggestion_fn=bridge.suggestionReceived.emit,
+        on_presence_fn=controller.presenceChanged.emit,
     )
     sys.exit(app.exec())

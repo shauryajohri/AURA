@@ -21,6 +21,7 @@ _last_context = {
 }
 _history = []
 _last_user_message_time = 0
+_pending_observation = None
 
 
 def get_last_user_message_time() -> float:
@@ -30,6 +31,11 @@ def get_last_user_message_time() -> float:
 def mark_user_active():
     global _last_user_message_time
     _last_user_message_time = time.time()
+    try:
+        from modules.proactive import record_user_activity
+        record_user_activity()
+    except Exception:
+        pass
 
 def update_context(ctx: dict):
     global _last_context
@@ -122,6 +128,7 @@ UNLOCK_PHRASES = [
 ]
 
 def handle_focus_command(query: str) -> str | None:
+    global _pending_observation
     q = query.lower().strip()
 
     if any(p in q for p in UNLOCK_PHRASES):
@@ -147,9 +154,57 @@ def handle_focus_command(query: str) -> str | None:
                 # never as the actual stored lock value.
                 set_app_lock(app_phrase)
                 confirm_name = decision["resolved_app"] or app_phrase
-                return f"Locked on to {confirm_name}. Ignoring everything else."
+                try:
+                    from modules.screen_reader import get_screen_context
+                    from modules.screen_observer import build_observation_reply, summarize_visible_issue
+                    context = get_screen_context(app_phrase)
+                    update_context(context)
+                    issue = summarize_visible_issue(context)
+                    _pending_observation = {
+                        "app": confirm_name,
+                        "context": context,
+                        "issue": issue,
+                    } if issue else None
+                    return build_observation_reply(confirm_name, "observe", context)
+                except Exception as e:
+                    print(f"[AURA] Focus observation error: {e}")
+                    return (
+                        f"Looking at {confirm_name} now. "
+                        "Do you want me to watch it for errors?"
+                    )
 
     return None
+
+
+def handle_observation_followup(query: str) -> str | None:
+    global _pending_observation
+    if not _pending_observation:
+        return None
+
+    q = query.lower().strip(" .?!")
+    if q in {"no", "nope", "nah", "not now", "cancel", "stop"}:
+        _pending_observation = None
+        return "Okay, I’ll just keep watching."
+
+    if q not in {"yes", "yeah", "yep", "sure", "ok", "okay", "please do"}:
+        return None
+
+    observation = _pending_observation
+    _pending_observation = None
+    visible_text = observation.get("context", {}).get("visible_text", "")
+    app = observation.get("app", "that window")
+    prompt = (
+        f"The user asked me to look at {app}. I saw this screen/terminal text:\n"
+        f"{visible_text}\n\n"
+        "Briefly explain the likely problem and suggest what could be changed. "
+        "Do not write a full code file. Ask before making changes."
+    )
+    answer = route("CASUAL", prompt)
+    if answer in {"CONNECTION_ERROR", "RATE_LIMIT"} or answer.startswith("ERROR"):
+        return "I saw the error, but the model connection stumbled. Paste the terminal text and I’ll reason from it."
+    return guard_output(answer)
+
+
 def process(query: str) -> str:
     print(f"\n[AURA] Processing: '{query}'")
     query_lower = query.lower()
@@ -272,6 +327,14 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
             on_chunk(focus_response)
         return focus_response
 
+    observation_followup = handle_observation_followup(query)
+    if observation_followup:
+        store.save_conversation("user", query)
+        store.save_conversation("aura", observation_followup)
+        if on_chunk:
+            on_chunk(observation_followup)
+        return observation_followup
+
     if any(w in query_lower for w in ["add task", "new task", "i need to", "todo", "add a task", "remind me to"]):
         from modules.tasks import handle_add_task
         result = handle_add_task(query)
@@ -321,14 +384,27 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
     except Exception as e:
         print(f"[AURA] Screen context refresh error: {e}")
     import re as _re
+
+    # If a system_prompt was passed, this is a compiled prompt from the engine.
+    # Use the system_prompt to determine intent properly, and use the query
+    # (which IS the compiled user prompt) as-is - don't wrap it in context.
     if system_prompt is not None:
-        intent = "CODING" if "code" in system_prompt.lower() or "software engineer" in system_prompt.lower() else "CASUAL"
+        sp_lower = system_prompt.lower()
+        if any(w in sp_lower for w in ["software engineer", "code", "coding", "implement"]):
+            intent = "CODING"
+        elif "research" in sp_lower:
+            intent = "SEARCH"
+        elif "writer" in sp_lower or "writing" in sp_lower:
+            intent = "CASUAL"
+        else:
+            intent = "CASUAL"
+        full_prompt = query
     elif _re.search(r'https?://', query):
         intent = "SEARCH"
+        full_prompt = build_context_prompt(query, intent, "")
     else:
         intent = classify_intent(query)
-    # thinking layer
-    full_prompt = query if system_prompt is not None else build_context_prompt(query, intent, "")
+        full_prompt = build_context_prompt(query, intent, "")
     if intent in {"RECALL", "SAVE"}:
         result = process(query)
         if on_chunk:
@@ -406,7 +482,7 @@ def should_respond(text: str) -> bool:
     except:
         return True
 
-def start_proactive(speak_fn=None, on_suggestion_fn=None):
+def start_proactive(speak_fn=None, on_suggestion_fn=None, on_presence_fn=None):
     """Start the Donna-style proactive loop."""
     if speak_fn is None:
         def speak_fn(text):
@@ -415,7 +491,8 @@ def start_proactive(speak_fn=None, on_suggestion_fn=None):
         import modules.proactive as proactive
         proactive.start_proactive_loop(
             speak_fn=speak_fn,
-            on_suggestion_fn=on_suggestion_fn
+            on_suggestion_fn=on_suggestion_fn,
+            on_presence_fn=on_presence_fn,
         )
         print("[AURA] Proactive module started (Donna is watching)")
     except Exception as e:

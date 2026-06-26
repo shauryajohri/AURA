@@ -291,17 +291,19 @@ class ExecutionPlanPanel(QWidget):
         self.show()
 
     def _build_ui(self, s: dict):
-        # Clear previous layout if any
-        if self.layout():
-            old = self.layout()
-            while old.count():
-                item = old.takeAt(0)
-                if item.widget():
-                    item.widget().deleteLater()
-            self.setLayout(None)
-
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
+        outer = self.layout()
+        if outer is None:
+            outer = QVBoxLayout(self)
+            outer.setContentsMargins(0, 0, 0, 0)
+        else:
+            while outer.count():
+                item = outer.takeAt(0)
+                widget = item.widget()
+                child_layout = item.layout()
+                if widget:
+                    widget.deleteLater()
+                elif child_layout:
+                    self._clear_layout(child_layout)
 
         panel = QFrame()
         panel.setObjectName("planPanel")
@@ -435,7 +437,17 @@ class ExecutionPlanPanel(QWidget):
         panel_layout.addLayout(action_row)
 
         outer.addWidget(panel)
-        self.setLayout(outer)
+
+    def _clear_layout(self, layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            child_layout = item.layout()
+            if widget:
+                widget.deleteLater()
+            elif child_layout:
+                self._clear_layout(child_layout)
+        layout.deleteLater()
 
     def _on_approve(self):
         self.hide()

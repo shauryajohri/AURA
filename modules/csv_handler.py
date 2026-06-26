@@ -6,7 +6,7 @@ import re
 from urllib import response
 from modules import screen_reader
 
-LOOK_AT_PATTERN = re.compile(r"look at (?P<target>.+?) and (?P<action>.+)", re.IGNORECASE)
+LOOK_AT_PATTERN = re.compile(r"look at (?P<target>.+?)(?: and (?P<action>.+))?$", re.IGNORECASE)
 STATUS_TRIGGERS = ["what are you doing", "what are you looking at"]
 
 CSV_PATH = os.path.join("config", "quick_responses.csv")

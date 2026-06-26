@@ -1,5 +1,6 @@
 import difflib
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -202,6 +203,32 @@ def open_app(app_name: str) -> str:
         return f"I couldn't find {app_name_clean} on your system. Try saying the full app name once."
 
 
+def _clean_window_title(title: str, target: str) -> str:
+    title = " ".join((title or "").split())
+    target_lower = target.lower()
+    parts = [p.strip() for p in re.split(r"\s[-|—–]\s", title) if p.strip()]
+    useful = [
+        p for p in parts
+        if target_lower not in p.lower()
+        and p.lower() not in {"new tab", "comet", "google chrome", "visual studio code"}
+    ]
+    return useful[0] if useful else title
+
+
+def describe_open_window(target: str) -> str:
+    window = screen_reader.find_window(target)
+    if not window:
+        return f"I can't find a window for {target} right now."
+
+    context = screen_reader.get_screen_context(target)
+    page = _clean_window_title(window.title, target)
+    visible = " ".join(context.get("visible_text", "").split())
+
+    if visible:
+        return f"{target.title()} is showing {page}. I can see: {visible[:220]}"
+    return f"{target.title()} is showing {page}."
+
+
 def handle_command(query: str) -> str | None:
     q = query.lower()
 
@@ -212,15 +239,22 @@ def handle_command(query: str) -> str | None:
     look_match = LOOK_AT_PATTERN.search(q)
     if look_match:
         target = look_match.group("target").strip()
-        action = look_match.group("action").strip()
+        action = (look_match.group("action") or "observe").strip()
         window = screen_reader.find_window(target)
         if not window:
             return f"I can't find a window for {target} right now."
         screen_reader.set_current_focus(window.title, action)
         context = screen_reader.get_screen_context(target)
-        # TODO: hand `context["visible_text"]` to your LLM/thinking module
-        # along with `action` to actually do the debugging analysis.
-        return f"Looking at {window.title} now to {action}."
+        from modules.screen_observer import build_observation_reply
+        return build_observation_reply(window.title, action, context)
+
+    window_question = re.search(
+        r"(?:what|which)\s+(?:website|site|page|tab)\s+(?:is\s+)?(?:open|opened|showing)?\s*(?:in|on)\s+(?P<target>[\w .-]+)",
+        q,
+    )
+    if window_question:
+        target = window_question.group("target").strip(" ?.!")
+        return describe_open_window(target)
 
     if any(trigger in q for trigger in STATUS_TRIGGERS):
         return screen_reader.describe_current_focus()

@@ -56,14 +56,39 @@ class ChatBubble(QFrame):
         self.setMaximumWidth(480)
 
 
+# ── User presence states ───────────────────────────────────────────────────────
+PRESENCE_WORKING = "working"
+PRESENCE_IDLE    = "idle"
+PRESENCE_AFK     = "afk"
+
+PRESENCE_STYLES = {
+    PRESENCE_WORKING: {
+        "dot":   "#3ddc97",   # green
+        "label": "Working",
+        "color": "#3ddc97",
+    },
+    PRESENCE_IDLE: {
+        "dot":   "#f0a500",   # amber
+        "label": "Idle",
+        "color": "#f0a500",
+    },
+    PRESENCE_AFK: {
+        "dot":   "#ff5c6e",   # red
+        "label": "AFK",
+        "color": "#ff5c6e",
+    },
+}
+
+
 class MainWindow(QWidget):
     sendMessage = Signal(str)
-    micToggled = Signal(bool)  # True = mic on, False = mic off
+    micToggled = Signal(bool)
 
     def __init__(self, orb: OrbWidget, parent=None):
         super().__init__(parent)
         self._orb = orb
         self._mic_on = False
+        self._presence = PRESENCE_IDLE
         self.setWindowTitle("AURA")
         self.resize(1380, 780)
         self.setStyleSheet(f"background-color: {VOID_BLACK};")
@@ -146,6 +171,35 @@ class MainWindow(QWidget):
 
         layout.addStretch()
 
+        # ── Presence indicator ───────────────────────────────────────────
+        presence_row = QHBoxLayout()
+        presence_row.setAlignment(Qt.AlignCenter)
+        presence_row.setSpacing(6)
+
+        self._presence_dot = QLabel("●")
+        self._presence_dot.setFont(mono_font(9))
+
+        self._presence_label = QLabel("Idle")
+        self._presence_label.setFont(mono_font(11))
+
+        presence_row.addWidget(self._presence_dot)
+        presence_row.addWidget(self._presence_label)
+
+        presence_wrap = QWidget()
+        presence_wrap.setLayout(presence_row)
+        presence_wrap.setStyleSheet(f"""
+            QWidget {{
+                background-color: rgba(255,255,255,0.04);
+                border: 1px solid {EVENT_VIOLET};
+                border-radius: 8px;
+                padding: 4px 10px;
+            }}
+        """)
+        layout.addWidget(presence_wrap, alignment=Qt.AlignCenter)
+
+        self._set_presence_style(PRESENCE_IDLE)
+        # ────────────────────────────────────────────────────────────────
+
         floating_note = QLabel("Orb active")
         floating_note.setFont(mono_font(11))
         floating_note.setAlignment(Qt.AlignCenter)
@@ -158,7 +212,6 @@ class MainWindow(QWidget):
         self._voice_status.setStyleSheet(f"color: {TEXT_SECONDARY};")
         layout.addWidget(self._voice_status)
 
-        # ── Mic button ──────────────────────────────────────────────────
         self._mic_btn = QPushButton("🎤  Mic Off")
         self._mic_btn.setFixedHeight(38)
         self._mic_btn.setCursor(Qt.PointingHandCursor)
@@ -168,6 +221,22 @@ class MainWindow(QWidget):
 
         layout.addStretch()
         return panel
+
+    def _set_presence_style(self, state: str):
+        s = PRESENCE_STYLES.get(state, PRESENCE_STYLES[PRESENCE_IDLE])
+        self._presence_dot.setStyleSheet(f"color: {s['dot']}; font-size: 9px;")
+        self._presence_label.setText(s["label"])
+        self._presence_label.setStyleSheet(f"color: {s['color']}; font-weight: 600;")
+
+    def set_presence(self, state: str):
+        """
+        Call this from app.py to update the presence badge.
+        state: 'working' | 'idle' | 'afk'
+        """
+        if state == self._presence:
+            return
+        self._presence = state
+        self._set_presence_style(state)
 
     def _mic_style(self, active: bool) -> str:
         if active:
@@ -289,7 +358,6 @@ class MainWindow(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
 
-        # header row with clear button
         header_row = QHBoxLayout()
         header = QLabel("Code")
         header.setFont(display_font(14))
@@ -367,7 +435,6 @@ class MainWindow(QWidget):
         )
 
     def append_code(self, lang: str, code: str):
-        """Call this to push code into the code panel."""
         header = f"# ── {lang.upper()} ──────────────────────\n" if lang else ""
         self._code_view.append(header + code + "\n")
 

@@ -3,21 +3,99 @@ import time
 import threading
 import re
 import random
-_pending_offer      = None   # context behind the last spoken offer, so a "yes" can act on it
-PENDING_OFFER_TTL    = 120    # seconds an offer stays valid for a response before it's considered stale
+import ctypes
+
+_pending_offer      = None
+PENDING_OFFER_TTL    = 120
 
 AFFIRMATIVE_PHRASES = ["yes", "yeah", "yep", "sure", "ok", "okay", "please", "go ahead", "help me", "do it"]
 
 # ── Timing ────────────────────────────────────────────────────────────────────
-CHECK_INTERVAL       = 30    # seconds between screen checks
-SUGGESTION_COOLDOWN  = 120   # min seconds between any suggestion
-STUCK_THRESHOLD      = 4     # same-context checks before "stuck" fires
-ERROR_THRESHOLD      = 2     # error-keyword checks before error fires
-INTERACTION_INTERVAL = 180   # seconds between casual interaction pings
-USER_ACTIVE_SILENCE  = 90    # stay silent if user messaged within this window
-CODE_INSIGHT_COOLDOWN = 100  # seconds between code-insight comments specifically
-LOCKED_CHECKIN_INTERVAL = 90   # how often AURA comments while locked to one app
+CHECK_INTERVAL       = 30
+SUGGESTION_COOLDOWN  = 120
+STUCK_THRESHOLD      = 4
+ERROR_THRESHOLD      = 2
+INTERACTION_INTERVAL = 180
+USER_ACTIVE_SILENCE  = 90
+CODE_INSIGHT_COOLDOWN = 100
+LOCKED_CHECKIN_INTERVAL = 90
 _locked_last_signature  = ""
+
+# ── AFK Detection ─────────────────────────────────────────────────────────────
+AFK_THRESHOLD        = 180   # seconds of no mouse/keyboard → user is AFK
+AFK_CHECK_INTERVAL   = 5     # how often the AFK tracker samples mouse position (seconds)
+
+_last_activity_time  = time.time()   # updated on any mouse move or key press
+_last_mouse_pos      = (0, 0)
+_afk_tracker_started = False
+
+
+class _LASTINPUTINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", ctypes.c_uint),
+        ("dwTime", ctypes.c_uint),
+    ]
+
+
+def _get_windows_idle_seconds() -> float | None:
+    """Return OS-level idle seconds on Windows, or None if unavailable."""
+    try:
+        info = _LASTINPUTINFO()
+        info.cbSize = ctypes.sizeof(_LASTINPUTINFO)
+        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
+            return None
+        tick_count = ctypes.windll.kernel32.GetTickCount()
+        return max(0, (tick_count - info.dwTime) / 1000.0)
+    except Exception:
+        return None
+
+
+def _is_user_afk() -> bool:
+    """Return True if the user hasn't moved their mouse or typed in AFK_THRESHOLD seconds."""
+    idle_seconds = _get_windows_idle_seconds()
+    if idle_seconds is not None:
+        return idle_seconds > AFK_THRESHOLD
+    return (time.time() - _last_activity_time) > AFK_THRESHOLD
+
+
+def _idle_seconds() -> float:
+    idle_seconds = _get_windows_idle_seconds()
+    if idle_seconds is not None:
+        return idle_seconds
+    return time.time() - _last_activity_time
+
+
+def _afk_tracker_loop():
+    """Background thread: polls mouse position every AFK_CHECK_INTERVAL seconds.
+    Updates _last_activity_time whenever the cursor moves."""
+    global _last_mouse_pos, _last_activity_time
+    while True:
+        try:
+            import pyautogui
+            pos = pyautogui.position()
+            if pos != _last_mouse_pos:
+                _last_mouse_pos = pos
+                _last_activity_time = time.time()
+        except Exception:
+            pass
+        time.sleep(AFK_CHECK_INTERVAL)
+
+
+def _start_afk_tracker():
+    global _afk_tracker_started
+    if _afk_tracker_started:
+        return
+    _afk_tracker_started = True
+    t = threading.Thread(target=_afk_tracker_loop, daemon=True)
+    t.start()
+
+
+def record_user_activity():
+    """Call this from brain.py / app.py whenever the user sends a message.
+    Keeps AFK timer fresh even if the mouse hasn't moved."""
+    global _last_activity_time
+    _last_activity_time = time.time()
+
 
 # ── State ─────────────────────────────────────────────────────────────────────
 _last_suggestion_time   = 0
@@ -32,11 +110,10 @@ _screen_reader_error    = ""
 _activity_log           = []
 _last_code_signature    = ""
 _last_code_insight_time = 0
-_locked_app             = None   # if set, AURA only watches an app whose name contains this string
+_locked_app             = None
 
 
 def get_pending_offer() -> dict | None:
-    """Return the context behind Aura's last proactive offer, if it's still fresh and unanswered."""
     if _pending_offer and time.time() - _pending_offer["time"] < PENDING_OFFER_TTL:
         return _pending_offer
     return None
@@ -53,9 +130,6 @@ def is_affirmative(text: str) -> bool:
 
 
 # ── App lock ──────────────────────────────────────────────────────────────────
-# Lets the user say "aura see vs code" and have proactive monitoring focus on
-# exactly that app, ignoring everything else, until they unlock it again.
-
 APP_ALIASES = {
     "vs code":    "visual studio code",
     "vscode":     "visual studio code",
@@ -160,16 +234,11 @@ def _signature(ctx: dict) -> str:
 
 
 def _clean_task_name(task: str) -> str:
-    """Clean up window titles into short readable task names."""
-    # remove leading numbers like "(2678)" or "[2]"
     task = re.sub(r'^\(?\d+\)?\s*', '', task)
-    # remove LIVE: or similar prefixes
     task = re.sub(r'^(LIVE|WATCH|NEW|HD|4K)\s*:\s*', '', task, flags=re.IGNORECASE)
-    # truncate at separators
     for sep in [' | ', ' - ', ' — ', ' – ']:
         if sep in task:
             task = task.split(sep)[0].strip()
-    # max 40 chars
     task = task.strip()
     if len(task) > 40:
         task = task[:37] + "..."
@@ -181,7 +250,6 @@ def _extract_task(ctx: dict) -> str:
     text     = ctx.get("visible_text", "").lower()
     combined = f"{app} {text}"
 
-    # match against pending tasks first
     try:
         from memory.store import get_pending_tasks
         for task in get_pending_tasks():
@@ -192,7 +260,6 @@ def _extract_task(ctx: dict) -> str:
     except Exception as e:
         print(f"[AURA Proactive] Task lookup error: {e}")
 
-    # fallback: window title
     title = re.sub(r"\s+", " ", app).strip()
     return _clean_task_name(title)
 
@@ -222,6 +289,7 @@ def _is_in_flow() -> bool:
     tasks  = [t for _, t in recent]
     return len(set(tasks)) > 1
 
+
 # ── Core decision ──────────────────────────────────────────────────────────────
 def _decide(ctx: dict) -> tuple[str, str]:
     global _last_suggestion_time, _last_interaction_time
@@ -237,7 +305,6 @@ def _decide(ctx: dict) -> tuple[str, str]:
     if len(_activity_log) > 20:
         _activity_log.pop(0)
 
-    # user is actively chatting — stay quiet
     try:
         from core.brain import get_last_user_message_time
         last_msg_time = get_last_user_message_time()
@@ -246,7 +313,6 @@ def _decide(ctx: dict) -> tuple[str, str]:
     except Exception as e:
         print(f"[AURA Proactive] Active-check error: {e}")
 
-    # cooldown guard
     if now - _last_suggestion_time < SUGGESTION_COOLDOWN:
         return "silent", task
 
@@ -254,7 +320,6 @@ def _decide(ctx: dict) -> tuple[str, str]:
         _same_context_checks = 0
         return "silent", task
 
-    # track same-context streak
     if sig == _last_signature:
         _same_context_checks += 1
     else:
@@ -265,7 +330,6 @@ def _decide(ctx: dict) -> tuple[str, str]:
         _last_seen_task = task
         _same_context_checks = 1
 
-    # error detection (highest priority)
     if _has_errors(ctx):
         _error_count += 1
         if _error_count >= ERROR_THRESHOLD:
@@ -275,10 +339,6 @@ def _decide(ctx: dict) -> tuple[str, str]:
     else:
         _error_count = max(0, _error_count - 1)
 
-    # code insight — editor open, no errors, fresh code, nothing alarming.
-    # Fires on genuinely NEW code (signature changed) so it never repeats
-    # the same comment, and it takes priority over "stuck" since the code
-    # is fine — there's nothing to nudge about.
     if _is_code_editor(ctx) and not _has_errors(ctx):
         if (sig != _last_code_signature
                 and _screen_text_is_usable(ctx.get("visible_text", ""))
@@ -288,14 +348,12 @@ def _decide(ctx: dict) -> tuple[str, str]:
             _last_suggestion_time   = now
             return "code_insight", task
 
-    # stuck detection
     if _same_context_checks >= STUCK_THRESHOLD and task != _last_task:
         _same_context_checks = 0
         _last_task = task
         _last_suggestion_time = now
         return "stuck", task
 
-    # casual interaction — only when user is in flow
     since_interaction = now - _last_interaction_time
     if (since_interaction > INTERACTION_INTERVAL
             and _is_in_flow()
@@ -305,9 +363,8 @@ def _decide(ctx: dict) -> tuple[str, str]:
 
     return "silent", task
 
+
 def _decide_locked_distracted(ctx: dict) -> tuple[str, str]:
-    """Decision logic while locked, but the user has actually switched
-    to a different app. This is the main thing the lock is for."""
     global _last_suggestion_time
 
     now = time.time()
@@ -327,9 +384,8 @@ def _decide_locked_distracted(ctx: dict) -> tuple[str, str]:
     _last_suggestion_time = now
     return "locked_distracted", task
 
+
 def _decide_locked(ctx: dict) -> tuple[str, str]:
-    """Decision logic while locked onto a single app. Skips the normal
-    flow/variety checks — there's only one app, so 'in flow' never applies."""
     global _last_suggestion_time, _locked_last_signature
 
     now  = time.time()
@@ -369,6 +425,7 @@ def _decide_locked(ctx: dict) -> tuple[str, str]:
 def _pick_line(lines: list, task: str) -> str:
     line = random.choice(lines)
     return line.replace("{task}", task)
+
 
 _PROACTIVE_PROMPT = """You are AURA noticing something on the user's screen and deciding to say something.
 Moment type: {moment}
@@ -437,6 +494,7 @@ LOCKED_IDLE_LINES = [
     "quiet over here on {app}. you still with me?",
     "you locked me onto {app} and then vanished. classic.",
 ]
+
 LOCKED_DISTRACTED_PROMPT = """You are AURA. The user told you to lock onto {locked_app} and watch only that, but they've now switched away to a different app: {current_app}.
 
 Locked app (what they asked you to watch): {locked_app}
@@ -456,14 +514,14 @@ LOCKED_DISTRACTED_LINES = [
     "{current_app}? I thought we were doing {locked_app}.",
     "drifted off to {current_app}, huh. {locked_app}'s still waiting.",
 ]
+
+
 def _screen_text_is_usable(text: str) -> bool:
-    """Reject OCR text that's too short, fragmented, or noisy to safely reference."""
     if not text or len(text.strip()) < 25:
         return False
     words = re.findall(r"[a-zA-Z]{3,}", text)
     if len(words) < 6:
         return False
-    # too many single/double-char tokens = garbled OCR
     tokens = text.split()
     junk_ratio = sum(1 for t in tokens if len(t) <= 2) / max(len(tokens), 1)
     if junk_ratio > 0.5:
@@ -494,18 +552,14 @@ def _ai_generate_message(action: str, task: str, ctx: dict, prompt_template: str
 
 
 def generate_message(action: str, task: str, ctx: dict) -> str | None:
-    # Only spend an AI call on higher-value moments — keep casual pings cheap
     if action in {"error", "stuck"}:
         ai_msg = _ai_generate_message(action, task, ctx, _PROACTIVE_PROMPT)
         if ai_msg:
             return ai_msg
     elif action == "code_insight":
         ai_msg = _ai_generate_message(action, task, ctx, CODE_INSIGHT_PROMPT)
-        # No template fallback here on purpose — a wrong guess about code
-        # logic is worse than staying silent this one cycle.
         return ai_msg
 
-    # fallback to templates if AI call fails, or for interaction
     if action == "error":
         return _pick_line(ERROR_LINES, task)
     if action == "stuck":
@@ -534,24 +588,55 @@ def generate_message(action: str, task: str, ctx: dict) -> str | None:
         line = random.choice(LOCKED_DISTRACTED_LINES)
         return line.replace("{locked_app}", _locked_app or "that").replace("{current_app}", current_app)
     return None
-    
 
 
 # ── Loop ──────────────────────────────────────────────────────────────────────
 
-def _loop(speak_fn, on_suggestion_fn=None):
-    global _pending_offer
+# ── PATCH 1: Add presence_callback param to start_proactive_loop ─────────────
+# Replace the bottom of proactive.py (_loop and start_proactive_loop) with this:
+
+_afk_logged = False   # add this near the other state globals at the top
+
+
+def _loop(speak_fn, on_suggestion_fn=None, on_presence_fn=None):
+    """
+    on_presence_fn(state: str) — called when presence changes.
+    state is one of: 'working' | 'idle' | 'afk'
+    """
+    global _pending_offer, _afk_logged
     print("[AURA Proactive] Loop started")
+
+    _start_afk_tracker()
+
+    _current_presence = [None]   # mutable container so inner fn can write
+
+    def _emit_presence(state: str):
+        if state != _current_presence[0]:
+            _current_presence[0] = state
+            if on_presence_fn:
+                on_presence_fn(state)
+
     while True:
         try:
             time.sleep(CHECK_INTERVAL)
+
+            # ── AFK gate ──────────────────────────────────────────────────
+            if _is_user_afk():
+                if not _afk_logged:
+                    idle_mins = int(_idle_seconds() / 60)
+                    print(f"[AURA Proactive] User AFK ({idle_mins}m) — suppressing suggestions")
+                    _afk_logged = True
+                _emit_presence("afk")
+                continue
+
+            # User is back — reset log flag and mark active
+            _afk_logged = False
+            # ─────────────────────────────────────────────────────────────
+
             ctx = _get_screen_context()
             if not ctx:
                 continue
 
-            # app lock — if locked, completely skip cycles where the
-            # active app isn't the locked one. No state changes happen
-            # for ignored apps, so switching back picks up cleanly.
             if _locked_app:
                 if _locked_app not in ctx.get("app", "").lower():
                     action, task = _decide_locked_distracted(ctx)
@@ -559,6 +644,14 @@ def _loop(speak_fn, on_suggestion_fn=None):
                     action, task = _decide_locked(ctx)
             else:
                 action, task = _decide(ctx)
+
+            # Presence: if we got here the user is present
+            # 'working' = something happening on screen, 'idle' = not much
+            if _is_work(ctx):
+                _emit_presence("working")
+            else:
+                _emit_presence("idle")
+
             if action == "silent":
                 continue
 
@@ -566,7 +659,10 @@ def _loop(speak_fn, on_suggestion_fn=None):
             if not msg:
                 continue
 
-            _pending_offer = {"action": action, "task": task, "ctx": ctx, "message": msg, "time": time.time()}
+            _pending_offer = {
+                "action": action, "task": task,
+                "ctx": ctx, "message": msg, "time": time.time()
+            }
 
             print(f"[AURA Proactive] ({action}) {msg}")
             if on_suggestion_fn:
@@ -577,7 +673,11 @@ def _loop(speak_fn, on_suggestion_fn=None):
             print(f"[AURA Proactive Error] {e}")
 
 
-def start_proactive_loop(speak_fn, on_suggestion_fn=None):
-    t = threading.Thread(target=_loop, args=(speak_fn, on_suggestion_fn), daemon=True)
+def start_proactive_loop(speak_fn, on_suggestion_fn=None, on_presence_fn=None):
+    t = threading.Thread(
+        target=_loop,
+        args=(speak_fn, on_suggestion_fn, on_presence_fn),
+        daemon=True
+    )
     t.start()
     return t

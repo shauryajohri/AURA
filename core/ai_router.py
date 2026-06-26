@@ -109,52 +109,6 @@ def clean_response(text: str) -> str:
         result += "."
     return result.strip()
 
-def call_groq(prompt: str, system: str = DONNA_SYSTEM_PROMPT, intent: str = "CASUAL") -> str:
-    is_coding = (intent == "CODING")
-    if is_coding:
-        strict_system = system + _CODING_SYSTEM_ADDON
-    else:
-        strict_system = system + """
-
-OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
-- MAX 2 sentences. Hard limit. Count them.
-- NO emoji. Zero.
-- NO "OMG", "Whoopsie", "Let's", "Together", "Great question", "Certainly"
-- NO made-up context. Only refer to what's in the conversation.
-- NEVER guess or make up content about videos, URLs, or links you cannot access.
-- If asked about a URL say: "can't open that directly — paste the key points and I'll work with it."
-- Talk like a sharp friend texting. Dry. Direct. No hype.
-- NEVER end with a question unless you have zero info to work with.
-"""
-    try:
-        response = requests.post(
-            GROQ_URL,
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": GROQ_MODEL,
-                "messages": [
-                    {"role": "system", "content": strict_system},
-                    {"role": "user",   "content": prompt}
-                ],
-                "max_tokens": 1024 if is_coding else 150,
-                "temperature": 0.3 if is_coding else 0.7,
-                "stream": False
-            },
-            timeout=30
-        )
-        data = response.json()
-        print(f"[AURA Groq Debug] Status: {response.status_code} | Intent: {intent}")
-        raw = data["choices"][0]["message"]["content"]
-        if is_coding:
-            print(f"[AURA CODE RAW]\n{raw}\n[END RAW]")
-        return raw if is_coding else clean_response(raw)
-    except Exception as e:
-        print(f"[AURA] Groq error: {e}")
-        return "CONNECTION_ERROR"
-
 def call_groq_streaming(prompt: str, system: str = DONNA_SYSTEM_PROMPT, intent: str = "CASUAL"):
     if _in_rate_limit_cooldown():
         yield "RATE_LIMIT"

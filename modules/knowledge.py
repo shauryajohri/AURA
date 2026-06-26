@@ -1,6 +1,6 @@
 import pyperclip
 from memory import store
-from core.ai_router import call_ollama
+from core.ai_router import call_claude
 import json
 
 def auto_tag_and_save(content: str, source: str = "user") -> str:
@@ -20,7 +20,7 @@ Return ONLY the JSON, no extra text.
 Example: {{"title": "Binary search notes", "tags": "coding,algorithms,DSA", "summary": "Notes about binary search implementation and complexity"}}
 """
     try:
-        raw = call_ollama(meta_prompt)
+        raw = call_claude(meta_prompt)
         # extract JSON from response
         import re
         json_match = re.search(r'\{.*?\}', raw, re.DOTALL)

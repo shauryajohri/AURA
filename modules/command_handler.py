@@ -229,8 +229,43 @@ def describe_open_window(target: str) -> str:
     return f"{target.title()} is showing {page}."
 
 
+AFK_QUERY_PATTERN = re.compile(r"\bafk\b")
+
+
+def _format_duration(seconds: float) -> str:
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds} seconds"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes} minute{'s' if minutes != 1 else ''}"
+    hours = minutes // 60
+    rem_minutes = minutes % 60
+    if rem_minutes:
+        return f"{hours}h {rem_minutes}m"
+    return f"{hours} hour{'s' if hours != 1 else ''}"
+
+
+def describe_afk_status() -> str:
+    try:
+        from modules.proactive import get_afk_status
+    except Exception as e:
+        return f"Can't check AFK status right now: {e}"
+
+    status = get_afk_status()
+
+    if status["is_afk"]:
+        return f"You've been AFK for {_format_duration(status['idle_seconds'])}."
+    if status["last_afk_gap_seconds"] >= 20:
+        return f"You were away for about {_format_duration(status['last_afk_gap_seconds'])} just now."
+    return "You haven't been AFK — been active this whole time."
+
+
 def handle_command(query: str) -> str | None:
     q = query.lower()
+
+    if AFK_QUERY_PATTERN.search(q):
+        return describe_afk_status()
 
     open_triggers = [
         "can you open ", "please open ", "can u open ",

@@ -4,7 +4,7 @@ import threading
 import re
 import random
 import ctypes
-
+from core.voice_gate import can_speak, mark_spoken
 _pending_offer      = None
 PENDING_OFFER_TTL    = 120
 
@@ -28,6 +28,9 @@ AFK_CHECK_INTERVAL   = 5     # how often the AFK tracker samples mouse position 
 _last_activity_time  = time.time()   # updated on any mouse move or key press
 _last_mouse_pos      = (0, 0)
 _afk_tracker_started = False
+_last_afk_gap_seconds = 0.0   # duration of the most recently completed AFK gap
+_last_afk_gap_time    = 0.0   # when that gap ended (so old gaps don't get reported as current)
+AFK_LOG_MIN_SECONDS  = 20     # ignore tiny pauses; only log real gaps
 
 
 class _LASTINPUTINFO(ctypes.Structure):
@@ -65,12 +68,22 @@ def _idle_seconds() -> float:
     return time.time() - _last_activity_time
 
 
+
 def _afk_tracker_loop():
-    """Background thread: polls mouse position every AFK_CHECK_INTERVAL seconds.
-    Updates _last_activity_time whenever the cursor moves."""
-    global _last_mouse_pos, _last_activity_time
+    """Polls real OS idle time every AFK_CHECK_INTERVAL seconds. When idle time
+    suddenly drops (user was away, now active again), records how long that gap
+    was — this has to happen here, in the background, because by the time the
+    user types a query the act of typing has already reset idle time to ~0."""
+    global _last_mouse_pos, _last_activity_time, _last_afk_gap_seconds, _last_afk_gap_time
+    prev_idle = 0.0
     while True:
         try:
+            idle = _idle_seconds()
+            if prev_idle >= AFK_LOG_MIN_SECONDS and idle < prev_idle:
+                _last_afk_gap_seconds = prev_idle
+                _last_afk_gap_time = time.time()
+            prev_idle = idle
+
             import pyautogui
             pos = pyautogui.position()
             if pos != _last_mouse_pos:
@@ -80,6 +93,16 @@ def _afk_tracker_loop():
             pass
         time.sleep(AFK_CHECK_INTERVAL)
 
+def get_afk_status() -> dict:
+    idle = _idle_seconds()
+    gap_age = time.time() - _last_afk_gap_time
+    recent_gap = _last_afk_gap_seconds if gap_age < 600 else 0.0
+    return {
+        "is_afk": idle > AFK_THRESHOLD,
+        "idle_seconds": idle,
+        "threshold_seconds": AFK_THRESHOLD,
+        "last_afk_gap_seconds": recent_gap,
+    }
 
 def _start_afk_tracker():
     global _afk_tracker_started
@@ -664,16 +687,13 @@ def _loop(speak_fn, on_suggestion_fn=None, on_presence_fn=None):
                 "ctx": ctx, "message": msg, "time": time.time()
             }
 
+            if not can_speak():
+                continue
+            mark_spoken()
+
             print(f"[AURA Proactive] ({action}) {msg}")
             if on_suggestion_fn:
                 on_suggestion_fn(msg)
-            try:
-                from core.voice_gate import can_speak, mark_spoken
-                if not can_speak():
-                    continue
-                mark_spoken()
-            except Exception:
-                pass
             speak_fn(msg)
 
         except Exception as e:

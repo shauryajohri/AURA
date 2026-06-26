@@ -24,7 +24,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional, Callable
 
-from core.voice_gate import can_speak, mark_spoken
+from core.voice_gate import can_speak, mark_spoken, seconds_since_last_spoken
 
 # ── Timing ────────────────────────────────────────────────────────────────────
 THINK_INTERVAL          = 300   # 5 minutes between thinking cycles

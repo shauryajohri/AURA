@@ -2,6 +2,7 @@ import signal
 import sys
 
 from core.brain import _history, get_context, start_proactive
+from core.curiosity_engine import start_curiosity_loop
 from modules.session_memory import get_greeting_with_memory, save_on_exit
 from modules.voice_output import speak
 
@@ -47,5 +48,9 @@ if __name__ == "__main__":
         speak_fn=speak,
         on_suggestion_fn=bridge.suggestionReceived.emit,
         on_presence_fn=controller.presenceChanged.emit,
+    )
+    start_curiosity_loop(
+        speak_fn=speak,
+        on_curiosity_fn=bridge.suggestionReceived.emit,
     )
     sys.exit(app.exec())

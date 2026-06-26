@@ -667,6 +667,13 @@ def _loop(speak_fn, on_suggestion_fn=None, on_presence_fn=None):
             print(f"[AURA Proactive] ({action}) {msg}")
             if on_suggestion_fn:
                 on_suggestion_fn(msg)
+            try:
+                from core.voice_gate import can_speak, mark_spoken
+                if not can_speak():
+                    continue
+                mark_spoken()
+            except Exception:
+                pass
             speak_fn(msg)
 
         except Exception as e:

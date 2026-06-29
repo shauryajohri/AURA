@@ -302,6 +302,13 @@ _DETECTORS: list[Callable[[], Optional[CuriosityCandidate]]] = [
 
 
 # ── Decision ──────────────────────────────────────────────────────────────────
+def _safe_is_attention_active() -> bool:
+    try:
+        from modules.attention_engine import get_engine as get_ae
+        return get_ae().is_attention_active()
+    except Exception:
+        return False
+
 
 def _should_think() -> bool:
     now = time.time()
@@ -319,6 +326,11 @@ def _should_think() -> bool:
     if not can_speak():
         return False
 
+    # BUG 2 FIX — same yield point proactive.py uses. Attention owns the
+    # conversation while it's mid-utterance; curiosity waits its turn.
+    if _safe_is_attention_active():
+        return False
+
     locked_app = _safe_get_app_lock()
     if locked_app:
         # Respect focus mode — curiosity stays quiet while the user has
@@ -327,8 +339,6 @@ def _should_think() -> bool:
         return False
 
     return True
-
-
 def think_once() -> Optional[CuriosityCandidate]:
     """Runs all detectors, returns the highest-confidence candidate above
     threshold, or None. Exposed standalone so it can be unit tested or
@@ -379,6 +389,11 @@ def _loop(speak_fn, on_curiosity_fn=None):
             if on_curiosity_fn:
                 on_curiosity_fn(candidate.message)
             speak_fn(candidate.message)
+            try:
+                from modules.attention_engine import register_speech as _ae_register_speech
+                _ae_register_speech()
+            except Exception:
+                pass
 
         except Exception as e:
             print(f"[Curiosity Error] {e}")

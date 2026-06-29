@@ -316,7 +316,7 @@ def _is_in_flow() -> bool:
 
 
 # ── Core decision ──────────────────────────────────────────────────────────────
-def _decide(ctx: dict) -> tuple[str, str]:
+def _decide(ctx: dict, ie_result: dict | None = None) -> tuple[str, str]:
     global _last_suggestion_time, _last_interaction_time
     global _last_signature, _last_task, _last_seen_task
     global _same_context_checks, _error_count
@@ -366,8 +366,7 @@ def _decide(ctx: dict) -> tuple[str, str]:
             _error_count = max(0, _error_count - 1)
 
     if _is_code_editor(ctx):              # ← correct, same level as if/else above
-        ie = get_ie()
-        result = ie.score(ctx, idle_seconds=_idle_seconds())
+        result = ie_result if ie_result is not None else get_ie().score(ctx, idle_seconds=_idle_seconds())
         if result["should_interrupt"]:
             _last_suggestion_time = now
             return "code_insight", task
@@ -384,8 +383,6 @@ def _decide(ctx: dict) -> tuple[str, str]:
             and _same_context_checks < 2):
         _last_interaction_time = now
         return "interaction", task
-
-    return "silent", task
 
 
 def _decide_locked_distracted(ctx: dict) -> tuple[str, str]:
@@ -666,6 +663,12 @@ def _loop(speak_fn, on_suggestion_fn=None, on_presence_fn=None):
             engine = get_engine()
             observation = engine.observe(ctx)
             engine.update_mood(observation)
+            try:
+                from modules.attention_engine import get_engine as get_ae
+                if get_ae().is_attention_active():
+                    continue
+            except Exception:
+                pass
 
             if _locked_app:
                 if _locked_app not in ctx.get("app", "").lower():
@@ -673,11 +676,11 @@ def _loop(speak_fn, on_suggestion_fn=None, on_presence_fn=None):
                 else:
                     action, task = _decide_locked(ctx)
             else:
-                action, task = _decide(ctx)
+                ie_result = get_ie().score(ctx, idle_seconds=_idle_seconds())
+                action, task = _decide(ctx, ie_result=ie_result)
 
             # ── Interestingness gate ──────────────────────────────────────
             if action in {"interaction", "error"}:
-                ie_result = get_ie().score(ctx, idle_seconds=_idle_seconds())
                 if not ie_result["should_interrupt"]:
                     continue
             # ─────────────────────────────────────────────────────────────
@@ -701,6 +704,9 @@ def _loop(speak_fn, on_suggestion_fn=None, on_presence_fn=None):
             if on_suggestion_fn:
                 on_suggestion_fn(msg)
             speak_fn(msg)
+            from modules.attention_engine import register_speech
+            register_speech()
+
 
         except Exception as e:
             print(f"[AURA Proactive Error] {e}")

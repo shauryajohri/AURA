@@ -535,7 +535,7 @@ def start_proactive(speak_fn=None, on_suggestion_fn=None, on_presence_fn=None):
         from modules.speech_planner import plan
         def _speak(text):
             tts.speak_chunks(plan(text, "CHAT"))
-        get_ae().start(_speak, speak_fn)
+        get_ae().start(_speak, on_suggestion_fn)
     except Exception as e:
         print(f"[AURA] Attention engine start error: {e}")
         

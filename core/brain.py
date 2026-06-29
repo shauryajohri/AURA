@@ -32,11 +32,20 @@ def mark_user_active():
     global _last_user_message_time
     _last_user_message_time = time.time()
     try:
+        from modules.relationship_engine import get_engine
+        get_engine().record_user_message()   # ← add this
+    except Exception:
+        pass
+    try:
         from modules.proactive import record_user_activity
         record_user_activity()
     except Exception:
         pass
-
+    try:
+        from modules.attention_engine import get_engine as get_ae
+        get_ae().record_user_message()
+    except Exception:
+        pass
 def update_context(ctx: dict):
     global _last_context
     _last_context = ctx
@@ -519,4 +528,14 @@ def start_proactive(speak_fn=None, on_suggestion_fn=None, on_presence_fn=None):
         print("[AURA] Proactive module started (Donna is watching)")
     except Exception as e:
         print(f"[AURA] Proactive start error: {e}")
-    
+        
+    try:
+        from modules.attention_engine import get_engine as get_ae
+        import modules.voice_output as tts
+        from modules.speech_planner import plan
+        def _speak(text):
+            tts.speak_chunks(plan(text, "CHAT"))
+        get_ae().start(_speak, speak_fn)
+    except Exception as e:
+        print(f"[AURA] Attention engine start error: {e}")
+        

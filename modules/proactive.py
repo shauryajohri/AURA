@@ -5,6 +5,8 @@ import re
 import random
 import ctypes
 from core.voice_gate import can_speak, mark_spoken
+from modules.relationship_engine import get_engine
+from modules.interestingness_engine import get_engine as get_ie
 _pending_offer      = None
 PENDING_OFFER_TTL    = 120
 
@@ -359,16 +361,15 @@ def _decide(ctx: dict) -> tuple[str, str]:
             _error_count = 0
             _last_suggestion_time = now
             return "error", task
-    else:
-        _error_count = max(0, _error_count - 1)
+        
+        else:
+            _error_count = max(0, _error_count - 1)
 
-    if _is_code_editor(ctx) and not _has_errors(ctx):
-        if (sig != _last_code_signature
-                and _screen_text_is_usable(ctx.get("visible_text", ""))
-                and now - _last_code_insight_time > CODE_INSIGHT_COOLDOWN):
-            _last_code_signature    = sig
-            _last_code_insight_time = now
-            _last_suggestion_time   = now
+    if _is_code_editor(ctx):              # ← correct, same level as if/else above
+        ie = get_ie()
+        result = ie.score(ctx, idle_seconds=_idle_seconds())
+        if result["should_interrupt"]:
+            _last_suggestion_time = now
             return "code_insight", task
 
     if _same_context_checks >= STUCK_THRESHOLD and task != _last_task:
@@ -470,19 +471,23 @@ Moment type guide:
 Stay in character: sharp, casual, dry humor, like a smart friend texting. No "I notice you..." or "I see that...". Just talk like you already know.
 """
 
-CODE_INSIGHT_PROMPT = """You are AURA glancing at the user's screen while they code. There are no errors — the code looks fine. You're making ONE short, sharp, specific observation about what the code actually does, like a sharp dev friend reading over their shoulder.
+CODE_INSIGHT_PROMPT = """You are AURA. You have noticed something genuinely interesting about what the user is doing.
 
 App: {app}
-Code/screen text: {screen}
-Inferred task: {task}
+Interesting facts detected: {facts}
+Visible code (partial): {screen}
 
-CRITICAL RULE: Only name a specific function, pattern, or algorithm if it is clearly and fully readable in the screen text above. If the screen text says "(screen text unclear...)" or looks fragmented, do NOT invent or guess any detail — instead make a short, generic but natural comment using only the task name.
+Write ONE short line responding to the facts above — not describing the code, reacting to the situation.
+Examples of good responses:
+- "You've been fighting that function for a while."  
+- "proactive.py's having a rough day."
+- "That traceback's been sitting there for a bit."
 
 Rules:
-- Max 2 sentences, no quotes around the line
-- NEVER ask "need help debugging" or "is something wrong" — there is no problem, the code is fine
-- Sound like a smart friend who just glanced at the screen — casual, dry, specific when you genuinely can be
-- It is much better to be generic than to invent a detail that isn't really there
+- Max 2 sentences
+- No quotes around the line
+- Never say "I notice" or "I see"
+- Only speak to the facts listed above — never invent details
 """
 
 LOCKED_IDLE_PROMPT = """You are AURA, locked onto watching {app} because the user asked you to focus only on it. Nothing substantial is happening there right now — blank, idle, or unreadable.
@@ -560,11 +565,12 @@ def _ai_generate_message(action: str, task: str, ctx: dict, prompt_template: str
         screen_for_prompt = raw_text[:400] if usable else "(screen text unclear — do not reference specifics, talk about the task generally)"
 
         prompt = prompt_template.format(
-            moment=action,
-            app=ctx.get("app", "unknown"),
-            screen=screen_for_prompt,
-            task=task
-        )
+    moment=action,
+    app=ctx.get("app", "unknown"),
+    screen=screen_for_prompt,
+    task=task,
+    facts=", ".join(ctx.get("facts", [])) or "none"
+)
         result = call_groq(prompt, intent="CASUAL").strip()
         result = result.strip('"').strip("'").strip()
         if result and result.upper() not in {"CONNECTION_ERROR", "RATE_LIMIT", ""}:
@@ -657,8 +663,9 @@ def _loop(speak_fn, on_suggestion_fn=None, on_presence_fn=None):
             # ─────────────────────────────────────────────────────────────
 
             ctx = _get_screen_context()
-            if not ctx:
-                continue
+            engine = get_engine()
+            observation = engine.observe(ctx)
+            engine.update_mood(observation)
 
             if _locked_app:
                 if _locked_app not in ctx.get("app", "").lower():
@@ -668,16 +675,15 @@ def _loop(speak_fn, on_suggestion_fn=None, on_presence_fn=None):
             else:
                 action, task = _decide(ctx)
 
-            # Presence: if we got here the user is present
-            # 'working' = something happening on screen, 'idle' = not much
-            if _is_work(ctx):
-                _emit_presence("working")
-            else:
-                _emit_presence("idle")
+            # ── Interestingness gate ──────────────────────────────────────
+            if action in {"interaction", "error"}:
+                ie_result = get_ie().score(ctx, idle_seconds=_idle_seconds())
+                if not ie_result["should_interrupt"]:
+                    continue
+            # ─────────────────────────────────────────────────────────────
 
-            if action == "silent":
+            if action == "silent" or not engine.should_interrupt(observation):
                 continue
-
             msg = generate_message(action, task, ctx)
             if not msg:
                 continue

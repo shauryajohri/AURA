@@ -4,7 +4,7 @@
 import time
 import threading
 import random
-from core.voice_gate import mark_spoken as _gate_mark_spoken
+from core.voice_gate import request_to_speak
 
 # ── Thresholds (seconds) ──────────────────────────────────────────────────────
 STAGE_1_AFTER   = 150    # 2.5 min silence → curious
@@ -230,11 +230,12 @@ _speech_lock = threading.Lock()
 
 
 def register_speech():
-    """Call this whenever ANY module speaks — enforces global cooldown."""
+    """Kept for backward-compat callers; the real gate is now
+    core.voice_gate's priority arbiter, checked per-line in
+    _speak_lines via request_to_speak."""
     global _last_any_speech_time
     with _speech_lock:
         _last_any_speech_time = time.time()
-        _gate_mark_spoken()
 
 
 def can_speak_now() -> bool:
@@ -303,7 +304,11 @@ class AttentionEngine:
 
     def _speak_lines(self, lines: list, delays: list = None):
         """BUG 4 FIX — speak_fn for voice, on_chunk_fn for UI only. No double speech."""
-        if not self._speak_fn:
+        if not self._speak_fn or not lines:
+            return
+
+        combined = " ".join(lines)
+        if not request_to_speak("attention", combined):
             return
 
         self._attention_active = True

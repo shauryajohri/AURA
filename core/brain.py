@@ -3,7 +3,7 @@ import re
 import time
 from modules.proactive import set_app_lock, clear_app_lock, get_app_lock
 from core.ai_router import call_claude, route, route_streaming, extract_code_block, call_classifier
-from core.thinking import think
+from core.thinking import think, post_think
 from memory import store
 from modules.csv_handler import check_csv
 from modules.command_handler import handle_command
@@ -301,6 +301,7 @@ def process(query: str) -> str:
         return result
 
     # TIER 3 — LLM
+    thought_context = think(query, intent, _last_context, _history)
     full_prompt = build_context_prompt(query, intent, thought_context)
     print("[AURA] Routing to AI...")
     answer = route(intent, full_prompt)
@@ -489,7 +490,6 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
         return "Hit my rate limit — give me a moment."
 
     final_answer = guard_output(answer)
-    post_think(query, final_answer, intent)
     post_think(query, final_answer, intent)
     _history.append({"role": "user", "text": query})
     _history.append({"role": "aura", "text": final_answer})

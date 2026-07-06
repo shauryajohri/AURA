@@ -6,7 +6,19 @@ from config.settings import PICOVOICE_KEY
 # line clobbered this, so wake-word auth always failed.)
 ACCESS_KEY = PICOVOICE_KEY
 
-def wait_for_wake_word() -> bool:
+def wait_for_wake_word(stop_check=None) -> bool | None:
+    """Block until the wake word is heard.
+
+    Returns True  → wake word detected
+            False → wake word unavailable (bad key, no device, ...)
+            None  → stop_check() turned True (caller wants the mic back)
+    """
+    if not ACCESS_KEY or "your_key" in str(ACCESS_KEY).lower() \
+            or "your_picovoice" in str(ACCESS_KEY).lower():
+        print("[AURA] No Picovoice key set (PICOVOICE_KEY in .env) — "
+              "wake word disabled. Free key: https://console.picovoice.ai")
+        return False
+
     porcupine = None
     recorder = None
     try:
@@ -19,6 +31,8 @@ def wait_for_wake_word() -> bool:
         print("[AURA] Sleeping... say 'Jarvis' to wake me")
 
         while True:
+            if stop_check is not None and stop_check():
+                return None
             pcm = recorder.read()
             result = porcupine.process(pcm)
             if result >= 0:

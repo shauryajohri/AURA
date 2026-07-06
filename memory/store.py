@@ -4,8 +4,21 @@ import os
 DB_PATH = os.path.join(os.path.dirname(__file__), "aura_memory.db")
 
 
+def _connect() -> sqlite3.Connection:
+    """Thread-friendly connection: WAL journal + busy timeout so the many
+    background loops (proactive, curiosity, attention, error_detector)
+    don't hit 'database is locked'."""
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=10000")
+    except Exception:
+        pass
+    return conn
+
+
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
 
     cursor.execute('''
@@ -45,7 +58,7 @@ def init_db():
 
 def analyze_conversation_patterns(limit: int = 50) -> dict:
     """Extract patterns from recent conversations for personality awareness"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
 
     cursor.execute('''
@@ -112,7 +125,7 @@ def analyze_conversation_patterns(limit: int = 50) -> dict:
 
 def save_entry(title: str, content: str, summary: str = "",
                tags: str = "general", source: str = "user"):
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO knowledge (title, content, summary, tags, source, created_at)
@@ -125,7 +138,7 @@ def save_entry(title: str, content: str, summary: str = "",
 
 
 def search_entries(query: str) -> list:
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute('''
         SELECT title, summary, tags, created_at, content
@@ -140,7 +153,7 @@ def search_entries(query: str) -> list:
 
 
 def get_recent(limit: int = 5) -> list:
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute('''
         SELECT title, summary, tags, created_at
@@ -154,7 +167,7 @@ def get_recent(limit: int = 5) -> list:
 
 
 def save_reminder(text: str, remind_at: datetime.datetime):
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO reminders (text, remind_at, created_at)
@@ -167,7 +180,7 @@ def save_reminder(text: str, remind_at: datetime.datetime):
 
 
 def get_due_reminders() -> list:
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     now = datetime.datetime.now().isoformat()
     cursor.execute('''
@@ -180,13 +193,13 @@ def get_due_reminders() -> list:
 
 
 def mark_reminder_done(reminder_id: int):
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.execute('UPDATE reminders SET done=1 WHERE id=?', (reminder_id,))
     conn.commit()
     conn.close()
 
 def save_conversation(role: str, message: str):
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO conversations (role, message, created_at)
@@ -196,7 +209,7 @@ def save_conversation(role: str, message: str):
     conn.close()
 
 def get_recent_conversations(limit: int = 10) -> list:
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute('''
         SELECT role, message, created_at
@@ -216,7 +229,7 @@ def get_recent_conversations(limit: int = 10) -> list:
 def get_conversations_since(minutes: int = 60) -> list:
     """Conversations from the last N minutes — used by curiosity engine
     for pattern detection without re-reading the whole history each cycle."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cutoff = (datetime.datetime.now() - datetime.timedelta(minutes=minutes)).isoformat()
     cursor.execute('''
@@ -247,7 +260,7 @@ def count_recent_restarts(window_minutes: int = 60, keyword: str = "restart") ->
 init_db()
 
 def init_tasks():
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS tasks (
@@ -276,7 +289,7 @@ def init_tasks():
 
 def add_task(title: str, priority: str = "medium") -> int:
     import time
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO tasks (title, priority, status, created_at)
@@ -288,7 +301,7 @@ def add_task(title: str, priority: str = "medium") -> int:
     return task_id
 
 def get_tasks(status: str = None) -> list:
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     if status:
         cursor.execute('SELECT * FROM tasks WHERE status=? ORDER BY created_at', (status,))
@@ -299,7 +312,7 @@ def get_tasks(status: str = None) -> list:
     return results
 
 def complete_task(task_id: int):
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.execute('''
         UPDATE tasks SET status='done', done_at=?
         WHERE id=?
@@ -308,7 +321,7 @@ def complete_task(task_id: int):
     conn.close()
 
 def uncomplete_task(task_id: int):
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.execute('''
         UPDATE tasks SET status='pending', done_at=NULL
         WHERE id=?
@@ -317,7 +330,7 @@ def uncomplete_task(task_id: int):
     conn.close()
 
 def delete_task(task_id: int):
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.execute('DELETE FROM tasks WHERE id=?', (task_id,))
     conn.commit()
     conn.close()
@@ -336,7 +349,7 @@ def get_task_summary() -> str:
 
 def log_interaction_pattern(aura_response: str, user_follow_up: str, success: bool = True):
     """Log a follow-up pattern to learn from user behavior"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
 
     cursor.execute('''
@@ -368,7 +381,7 @@ def log_interaction_pattern(aura_response: str, user_follow_up: str, success: bo
 
 def get_learned_follow_ups(aura_response: str, limit: int = 3) -> list:
     """Get the most likely follow-ups based on learned patterns"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
 
     cursor.execute('''
@@ -386,7 +399,7 @@ def get_learned_follow_ups(aura_response: str, limit: int = 3) -> list:
 
 def save_session_snapshot(app: str, summary: str, topics: list):
     """Save what user was doing when AURA closes"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS session_snapshots (
@@ -408,7 +421,7 @@ def save_session_snapshot(app: str, summary: str, topics: list):
 
 def get_last_session() -> dict | None:
     """Retrieve what user was doing in the last session"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     try:
         cursor.execute('''
@@ -433,7 +446,7 @@ def get_last_session() -> dict | None:
 
 
 def save_working_memory(data: str):
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS working_memory (
@@ -450,7 +463,7 @@ def save_working_memory(data: str):
     conn.close()
 
 def get_working_memory() -> dict | None:
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     try:
         cursor.execute('''

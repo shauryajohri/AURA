@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea,
     QLineEdit, QPushButton, QFrame, QCheckBox, QSizePolicy
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer, Signal
 
 from ui.theme import (
     VOID_BLACK, NEBULA_PURPLE, EVENT_VIOLET, ACCRETION_BLUE, ION_CYAN,
@@ -115,10 +115,24 @@ class TasksPanel(QWidget):
     needed to redraw rows after add/complete/delete.
     """
 
+    countsChanged = Signal(int, int)   # (done, total) — feeds the stats chip
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._build_ui()
         self.refresh()
+
+        # Live refresh while visible, so tasks added/completed via chat
+        # ("add task ...") show up here without reopening the panel.
+        self._auto_refresh = QTimer(self)
+        self._auto_refresh.timeout.connect(
+            lambda: self.refresh() if self.isVisible() else None
+        )
+        self._auto_refresh.start(5000)
+
+    def showEvent(self, event):
+        self.refresh()
+        super().showEvent(event)
 
     def _build_ui(self):
         outer = QVBoxLayout(self)
@@ -238,6 +252,7 @@ class TasksPanel(QWidget):
         pending_count = sum(1 for r in rows if r[COL_STATUS] != "done")
         done_count = len(rows) - pending_count
         self._summary_label.setText(f"{pending_count} pending · {done_count} done")
+        self.countsChanged.emit(done_count, len(rows))
 
         if not rows:
             empty = QLabel("No tasks yet. Add one above, or just tell AURA.")

@@ -98,8 +98,13 @@ def generate_report() -> str:
     return report
 
 def get_quick_price(pair: str) -> str:
+    # Normalize the user's query ("what's EUR/USD at" → "whatseurusdat") and
+    # check whether the PAIR token appears in the QUERY — the old test was
+    # reversed (query-in-pair) and never matched.
+    query = pair.lower().replace("/", "").replace(" ", "").replace("-", "")
     for name, ticker in MAJOR_PAIRS.items():
-        if pair.lower() in name.lower():
+        token = name.lower().replace("/", "")
+        if token in query:
             data = get_pair_data(ticker)
             if data:
                 sign = "+" if data['pip_change'] > 0 else ""

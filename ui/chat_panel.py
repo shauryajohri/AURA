@@ -206,12 +206,17 @@ class ChatPanel(QWidget):
         title.setFont(theme.display_font(12))
         title.setStyleSheet(
             f"color: {theme.TEXT_PRIMARY}; background: transparent; border: none;")
+        self._mode_chip = QLabel("● NORMAL")
+        self._mode_chip.setFont(theme.mono_font(8))
         self._head_wave = WaveformWidget(bar_count=10, height=16)
         self._head_wave.setFixedWidth(70)
         head.addWidget(title)
+        head.addSpacing(8)
+        head.addWidget(self._mode_chip)
         head.addStretch()
         head.addWidget(self._head_wave)
         card_lay.addLayout(head)
+        self.set_mode("NORMAL", theme.FOCUS_GREEN)
 
         # scrolling message area
         self._scroll = QScrollArea()
@@ -305,6 +310,19 @@ class ChatPanel(QWidget):
 
     def show_reminder(self, text: str):
         self.toast.show_reminder(text)
+
+    def set_mode(self, name: str, color: str):
+        """Mode indicator chip: which engine owns the conversation."""
+        self._mode_chip.setText(f"● {name}")
+        self._mode_chip.setStyleSheet(
+            f"""
+            color: {color};
+            background-color: rgba(255, 255, 255, 0.05);
+            border: 1px solid {color};
+            border-radius: 8px;
+            padding: 1px 8px;
+            """
+        )
 
     def _on_state(self, state: str):
         self._head_wave.set_color(state_accent(state))

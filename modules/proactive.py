@@ -233,7 +233,6 @@ INTERACTION_LINES = [
     "you good, or do you need something?",
 ]
 
-
 # ── Screen helpers ─────────────────────────────────────────────────────────────
 
 def _get_screen_context() -> dict:

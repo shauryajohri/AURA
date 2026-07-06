@@ -4,7 +4,7 @@ import threading
 import re
 import random
 import ctypes
-from core.voice_gate import can_speak, mark_spoken
+from core.voice_gate import request_to_speak
 from modules.relationship_engine import get_engine
 from modules.interestingness_engine import get_engine as get_ie
 _pending_offer      = None
@@ -384,6 +384,8 @@ def _decide(ctx: dict, ie_result: dict | None = None) -> tuple[str, str]:
         _last_interaction_time = now
         return "interaction", task
 
+    return "silent", task
+
 
 def _decide_locked_distracted(ctx: dict) -> tuple[str, str]:
     global _last_suggestion_time
@@ -696,16 +698,14 @@ def _loop(speak_fn, on_suggestion_fn=None, on_presence_fn=None):
                 "ctx": ctx, "message": msg, "time": time.time()
             }
 
-            if not can_speak():
+            source = "code_error" if action == "error" else "observation"
+            if not request_to_speak(source, msg):
                 continue
-            mark_spoken()
 
             print(f"[AURA Proactive] ({action}) {msg}")
             if on_suggestion_fn:
                 on_suggestion_fn(msg)
             speak_fn(msg)
-            from modules.attention_engine import register_speech
-            register_speech()
 
 
         except Exception as e:

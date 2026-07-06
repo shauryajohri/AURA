@@ -19,6 +19,32 @@ TEXT_PRIMARY    = "#F5F3FF"
 TEXT_SECONDARY  = "#A8A0C8"   # muted lavender-grey for secondary text
 TEXT_DIM        = "#6B6490"   # timestamps, placeholders
 
+# ── State colors (design philosophy: orb = emotion) ─────────────────────
+IDLE_PURPLE     = "#8B3DFF"   # idle accent — black hole with purple ring
+THINKING_SILVER = "#C9CCD8"   # white hole, breathing
+SPEAKING_WHITE  = "#EAF2FF"   # speaking pulse
+FOCUS_GREEN     = "#3DDC97"   # focus mode, stable minimal energy
+ALERT_ORANGE    = "#FF7A3D"   # alerts — never full red
+ERROR_RED       = "#FF4D5E"   # small accents only, never a full red orb
+
+STATE_ACCENTS = {
+    "idle":      IDLE_PURPLE,
+    "listening": ACCRETION_BLUE,
+    "thinking":  THINKING_SILVER,
+    "speaking":  SPEAKING_WHITE,
+    "focus":     FOCUS_GREEN,
+    "alert":     ALERT_ORANGE,
+}
+
+# ── Model planet colors (from AI model indicator spec) ───────────────────
+MODEL_COLORS = {
+    "GPT-4o":       "#8B3DFF",  # purple
+    "Gemini 1.5":   "#4D8DFF",  # blue
+    "Claude 3.5":   "#E8E6F0",  # white/silver
+    "Grok 2":       "#FF7A3D",  # orange
+    "Local (LLM)":  "#FF4D5E",  # red
+}
+
 GLASS_BG        = "rgba(26, 16, 51, 0.55)"
 GLASS_BORDER    = "rgba(125, 127, 255, 0.18)"
 

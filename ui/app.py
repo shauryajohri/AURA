@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QObject, Qt, QTimer, Signal, Slot
 
 from ui.orb import OrbWidget
-from ui.main_window import MainWindow
+from ui.aura_window import AuraWindow
 from ui.execution_plan_panel import ExecutionPlanPanel
 from core.prompt_engine import PromptEngine
 
@@ -104,7 +104,7 @@ class AuraAppController(QObject):
         self._pending_response = []
 
         self.orb = OrbWidget()
-        self.main_window = MainWindow(self.orb)
+        self.main_window = AuraWindow()
 
         self.prompt_engine = PromptEngine()
 

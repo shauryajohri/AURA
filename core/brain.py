@@ -9,8 +9,7 @@ from modules.csv_handler import check_csv
 from modules.command_handler import handle_command
 from modules.speech_planner import plan, debug as plan_debug
 import modules.voice_output as tts
-from core.personality import (INTENT_PROMPT, VERIFY_PROMPT, ANTICIPATE_PROMPT, SHOULD_RESPOND_PROMPT, OUTPUT_GUARD_PROMPT)
-from core.thinking import think, post_think
+from core.personality import (INTENT_PROMPT, ANTICIPATE_PROMPT, SHOULD_RESPOND_PROMPT)
 
 DEBUG_SPEECH = True
 
@@ -28,12 +27,12 @@ def get_last_user_message_time() -> float:
     return _last_user_message_time
 
 
-def mark_user_active():
+def mark_user_active(text: str = ""):
     global _last_user_message_time
     _last_user_message_time = time.time()
     try:
         from modules.relationship_engine import get_engine
-        get_engine().record_user_message()   # ← add this
+        get_engine().record_user_message()
     except Exception:
         pass
     try:
@@ -44,6 +43,16 @@ def mark_user_active():
     try:
         from modules.attention_engine import get_engine as get_ae
         get_ae().record_user_message()
+    except Exception:
+        pass
+    try:
+        # Refill conversation energy on every real message, and honour explicit
+        # "busy" / "I'm back" phrases by freezing/thawing the meter.
+        from modules.conversation_energy import get_energy
+        energy = get_energy()
+        energy.record_interaction(meaningful=True)
+        if text:
+            energy.note_user_text(text)
     except Exception:
         pass
 def update_context(ctx: dict):
@@ -333,7 +342,7 @@ def process(query: str) -> str:
 
 
 def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: str | None = None) -> str:
-    mark_user_active()
+    mark_user_active(query)
     print(f"\n[AURA] Streaming: '{query}'")
     query_lower = query.lower()
     focus_response = handle_focus_command(query)

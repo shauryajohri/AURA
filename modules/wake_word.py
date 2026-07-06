@@ -1,10 +1,10 @@
 import pvporcupine
-import keyboard
 from pvrecorder import PvRecorder
 from config.settings import PICOVOICE_KEY
-ACCESS_KEY = PICOVOICE_KEY
 
-ACCESS_KEY = "your_picovoice_key_here"
+# Real key from the environment. (Previously a placeholder string on the next
+# line clobbered this, so wake-word auth always failed.)
+ACCESS_KEY = PICOVOICE_KEY
 
 def wait_for_wake_word() -> bool:
     porcupine = None

@@ -38,8 +38,19 @@ def get_active_window() -> str:
         if win:
             return win.title
         return "unknown"
-    except:
+    except Exception:
         return "unknown"
+
+
+def list_window_titles() -> list:
+    """All open window titles (lowercased, non-empty). Used to detect ambient
+    context like a music player or a meeting app being open in the background."""
+    if gw is None:
+        return []
+    try:
+        return [w.title.lower() for w in gw.getAllWindows() if w.title and w.title.strip()]
+    except Exception:
+        return []
 # Common shorthand people use when naming apps out loud; extend as needed.
 WINDOW_NAME_ALIASES = {
     "vs": "visual studio code",

@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 from core.personality import DONNA_SYSTEM_PROMPT, INTENT_PERSONALITY_ADJUSTMENTS
 
 load_dotenv()  # must be before os.getenv
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")  # get from console.groq.com
 GROQ_MODEL   = "llama-3.3-70b-versatile"
 GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
@@ -204,17 +203,12 @@ def call_classifier(prompt: str) -> str:
             return ""
         data = response.json()
         if "choices" not in data:
-            if response.status_code == 429:
-                _start_rate_limit_cooldown()
-            return "RATE_LIMIT"
-        data = response.json()
-        if "choices" not in data:
-            print(f"[AURA] Groq search API error (status {response.status_code}): {data}")
+            print(f"[AURA] Groq classifier API error (status {response.status_code}): {data}")
             return "CONNECTION_ERROR"
         raw = data["choices"][0]["message"]["content"]
         return clean_response(raw)
     except Exception as e:
-        print(f"[AURA] Groq search error: {e}")
+        print(f"[AURA] Groq classifier error: {e}")
         return "CONNECTION_ERROR"
 
 
@@ -222,7 +216,9 @@ def route(intent: str, prompt: str) -> str:
     extra = INTENT_PERSONALITY_ADJUSTMENTS.get(intent, "")
     system = DONNA_SYSTEM_PROMPT + extra
     if intent == "SEARCH":
-        return call_groq_with_search(prompt, system)
+        # No dedicated web-search backend is wired up; answer with the base
+        # model instead of crashing on an undefined function (was NameError).
+        return call_groq(prompt, system, intent="SEARCH")
     return call_groq(prompt, system, intent=intent)
 
 def route_streaming(intent: str, prompt: str, system_prompt: str | None = None):

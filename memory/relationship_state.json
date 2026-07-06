@@ -1,14 +1,14 @@
 {
-  "last_interaction": 1783314319.4914467,
+  "last_interaction": 1783316326.195416,
   "last_proactive_at": null,
-  "today_messages": 1,
+  "today_messages": 2,
   "ignored_minutes": 0,
-  "mood": "normal",
-  "attention": 0.1,
+  "mood": "curious",
+  "attention": 0.35,
   "interrupt_budget": 10,
-  "trust_score": 0.46000000000000013,
+  "trust_score": 0.46500000000000014,
   "last_reset_date": "2026-07-06",
   "personality": "companion",
   "total_sessions": 0,
-  "total_messages": 32
+  "total_messages": 33
 }

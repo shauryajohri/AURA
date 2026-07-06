@@ -48,11 +48,9 @@ def get_greeting_with_memory() -> str | None:
     last = store.get_last_session()
     if not last:
         return None
-    import sqlite3
-    conn = sqlite3.connect("memory/aura_memory.db")
-    conn.execute("DELETE FROM session_snapshots")
-    conn.commit()
-    conn.close()
+    # NOTE: previously this wiped the entire session_snapshots table on every
+    # startup, which destroyed the memory feature after a single launch. We now
+    # read only — snapshots persist and are pruned by save/rotation elsewhere.
     # parse how long ago
     import datetime
     try:

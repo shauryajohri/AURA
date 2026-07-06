@@ -284,11 +284,25 @@ class ExecutionPlanPanel(QWidget):
     def show_plan(self, summary: dict):
         """
         Call this with the dict from EngineResult.summary_dict()
-        to display the panel.
+        to display the panel. Renders as a centered overlay card on top
+        of the parent window (docking it into a column layout squeezed
+        every row into invisible slivers).
         """
         self._summary = summary
         self._build_ui(summary)
+
+        parent = self.parentWidget()
+        if parent is not None:
+            width = min(620, max(420, parent.width() - 240))
+            self.setFixedWidth(width)
+            self.setMaximumHeight(parent.height() - 120)
+            self.adjustSize()
+            self.move(
+                (parent.width() - self.width()) // 2,
+                (parent.height() - self.height()) // 2,
+            )
         self.show()
+        self.raise_()
 
     def _build_ui(self, s: dict):
         outer = self.layout()
@@ -320,6 +334,21 @@ class ExecutionPlanPanel(QWidget):
         title_lbl.setObjectName("headerTitle")
         h_layout.addWidget(title_lbl)
         h_layout.addStretch()
+
+        btn_close = QPushButton("✕")
+        btn_close.setFixedSize(24, 24)
+        btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_close.setStyleSheet(
+            f"""
+            QPushButton {{ background: transparent; border: none;
+                           color: {COLORS['text_dim']}; font-size: 12px;
+                           border-radius: 6px; }}
+            QPushButton:hover {{ color: {COLORS['danger']};
+                                 background: rgba(255, 92, 110, 0.12); }}
+            """
+        )
+        btn_close.clicked.connect(self._on_cancel)   # close = cancel the plan
+        h_layout.addWidget(btn_close)
         panel_layout.addWidget(header)
 
         # --- Goal ---

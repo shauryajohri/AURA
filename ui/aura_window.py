@@ -12,7 +12,7 @@ import time
 from PySide6.QtCore import Qt, QPoint, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from ui import theme
@@ -21,6 +21,7 @@ from ui.chat_panel import ChatPanel
 from ui.sidebar import Sidebar
 from ui.state import AuraState, StateBus
 from ui.stats_bar import StatsBar
+from ui.tasks_panel import TasksPanel
 
 
 class AuraWindow(QWidget):
@@ -66,16 +67,29 @@ class AuraWindow(QWidget):
 
         self.sidebar = Sidebar(self.bus)
         self.center = CenterPanel(self.bus)
+        self.tasks_panel = TasksPanel()
         self.chat = ChatPanel(self.bus)
         self.chat.setFixedWidth(320)
 
+        # Center area is a stack: Home (cosmos) ⇄ Tasks (full list,
+        # completed included). Sidebar nav switches pages.
+        self.center_stack = QStackedWidget()
+        self.center_stack.addWidget(self.center)       # index 0 — Home
+        self.center_stack.addWidget(self.tasks_panel)  # index 1 — Tasks
+
         columns.addWidget(self.sidebar)
-        columns.addWidget(self.center, 1)
+        columns.addWidget(self.center_stack, 1)
         columns.addWidget(self.chat)
         root.addLayout(columns, 1)
 
         self.stats = StatsBar()
         root.addWidget(self.stats)
+
+        self.sidebar.navSelected.connect(self._on_nav_selected)
+        self.tasks_panel.countsChanged.connect(
+            lambda done, total: self.stats.set_tasks(f"{done}/{total}")
+        )
+        self.tasks_panel.refresh()  # seed the Completed Tasks chip with real data
 
         # mock-phase hotkeys: 1..6 cycle presence states
         for i, state in enumerate(AuraState.ALL, start=1):
@@ -99,6 +113,15 @@ class AuraWindow(QWidget):
     def _toggle_mic(self):
         self._mic_on = not self._mic_on
         self.micToggled.emit(self._mic_on)
+
+    # ── nav / views ──────────────────────────────────────────────────────
+    def _on_nav_selected(self, name: str):
+        if name == "Tasks":
+            self.tasks_panel.refresh()
+            self.center_stack.setCurrentWidget(self.tasks_panel)
+        else:
+            # Home and everything not yet implemented → cosmos view
+            self.center_stack.setCurrentWidget(self.center)
 
     def is_mic_on(self) -> bool:
         return self._mic_on
@@ -128,12 +151,30 @@ class AuraWindow(QWidget):
     def set_presence(self, presence: str):
         self.sidebar.set_presence(presence)
 
+    def set_model_text(self, text: str):
+        """Show which LLM is actually being used (fed by the controller)."""
+        self.stats.set_model(text)
+
+    # mode name → (chip color, input placeholder)
+    _MODE_UI = {
+        "NORMAL":   (theme.FOCUS_GREEN,  "Talk or type a message..."),
+        "PROMPT":   (theme.IDLE_PURPLE,  "PROMPT MODE — buffering… /prompt_end to build"),
+        "STUDY":    (theme.ALERT_ORANGE, "STUDY MODE — /study_end to finish"),
+        "DEBUG":    (theme.ERROR_RED,    "DEBUG MODE — /debug_end to finish"),
+    }
+
+    def set_mode(self, mode: str):
+        """Conversation Director mode → header chip + input placeholder."""
+        color, placeholder = self._MODE_UI.get(
+            mode, (theme.FOCUS_GREEN, "Talk or type a message..."))
+        self.chat.set_mode(mode, color)
+        self.chat.input.setPlaceholderText(placeholder)
+
     def set_plan_panel(self, panel: QWidget):
-        """Docks the execution-plan approval panel into the center column,
-        between the cosmos and the routing bar. Panel shows itself when
-        a plan is ready."""
-        layout = self.center.layout()
-        layout.insertWidget(2, panel)
+        """The approval panel floats as a centered overlay card on top of
+        the window (docking it into the center column squeezed every row
+        into invisible slivers — no visible text or buttons)."""
+        panel.setParent(self)
         panel.hide()
 
     def closeEvent(self, event):

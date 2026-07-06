@@ -22,32 +22,33 @@ class ModelSelection:
 # domain_filter=None means "any domain"
 # ---------------------------------------------------------------------------
 
+# These are REAL Groq model ids — the selection is actually dispatched
+# (ui/app.py passes model_id through to ai_router.call_groq). Domain rules
+# come FIRST so they genuinely take precedence over the generic tiers.
+
 ROUTING_TABLE = [
-    # Fast, cheap model for trivial tasks
-    (30, None, "qwen3-coder", "Qwen3-Coder",
-     "Simple task — lightweight coder model is fast and cheap",
-     "~$0.00"),
-
-    # Mid-tier for moderate complexity
-    (70, None, "minimax", "MiniMax",
-     "Moderate task — balanced performance and cost",
-     "~$0.01–$0.03"),
-
-    # Research tasks always go to Claude regardless of complexity
-    (101, "RESEARCH", "claude-sonnet-4-6", "Claude",
+    # Research tasks always go to the big model regardless of complexity
+    (101, "RESEARCH", "llama-3.3-70b-versatile", "Llama 3.3 70B (Groq)",
      "Research tasks need broad knowledge and nuanced reasoning",
-     "~$0.03–$0.08"),
+     "free tier"),
 
-    # High-complexity coding
-    (101, "CODING", "claude-sonnet-4-6", "Claude",
-     "Complex code changes need strong reasoning and context retention",
-     "~$0.04–$0.10"),
+    # Coding always goes to the big model
+    (101, "CODING", "llama-3.3-70b-versatile", "Llama 3.3 70B (Groq)",
+     "Code changes need strong reasoning and context retention",
+     "free tier"),
 
-    # Everything else at high complexity
-    (101, None, "claude-sonnet-4-6", "Claude",
-     "High complexity — Claude handles the full context well",
-     "~$0.05–$0.12"),
+    # Fast, cheap model for trivial tasks
+    (30, None, "llama-3.1-8b-instant", "Llama 3.1 8B Instant (Groq)",
+     "Simple task — the small instant model is faster",
+     "free tier"),
+
+    # Everything else
+    (101, None, "llama-3.3-70b-versatile", "Llama 3.3 70B (Groq)",
+     "Default — full-size model handles the whole context",
+     "free tier"),
 ]
+
+DEFAULT_MODEL_ID = "llama-3.3-70b-versatile"
 
 
 def select_model(complexity: int, domain: str = "GENERAL") -> ModelSelection:
@@ -63,8 +64,8 @@ def select_model(complexity: int, domain: str = "GENERAL") -> ModelSelection:
                 )
     # Fallback
     return ModelSelection(
-        model_id="claude-sonnet-4-6",
-        display_name="Claude",
+        model_id=DEFAULT_MODEL_ID,
+        display_name="Llama 3.3 70B (Groq)",
         reason="Fallback for unmatched routing",
-        estimated_cost="~$0.05",
+        estimated_cost="free tier",
     )

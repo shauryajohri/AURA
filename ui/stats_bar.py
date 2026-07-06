@@ -53,14 +53,19 @@ class StatsBar(QWidget):
         note_lay.addWidget(self.note)
         lay.addWidget(note_panel, 1)
 
+        self.model_chip = _StatChip("⚛", "Model", "—", theme.ION_CYAN)
         self.focus_chip = _StatChip("◷", "Focus Time", "2h 15m", theme.FOCUS_GREEN)
-        self.tasks_chip = _StatChip("✓", "Completed Tasks", "3/6", theme.ACCRETION_BLUE)
+        self.tasks_chip = _StatChip("✓", "Completed Tasks", "0/0", theme.ACCRETION_BLUE)
         self.prod_chip = _StatChip("✦", "Productivity", "78%", theme.IDLE_PURPLE)
+        lay.addWidget(self.model_chip)
         lay.addWidget(self.focus_chip)
         lay.addWidget(self.tasks_chip)
         lay.addWidget(self.prod_chip)
 
     # future brain hooks
+    def set_model(self, text: str):
+        self.model_chip.value.setText(text)
+
     def set_focus_time(self, text: str):
         self.focus_chip.value.setText(text)
 

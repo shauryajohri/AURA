@@ -22,11 +22,11 @@ class UiBridge(QObject):
     def show_suggestion(self, text: str):
         self.controller.main_window.append_message(text, "AURA")
 
-greeting = get_greeting_with_memory()
-if greeting:
-    print(f"[AURA] {greeting}")
-
 if __name__ == "__main__":
+    greeting = get_greeting_with_memory()
+    if greeting:
+        print(f"[AURA] {greeting}")
+
     app = QApplication(sys.argv)
     controller = AuraAppController(app)
     bridge = UiBridge(controller)

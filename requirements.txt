@@ -1,0 +1,24 @@
+# AURA — runtime dependencies
+PySide6
+requests
+python-dotenv
+
+# Voice
+edge-tts
+pygame
+SpeechRecognition
+PyAudio
+pvporcupine
+pvrecorder
+
+# Data / forex
+yfinance
+ta
+pandas
+
+# Utilities
+pyperclip
+keyboard
+
+# Optional — local should_respond gate (falls back gracefully if absent)
+ollama

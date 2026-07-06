@@ -54,7 +54,7 @@ class StateBus(QObject):
     def __init__(self):
         super().__init__()
         self._state = AuraState.IDLE
-        self._active_model = "GPT-4o"
+        self._active_model = "Llama 3.3 70B"
 
     @property
     def state(self) -> str:

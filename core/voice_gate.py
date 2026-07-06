@@ -54,6 +54,7 @@ _round_open = False
 _round_deadline = 0.0
 _round_bids = []   # list of dicts: {source, priority, message, time}
 _round_id = 0
+_round_results = {}  # round_id -> winning bid dict (judged once, read by all bidders)
 
 
 def _default_priority(source: str) -> int:
@@ -100,7 +101,6 @@ def request_to_speak(source: str, message: str, priority: int = None) -> bool:
         return False
 
     bid_priority = priority if priority is not None else _default_priority(source)
-    my_round_id = None
 
     with _lock:
         now = time.time()
@@ -110,32 +110,37 @@ def request_to_speak(source: str, message: str, priority: int = None) -> bool:
             _round_bids = []
             _round_id += 1
         my_round_id = _round_id
-        _round_bids.append({
+        my_bid = {
             "source": source,
             "priority": bid_priority,
             "message": message,
             "time": now,
-        })
+        }
+        _round_bids.append(my_bid)
         wait_time = max(0.0, _round_deadline - now)
 
     if wait_time > 0:
         time.sleep(wait_time)
 
     with _lock:
-        # If a newer round has already started, this bid's round is
-        # stale — bail out quietly rather than judge against the wrong set.
-        if my_round_id != _round_id:
-            return False
+        # The round is judged exactly ONCE — by whichever bidder wakes
+        # first — and the winning bid is cached so every other bidder in
+        # the same round sees the same verdict (fixes the race where a
+        # losing thread cleared the bids and the real winner found an
+        # empty round and stayed silent).
+        winner = _round_results.get(my_round_id)
+        if winner is None:
+            if my_round_id != _round_id or not _round_bids:
+                return False
+            winner = max(_round_bids, key=lambda b: (b["priority"], -b["time"]))
+            _round_results[my_round_id] = winner
+            _round_open = False
+            _round_bids = []
+            # Prune old verdicts so the cache can't grow unbounded.
+            for rid in [r for r in _round_results if r < my_round_id - 10]:
+                del _round_results[rid]
 
-        if not _round_bids:
-            return False
-
-        winner = max(_round_bids, key=lambda b: (b["priority"], -b["time"]))
-        _round_open = False
-        _round_bids = []
-
-        won = (winner["source"] == source and winner["priority"] == bid_priority
-               and winner["message"] == message)
+        won = winner is my_bid  # identity — no accidental ties on equal bids
 
         if won:
             _last_spoken_time = time.time()

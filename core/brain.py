@@ -341,7 +341,7 @@ def process(query: str) -> str:
     return final_answer
 
 
-def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: str | None = None) -> str:
+def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: str | None = None, model: str | None = None, intent_hint: str | None = None) -> str:
     mark_user_active(query)
     print(f"\n[AURA] Streaming: '{query}'")
     query_lower = query.lower()
@@ -431,7 +431,12 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
     # (which IS the compiled user prompt) as-is - don't wrap it in context.
     if system_prompt is not None:
         sp_lower = system_prompt.lower()
-        if any(w in sp_lower for w in ["software engineer", "code", "coding", "implement"]):
+        if intent_hint:
+            # The plan engine knows its domain — trust it over keyword
+            # guessing (a miss dropped coding plans into CASUAL mode:
+            # 150 tokens, 2-sentence limit, no code extraction).
+            intent = intent_hint
+        elif any(w in sp_lower for w in ["software engineer", "code", "coding", "implement"]):
             intent = "CODING"
         elif "research" in sp_lower:
             intent = "SEARCH"
@@ -444,7 +449,10 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
         intent = "SEARCH"
         full_prompt = build_context_prompt(query, intent, "")
     else:
-        intent = classify_intent(query)
+        # An explicit hint from the Conversation Director pins the intent —
+        # the classifier alone could decide CODING for a mere statement of
+        # intent and generate unsolicited code past the permission gate.
+        intent = intent_hint or classify_intent(query)
         full_prompt = build_context_prompt(query, intent, "")
     if intent in {"RECALL", "SAVE"}:
         result = process(query)
@@ -453,14 +461,24 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
         return result
 
     if intent == "CODING":
-        from modules.project_context import get_relevant_context
-        project_ctx = get_relevant_context(query)
+        # Only inject AURA's own source when the request is actually about
+        # THIS project. Generic coding questions ("linked list in python")
+        # were getting AURA code chunks stuffed in, and the model wrote
+        # about those instead of the user's task.
+        q_low_ctx = query.lower()
+        wants_project = (".py" in q_low_ctx or "aura" in q_low_ctx
+                         or "this project" in q_low_ctx
+                         or "the project" in q_low_ctx)
+        project_ctx = ""
+        if wants_project:
+            from modules.project_context import get_relevant_context
+            project_ctx = get_relevant_context(query)
         if project_ctx:
             full_prompt = f"Relevant code from the AURA project:\n{project_ctx}\n\n{full_prompt}"
             print(f"[AURA] Injected project context ({len(project_ctx)} chars)")
 
         raw_chunks = []
-        for chunk in route_streaming(intent, full_prompt, system_prompt=system_prompt):
+        for chunk in route_streaming(intent, full_prompt, system_prompt=system_prompt, model=model):
             raw_chunks.append(chunk)
         raw = "".join(raw_chunks).strip()
 
@@ -487,7 +505,7 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
         return chat_msg
 
     chunks = []
-    for chunk in route_streaming(intent, full_prompt, system_prompt=system_prompt):
+    for chunk in route_streaming(intent, full_prompt, system_prompt=system_prompt, model=model):
         chunks.append(chunk)
         if on_chunk and chunk not in {"CONNECTION_ERROR", "RATE_LIMIT"}:
             on_chunk(chunk)

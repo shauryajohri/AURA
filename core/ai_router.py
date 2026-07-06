@@ -108,7 +108,7 @@ def clean_response(text: str) -> str:
         result += "."
     return result.strip()
 
-def call_groq_streaming(prompt: str, system: str = DONNA_SYSTEM_PROMPT, intent: str = "CASUAL"):
+def call_groq_streaming(prompt: str, system: str = DONNA_SYSTEM_PROMPT, intent: str = "CASUAL", model: str = None):
     if _in_rate_limit_cooldown():
         yield "RATE_LIMIT"
         return
@@ -134,7 +134,7 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
                 "Content-Type": "application/json"
             },
             json={
-                "model": GROQ_MODEL,
+                "model": model or GROQ_MODEL,
                 "messages": [
                     {"role": "system", "content": strict_system},
                     {"role": "user",   "content": prompt}
@@ -221,11 +221,50 @@ def route(intent: str, prompt: str) -> str:
         return call_groq(prompt, system, intent="SEARCH")
     return call_groq(prompt, system, intent=intent)
 
-def route_streaming(intent: str, prompt: str, system_prompt: str | None = None):
+def route_streaming(intent: str, prompt: str, system_prompt: str | None = None, model: str | None = None):
     extra = INTENT_PERSONALITY_ADJUSTMENTS.get(intent, "")
     system = system_prompt if system_prompt is not None else DONNA_SYSTEM_PROMPT + extra
-    for chunk in call_groq_streaming(prompt, system, intent=intent):
+    for chunk in call_groq_streaming(prompt, system, intent=intent, model=model):
         yield chunk
+def call_groq_raw(prompt: str, system: str, max_tokens: int = 1024,
+                  temperature: float = 0.4, model: str = None) -> str:
+    """Clean single call — NO personality addon, NO 2-sentence limit,
+    NO response cleaning. Used by the Prompt Maker (/prompt_end) and any
+    future session mode that needs full-length structured output."""
+    if _in_rate_limit_cooldown():
+        return "RATE_LIMIT"
+    try:
+        response = requests.post(
+            GROQ_URL,
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": model or GROQ_MODEL,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user",   "content": prompt}
+                ],
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "stream": False
+            },
+            timeout=45
+        )
+        if response.status_code == 429:
+            _start_rate_limit_cooldown()
+            return "RATE_LIMIT"
+        data = response.json()
+        if "choices" not in data:
+            print(f"[AURA] Groq raw API error (status {response.status_code}): {data}")
+            return "CONNECTION_ERROR"
+        return data["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        print(f"[AURA] Groq raw error: {e}")
+        return "CONNECTION_ERROR"
+
+
 def call_groq(prompt: str, system: str = DONNA_SYSTEM_PROMPT, intent: str = "CASUAL") -> str:
     if _in_rate_limit_cooldown():
         return "RATE_LIMIT"

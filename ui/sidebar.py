@@ -7,7 +7,7 @@ Left column: logo, navigation, the embedded mini-orb presence panel
 import math
 import random
 
-from PySide6.QtCore import Qt, QTimer, QRectF, QPointF
+from PySide6.QtCore import Qt, QTimer, QRectF, QPointF, Signal
 from PySide6.QtGui import QPainter, QColor, QRadialGradient, QBrush, QPen
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
@@ -121,6 +121,8 @@ class MiniOrb(QWidget):
 
 
 class Sidebar(QWidget):
+    navSelected = Signal(str)   # "Home", "Tasks", "Memory", ...
+
     def __init__(self, bus: StateBus, parent=None):
         super().__init__(parent)
         self._bus = bus
@@ -230,6 +232,7 @@ class Sidebar(QWidget):
     def _set_active(self, name: str):
         self._active_nav = name
         self._refresh_nav()
+        self.navSelected.emit(name)
 
     def _refresh_nav(self):
         for label, btn in self._nav_buttons.items():

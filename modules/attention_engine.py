@@ -291,7 +291,7 @@ def _build_return_lines(gap_seconds: float, env: dict, trust: float) -> list:
 def _llm_generate(stage: int, silence_seconds: float, env: dict) -> list | None:
     """Generate nudge lines via LLM. Returns list of strings or None on failure."""
     try:
-        from core.ai_router import call_groq
+        from core.ai_router import call_groq, GROQ_MODEL_LIGHT
         trust = _get_trust()
         silent_min = round(silence_seconds / 60, 1)
 
@@ -316,7 +316,7 @@ def _llm_generate(stage: int, silence_seconds: float, env: dict) -> list | None:
             num_lines=num_lines,
         )
 
-        result = call_groq(prompt, intent="CASUAL").strip()
+        result = call_groq(prompt, intent="CASUAL", model=GROQ_MODEL_LIGHT).strip()
         if not result or result.upper() in {"CONNECTION_ERROR", "RATE_LIMIT"}:
             return None
 
@@ -330,7 +330,7 @@ def _llm_generate(stage: int, silence_seconds: float, env: dict) -> list | None:
 
 def _llm_presence(env: dict) -> list | None:
     try:
-        from core.ai_router import call_groq
+        from core.ai_router import call_groq, GROQ_MODEL_LIGHT
         trust = _get_trust()
         prompt = PRESENCE_PROMPT.format(
             time_of_day=env.get("time_of_day", "day"),
@@ -338,7 +338,7 @@ def _llm_presence(env: dict) -> list | None:
             last_summary=_last_session_summary(),
             relationship=_relationship_word(trust),
         )
-        result = call_groq(prompt, intent="CASUAL").strip()
+        result = call_groq(prompt, intent="CASUAL", model=GROQ_MODEL_LIGHT).strip()
         if not result or result.upper() in {"CONNECTION_ERROR", "RATE_LIMIT"}:
             return None
         line = result.split("\n")[0].strip().strip('"').strip("'")
@@ -435,6 +435,10 @@ class AttentionEngine:
         self._running     = True
         threading.Thread(target=self._loop, daemon=True).start()
         threading.Thread(target=self._presence_once, daemon=True).start()
+        # Fast watcher: greet the RETURN (mouse moves) within ~2s, not on the
+        # 15s nudge cadence — the greeting must come before the user's first
+        # message, not after it.
+        threading.Thread(target=self._return_loop, daemon=True).start()
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
@@ -493,8 +497,16 @@ class AttentionEngine:
         print(f"[AttentionEngine] Presence: {lines}")
         self._speak_lines(lines)
 
-    # ── State 5 — Return from AFK ────────────────────────────────────────────
-    def _check_return(self, env: dict):
+    # ── State 5 — Return from AFK (own fast loop: mouse move = greeting) ─────
+    def _return_loop(self):
+        while self._running:
+            time.sleep(2)
+            try:
+                self._check_return_fast()
+            except Exception as e:
+                print(f"[AttentionEngine ReturnLoop] {e}")
+
+    def _check_return_fast(self):
         try:
             from modules.proactive import _idle_seconds, AFK_THRESHOLD
             idle = _idle_seconds()
@@ -503,11 +515,17 @@ class AttentionEngine:
         prev = self._prev_idle
         self._prev_idle = idle
 
-        if env.get("meeting"):
-            return
         # Was away (prev idle over threshold), now clearly present again.
         if prev >= AFK_THRESHOLD and idle <= RETURN_IDLE_MAX:
+            # If they already sent a message, the conversation has started —
+            # a late "Finally." after their question reads out of order.
+            # The comeback lines cover that case; skip the return greeting.
+            if time.time() - self._last_user_message_time < 15:
+                return
             if not can_speak_now():
+                return
+            env = _detect_environment()   # only on trigger — cheap loop stays cheap
+            if env.get("meeting"):
                 return
             trust = _get_trust()
             lines = _build_return_lines(prev, env, trust)
@@ -559,8 +577,9 @@ class AttentionEngine:
                 except Exception:
                     energy = None
 
-                # State 5 — physical return happens regardless of "talk" silence.
-                self._check_return(env)
+                # State 5 (return from AFK) now runs in its own 2s fast loop —
+                # the greeting must beat the user's first message, and 15s
+                # cadence was landing it AFTER the conversation restarted.
 
                 if not self._should_activate():
                     continue

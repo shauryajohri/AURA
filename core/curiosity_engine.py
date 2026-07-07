@@ -131,8 +131,8 @@ def _safe_call_groq(prompt: str) -> Optional[str]:
     """Tries call_groq first (current router), falls back to call_claude
     (older alias seen in brain.py), gives up cleanly otherwise."""
     try:
-        from core.ai_router import call_groq
-        result = call_groq(prompt, intent="CASUAL").strip()
+        from core.ai_router import call_groq, GROQ_MODEL_LIGHT
+        result = call_groq(prompt, intent="CASUAL", model=GROQ_MODEL_LIGHT).strip()
         if result and result.upper() not in {"CONNECTION_ERROR", "RATE_LIMIT", ""}:
             return result
     except Exception:

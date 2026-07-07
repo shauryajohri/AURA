@@ -11,15 +11,17 @@ rather than sprite frames, so transitions can interpolate smoothly.
 
 import math
 import random
-from PySide6.QtWidgets import QWidget, QMenu
+from PySide6.QtWidgets import QWidget, QMenu, QToolTip
 from PySide6.QtCore import (
     Qt, QTimer, QPoint, QPropertyAnimation, QEasingCurve,
     Property, Signal, QRectF, QSettings
 )
 from PySide6.QtGui import (
     QPainter, QColor, QRadialGradient, QConicalGradient, QPen, QBrush,
-    QAction, QPainterPath
+    QAction, QPainterPath, QGuiApplication
 )
+
+from ui.state import AuraState
 
 # ── Palette ───────────────────────────────────────────────────────────────
 VOID_BLACK      = QColor("#05030D")
@@ -28,6 +30,13 @@ EVENT_VIOLET    = QColor("#3D2B7A")
 ACCRETION_BLUE  = QColor("#5B7FFF")
 ION_CYAN        = QColor("#7FE8FF")
 STARLIGHT_WHITE = QColor("#F5F3FF")
+FOCUS_GREEN     = QColor("#3DDC97")
+ALERT_ORANGE    = QColor("#FF7A3D")
+
+SNAP_DISTANCE = 90   # px from a screen edge that triggers snapping
+SNAP_MARGIN = 14     # resting gap between orb and the edge
+SIZE_PRESETS = (("Small", 80), ("Medium", 100), ("Large", 120), ("XL", 160))
+OPACITY_PRESETS = (("100%", 1.0), ("85%", 0.85), ("70%", 0.70))
 
 ORB_SIZE = 120  # default widget diameter in px, including glow margin
 
@@ -73,20 +82,23 @@ class OrbWidget(QWidget):
     STATE_LISTENING = "listening"
     STATE_THINKING  = "thinking"
     STATE_SPEAKING  = "speaking"
+    STATE_FOCUS     = "focus"
+    STATE_ALERT     = "alert"
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowFlags(
-            Qt.FramelessWindowHint
-            | Qt.WindowStaysOnTopHint
-            | Qt.Tool                # keeps it off the taskbar
-        )
+        self._always_on_top = True
+        self.setWindowFlags(self._window_flags())
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_NoSystemBackground)
 
         self._settings = QSettings("AURA", "OrbWidget")
         saved_size = self._settings.value("orb_size", ORB_SIZE, type=int)
         self.resize(saved_size, saved_size)
+        self.setWindowOpacity(
+            self._settings.value("orb_opacity", 1.0, type=float))
+        self._locked = self._settings.value("orb_locked", False, type=bool)
+        self._status_task = ""   # optional "Task: ..." tooltip line
 
         self._state = self.STATE_IDLE
         self._rotation = 0.0
@@ -126,6 +138,17 @@ class OrbWidget(QWidget):
         self._click_pending = False
         self._dragged = False
 
+        # eased glide to the nearest screen edge after a drag
+        self._snap_anim = QPropertyAnimation(self, b"pos")
+        self._snap_anim.setDuration(320)
+        self._snap_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+    def _window_flags(self):
+        flags = Qt.FramelessWindowHint | Qt.Tool
+        if self._always_on_top:
+            flags |= Qt.WindowStaysOnTopHint
+        return flags
+
     # ── Qt property plumbing for animating glow smoothly ─────────────────
     def getGlowIntensity(self):
         return self._glow_intensity
@@ -138,17 +161,26 @@ class OrbWidget(QWidget):
 
     # ── Public state API ──────────────────────────────────────────────────
     def set_state(self, state: str):
-        if state not in (self.STATE_IDLE, self.STATE_LISTENING,
-                          self.STATE_THINKING, self.STATE_SPEAKING):
-            return
-        self._state = state
         targets = {
             self.STATE_IDLE: 0.55,
             self.STATE_LISTENING: 0.75,
             self.STATE_THINKING: 0.85,
             self.STATE_SPEAKING: 1.0,
+            self.STATE_FOCUS: 0.42,
+            self.STATE_ALERT: 1.0,
         }
+        if state not in targets:
+            return
+        self._state = state
         self._animate_glow_to(targets[state])
+
+    def set_status_task(self, text: str):
+        """Optional task line for the hover tooltip."""
+        self._status_task = text
+
+    def attach_bus(self, bus):
+        """Follow the app-wide StateBus so orb + window are one presence."""
+        bus.stateChanged.connect(self.set_state)
 
     def _animate_glow_to(self, target: float):
         self._glow_anim.stop()
@@ -163,6 +195,8 @@ class OrbWidget(QWidget):
             self.STATE_LISTENING: 0.6,
             self.STATE_THINKING: 1.6,
             self.STATE_SPEAKING: 0.9,
+            self.STATE_FOCUS: 0.2,
+            self.STATE_ALERT: 2.4,
         }.get(self._state, 0.35)
 
         self._rotation = (self._rotation + speed) % 360
@@ -206,9 +240,14 @@ class OrbWidget(QWidget):
         if self._state == self.STATE_LISTENING:
             return ACCRETION_BLUE, ION_CYAN, EVENT_VIOLET
         if self._state == self.STATE_THINKING:
-            return ACCRETION_BLUE, EVENT_VIOLET, QColor("#2A1A55")
+            # white hole — "I'm working." without a word
+            return STARLIGHT_WHITE, QColor("#C9CCD8"), QColor("#4A4A5E")
         if self._state == self.STATE_SPEAKING:
             return ION_CYAN, STARLIGHT_WHITE, ACCRETION_BLUE
+        if self._state == self.STATE_FOCUS:
+            return FOCUS_GREEN, FOCUS_GREEN, QColor("#0F3D2B")
+        if self._state == self.STATE_ALERT:
+            return ALERT_ORANGE, ALERT_ORANGE, QColor("#552B1A")
         return EVENT_VIOLET, ACCRETION_BLUE, NEBULA_PURPLE
 
     def _paint_outer_glow(self, painter, cx, cy, core_r):
@@ -278,6 +317,15 @@ class OrbWidget(QWidget):
         painter.setPen(Qt.NoPen)
         painter.drawEllipse(QRectF(cx - r, cy - r, r * 2, r * 2))
 
+    # ── Hover tooltip ─────────────────────────────────────────────────────
+    def enterEvent(self, event):
+        lines = ["AURA ✦", f"Mode: {AuraState.LABELS.get(self._state, '—')}"]
+        if self._status_task:
+            lines.append(f"Task: {self._status_task}")
+        QToolTip.showText(self.mapToGlobal(QPoint(self.width(), 0)),
+                          "\n".join(lines), self)
+        super().enterEvent(event)
+
     # ── Mouse interaction ─────────────────────────────────────────────────
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -287,8 +335,11 @@ class OrbWidget(QWidget):
                 self._resize_start_pos = event.globalPosition().toPoint()
                 self._resize_start_size = self.width()
                 self._dragged = True  # suppress the click/double-click path entirely
-            else:
+            elif not self._locked:
                 self._drag_offset = event.globalPosition().toPoint() - self.pos()
+                self._dragged = False
+            else:
+                self._drag_offset = None
                 self._dragged = False
         super().mousePressEvent(event)
 
@@ -305,13 +356,53 @@ class OrbWidget(QWidget):
             if self._resizing:
                 self._resizing = False
                 self._save_size()
-            elif not self._dragged:
+            elif self._dragged:
+                self._snap_to_edge()
+            else:
                 # don't fire yet — wait to see if a second click turns this
                 # into a double-click instead
                 self._click_pending = True
                 self._click_timer.start(220)
         self._drag_offset = None
         super().mouseReleaseEvent(event)
+
+    # ── Snap to edges ─────────────────────────────────────────────────────
+    def _snap_to_edge(self):
+        """After a drag, glide to the nearest screen edge if close enough —
+        the orb prefers to rest at the sides, out of the way."""
+        screen = QGuiApplication.screenAt(self.geometry().center())
+        if screen is None:
+            screen = QGuiApplication.primaryScreen()
+        geo = screen.availableGeometry()
+
+        x, y, w = self.x(), self.y(), self.width()
+        candidates = (
+            (x - geo.left(), "left"),
+            (geo.right() - (x + w), "right"),
+            (y - geo.top(), "top"),
+            (geo.bottom() - (y + w), "bottom"),
+        )
+        dist, edge = min(candidates)
+        if dist > SNAP_DISTANCE:
+            return  # nowhere near an edge — rest where dropped
+
+        tx, ty = x, y
+        if edge == "left":
+            tx = geo.left() + SNAP_MARGIN
+        elif edge == "right":
+            tx = geo.right() - w - SNAP_MARGIN
+        elif edge == "top":
+            ty = geo.top() + SNAP_MARGIN
+        else:
+            ty = geo.bottom() - w - SNAP_MARGIN
+        # clamp the free axis so the orb never rests off-screen
+        tx = max(geo.left() + 2, min(tx, geo.right() - w - 2))
+        ty = max(geo.top() + 2, min(ty, geo.bottom() - w - 2))
+
+        self._snap_anim.stop()
+        self._snap_anim.setStartValue(self.pos())
+        self._snap_anim.setEndValue(QPoint(int(tx), int(ty)))
+        self._snap_anim.start()
 
     def _apply_resize_delta(self, current_global_pos):
         """Scales the orb based on drag distance from the press point.
@@ -366,6 +457,28 @@ class OrbWidget(QWidget):
             return
         self._resize_armed = True
 
+    # ── Menu actions ──────────────────────────────────────────────────────
+    def _set_size_preset(self, size: int):
+        old_center = self.pos() + QPoint(self.width() // 2, self.height() // 2)
+        self.resize(size, size)
+        self.move(old_center - QPoint(size // 2, size // 2))
+        self._save_size()
+
+    def _toggle_lock(self):
+        self._locked = not self._locked
+        self._settings.setValue("orb_locked", self._locked)
+
+    def _set_opacity(self, value: float):
+        self.setWindowOpacity(value)
+        self._settings.setValue("orb_opacity", value)
+
+    def _toggle_always_on_top(self):
+        self._always_on_top = not self._always_on_top
+        pos = self.pos()
+        self.setWindowFlags(self._window_flags())
+        self.move(pos)
+        self.show()
+
     def contextMenuEvent(self, event):
         menu = QMenu(self)
         menu.setStyleSheet("""
@@ -387,17 +500,47 @@ class OrbWidget(QWidget):
         restore_action = QAction("Open AURA", self)
         restore_action.triggered.connect(self.requestRestore.emit)
         menu.addAction(restore_action)
+        menu.addSeparator()
 
-        resize_action = QAction("Resize Orb (drag to scale)", self)
-        resize_action.triggered.connect(self._arm_resize_mode)
-        menu.addAction(resize_action)
+        size_menu = menu.addMenu("Size")
+        size_menu.setStyleSheet(menu.styleSheet())
+        for label, px in SIZE_PRESETS:
+            act = QAction(label, self)
+            act.setCheckable(True)
+            act.setChecked(abs(self.width() - px) < 8)
+            act.triggered.connect(lambda _, s=px: self._set_size_preset(s))
+            size_menu.addAction(act)
+        free_resize = QAction("Free resize (drag to scale)", self)
+        free_resize.triggered.connect(self._arm_resize_mode)
+        size_menu.addAction(free_resize)
 
+        opacity_menu = menu.addMenu("Opacity")
+        opacity_menu.setStyleSheet(menu.styleSheet())
+        for label, val in OPACITY_PRESETS:
+            act = QAction(label, self)
+            act.setCheckable(True)
+            act.setChecked(abs(self.windowOpacity() - val) < 0.03)
+            act.triggered.connect(lambda _, v=val: self._set_opacity(v))
+            opacity_menu.addAction(act)
+
+        lock_action = QAction("Lock Position", self)
+        lock_action.setCheckable(True)
+        lock_action.setChecked(self._locked)
+        lock_action.triggered.connect(self._toggle_lock)
+        menu.addAction(lock_action)
+
+        on_top_action = QAction("Always on Top", self)
+        on_top_action.setCheckable(True)
+        on_top_action.setChecked(self._always_on_top)
+        on_top_action.triggered.connect(self._toggle_always_on_top)
+        menu.addAction(on_top_action)
+
+        menu.addSeparator()
         unlock_action = QAction("Stop watching locked app", self)
         unlock_action.triggered.connect(self.requestUnlock.emit)
         menu.addAction(unlock_action)
 
         menu.addSeparator()
-
         quit_action = QAction("Quit AURA", self)
         quit_action.triggered.connect(self.requestQuit.emit)
         menu.addAction(quit_action)

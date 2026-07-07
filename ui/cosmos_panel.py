@@ -115,14 +115,26 @@ class CosmosPanel(QWidget):
         self._pulse += 0.06 if state == AuraState.THINKING else 0.035
         for d in self._dust:
             d.angle = (d.angle + d.speed * speed) % 360
+        working_name = self._working_model()
         for p in self._planets:
-            # Locked planets idle slower; all planets ease their orbit radius
-            # toward the current lock target for a smooth drift in/out.
-            p.angle = (p.angle + p.speed * (0.4 if p.locked else 1.0)) % 360
+            # Locked planets idle slower; the model currently doing the task
+            # spins noticeably faster so the eye is drawn to it. All planets
+            # ease their orbit radius toward the lock target for smooth drift.
+            boost = 2.6 if p.name == working_name else 1.0
+            p.angle = (p.angle + p.speed * (0.4 if p.locked else 1.0) * boost) % 360
             trx, try_ = p.target()
             p.rx += (trx - p.rx) * 0.06
             p.ry += (try_ - p.ry) * 0.06
         self.update()
+
+    # ── active/working model ───────────────────────────────────────────────
+    def _working_model(self):
+        """Name of the planet AURA is actively using right now (a task is in
+        flight), or None. Drives the speed boost + energy stream. Gated on the
+        thinking/speaking state so it only fires during real work."""
+        if self._bus.state in (AuraState.THINKING, AuraState.SPEAKING):
+            return self._bus.active_model
+        return None
 
     def set_locked(self, name: str, locked: bool):
         """Toggle a model's parked/edge state. Called by the ModelDock."""
@@ -163,8 +175,51 @@ class CosmosPanel(QWidget):
         for p in front:
             self._paint_planet(painter, p, cx, cy, base)
 
+        # Energy stream from the model doing the task → core, painted last so
+        # the beam reads on top of the accretion disk.
+        working_name = self._working_model()
+        if working_name:
+            for p in self._planets:
+                if p.name == working_name:
+                    self._paint_energy_stream(painter, p, cx, cy, base)
+
         self._paint_captions(painter, cx, cy, base)
         painter.end()
+
+    def _planet_pos(self, p, cx, cy, base):
+        rad = math.radians(p.angle)
+        x = cx + p.rx * base * math.cos(rad)
+        y = cy + p.ry * base * math.sin(rad) * 0.9
+        depth = 0.75 + 0.25 * math.sin(rad)   # smaller when "behind"
+        r = base * 0.032 * depth
+        return x, y, r
+
+    def _paint_energy_stream(self, painter, p, cx, cy, base):
+        """A glowing beam of flowing particles from the active planet into the
+        core — the 'this model is working' indicator."""
+        x, y, _ = self._planet_pos(p, cx, cy, base)
+        color = QColor(p.color)
+
+        # soft continuous beam underneath
+        line = QColor(color); line.setAlphaF(0.22)
+        pen = QPen(line, max(1.5, base * 0.006))
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawLine(QPointF(x, y), QPointF(cx, cy))
+
+        # particles flowing inward (t: 0 at planet → 1 at core), animated by time
+        painter.setPen(Qt.NoPen)
+        n = 16
+        flow = (self._rotation * 0.02)
+        for i in range(n):
+            t = ((i / n) + flow) % 1.0
+            px = x + (cx - x) * t
+            py = y + (cy - y) * t
+            fade = 1.0 - t                      # brighter near the planet
+            c = QColor(color); c.setAlphaF(max(0.0, 0.85 * fade))
+            size = (0.6 + 2.4 * fade) * (base / 500.0) + 0.8
+            painter.setBrush(QBrush(c))
+            painter.drawEllipse(QPointF(px, py), size, size)
 
     def _paint_stars(self, painter, w, h):
         for fx, fy, size, phase in self._stars:
@@ -239,11 +294,7 @@ class CosmosPanel(QWidget):
         painter.drawEllipse(QPointF(cx, cy), core_r * 1.15, core_r * 1.15)
 
     def _paint_planet(self, painter, p: _Planet, cx, cy, base):
-        rad = math.radians(p.angle)
-        x = cx + p.rx * base * math.cos(rad)
-        y = cy + p.ry * base * math.sin(rad) * 0.9
-        depth = 0.75 + 0.25 * math.sin(rad)   # slightly smaller when "behind"
-        r = base * 0.032 * depth
+        x, y, r = self._planet_pos(p, cx, cy, base)
 
         # A locked model is parked at the edge and not in play — render it
         # muted so the eye reads it as "idle out there", never as active.

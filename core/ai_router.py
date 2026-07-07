@@ -85,6 +85,26 @@ def _start_rate_limit_cooldown(provider: str = "groq"):
     print(f"[AURA] Rate limited — pausing {provider} calls for {RATE_LIMIT_COOLDOWN_SECONDS}s")
 
 
+def _key_is_real(key) -> bool:
+    """A usable key: present and not a leftover .env placeholder."""
+    return bool(key) and "your-" not in key and "your_" not in key
+
+
+def openrouter_status() -> str:
+    """One-line summary of which OpenRouter model keys are configured, so it's
+    obvious at startup that dropping a key in .env 'just works'. Any model
+    without its own key still runs — it falls back to the shared key, then to
+    Groq."""
+    from core import model_router
+    ready = [model_router.name_for_id(mid) or mid
+             for mid, key in _OPENROUTER_MODEL_KEYS.items() if _key_is_real(key)]
+    if not ready:
+        return ("OpenRouter: no key detected — running on Groq for everything. "
+                "Add OPENROUTER_KEY_CODING / _RESEARCH / _CHAT (or a single "
+                "OPENROUTER_API_KEY) to .env to switch models on.")
+    return "OpenRouter live for: " + ", ".join(ready) + " (others fall back to Groq)."
+
+
 def last_model_used() -> str:
     return _last_model_used
 
@@ -92,6 +112,13 @@ def last_model_used() -> str:
 def _set_last_model(model_id: str):
     global _last_model_used
     _last_model_used = model_id
+
+
+def _announce_model(name: str, model_id: str, intent: str):
+    """Loud, consistent terminal line so you can SEE which model actually
+    produced each answer (and whether it was OpenRouter or a Groq fallback)."""
+    print(f"[AURA] ✅ ANSWERED BY → {name}  ·  {model_id}  "
+          f"·  {_provider_for(model_id).upper()}  (intent: {intent})")
 
 
 def resolve_model(intent: str):
@@ -211,6 +238,21 @@ def clean_response(text: str) -> str:
         result += "."
     return result.strip()
 
+# Workspace long-form modes (/research, /discussion, /plan) — full structured
+# reports, so the usual 2-sentence clamp is replaced with this.
+_LONGFORM_INTENTS = {"RESEARCH", "DISCUSSION", "PLAN"}
+
+_LONGFORM_SYSTEM_ADDON = """
+
+WORKSPACE MODE — this OVERRIDES your default brevity rules:
+- IGNORE any 2-sentence / "keep it short" guidance. Be thorough.
+- Produce a COMPLETE, well-structured answer with clear section headings
+  exactly as the request specifies.
+- Be specific and concrete: real steps, real examples, real trade-offs.
+- No filler, no hype, no emoji. Objective and useful.
+"""
+
+
 _PERSONAL_SYSTEM_ADDON = """
 
 PERSONAL MODE — you're a close friend right now, not a tool:
@@ -232,8 +274,11 @@ def call_groq_streaming(prompt: str, system: str = DONNA_SYSTEM_PROMPT, intent: 
 
     is_coding = (intent == "CODING")
     is_personal = (intent == "PERSONAL")
+    is_longform = (intent in _LONGFORM_INTENTS)
     if is_coding:
         strict_system = system + _CODING_SYSTEM_ADDON
+    elif is_longform:
+        strict_system = system + _LONGFORM_SYSTEM_ADDON
     elif is_personal:
         strict_system = system + _PERSONAL_SYSTEM_ADDON
     else:
@@ -256,11 +301,11 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
                     {"role": "system", "content": strict_system},
                     {"role": "user",   "content": prompt}
                 ],
-                "max_tokens": 1024 if is_coding else (300 if is_personal else 150),
-                "temperature": 0.3 if is_coding else 0.7,
+                "max_tokens": 2048 if (is_coding or is_longform) else (300 if is_personal else 150),
+                "temperature": 0.6 if is_longform else (0.3 if is_coding else 0.7),
                 "stream": True
             },
-            timeout=30,
+            timeout=60 if is_longform else 30,
             stream=True
         )
         if response.status_code == 429:
@@ -346,9 +391,10 @@ def route(intent: str, prompt: str) -> str:
         result = call_groq(prompt, system, intent=intent, model=mid)
         if result in ("RATE_LIMIT", "CONNECTION_ERROR"):
             last = result
-            print(f"[AURA] {name} unavailable ({result}) — falling back")
+            print(f"[AURA] ⚠ {name} unavailable ({result}) — falling back")
             continue
         _set_last_model(mid)
+        _announce_model(name, mid, intent)
         return result
     return last
 
@@ -448,9 +494,10 @@ def route_streaming(intent: str, prompt: str, system_prompt: str | None = None, 
             continue
         if first in ("RATE_LIMIT", "CONNECTION_ERROR"):
             last_sentinel = first
-            print(f"[AURA] {name} unavailable ({first}) — falling back")
+            print(f"[AURA] ⚠ {name} unavailable ({first}) — falling back")
             continue
         _set_last_model(mid)
+        _announce_model(name, mid, intent)
         yield first
         for chunk in gen:
             yield chunk
@@ -504,8 +551,11 @@ def call_groq(prompt: str, system: str = DONNA_SYSTEM_PROMPT, intent: str = "CAS
 
     is_coding = (intent == "CODING")
     is_personal = (intent == "PERSONAL")
+    is_longform = (intent in _LONGFORM_INTENTS)
     if is_coding:
         strict_system = system + _CODING_SYSTEM_ADDON
+    elif is_longform:
+        strict_system = system + _LONGFORM_SYSTEM_ADDON
     elif is_personal:
         strict_system = system + _PERSONAL_SYSTEM_ADDON
     else:
@@ -531,11 +581,11 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
                     {"role": "system", "content": strict_system},
                     {"role": "user",   "content": prompt}
                 ],
-                "max_tokens": 1024 if is_coding else (300 if is_personal else 150),
-                "temperature": 0.3 if is_coding else 0.7,
+                "max_tokens": 2048 if (is_coding or is_longform) else (300 if is_personal else 150),
+                "temperature": 0.6 if is_longform else (0.3 if is_coding else 0.7),
                 "stream": False
             },
-            timeout=30
+            timeout=60 if is_longform else 30
         )
         print(f"[AURA {provider} Debug] Status: {response.status_code} | Intent: {intent} | Model: {model_id}")
 

@@ -27,6 +27,12 @@ class UiBridge(QObject):
         self.controller.main_window.append_message(text, "AURA")
 
 if __name__ == "__main__":
+    try:
+        from core.ai_router import openrouter_status
+        print(f"[AURA] {openrouter_status()}")
+    except Exception as _e:
+        print(f"[AURA] OpenRouter status check skipped: {_e}")
+
     greeting = get_greeting_with_memory()
     if greeting:
         print(f"[AURA] {greeting}")

@@ -163,10 +163,14 @@ class AuraWindow(QWidget):
 
     # mode name → (chip color, input placeholder)
     _MODE_UI = {
-        "NORMAL":   (theme.FOCUS_GREEN,  "Talk or type a message..."),
-        "PROMPT":   (theme.IDLE_PURPLE,  "PROMPT MODE — buffering… /prompt_end to build"),
-        "STUDY":    (theme.ALERT_ORANGE, "STUDY MODE — /study_end to finish"),
-        "DEBUG":    (theme.ERROR_RED,    "DEBUG MODE — /debug_end to finish"),
+        "NORMAL":     (theme.FOCUS_GREEN,   "Talk or type a message..."),
+        "PROMPT":     (theme.IDLE_PURPLE,   "PROMPT MODE — buffering… /prompt_end to build"),
+        "CODE":       (theme.ACCRETION_BLUE,"💻 CODE MODE — every message is a coding task · /code_end"),
+        "RESEARCH":   (theme.ION_CYAN,      "🔍 RESEARCH MODE — structured reports · /research_end"),
+        "DISCUSSION": (theme.IDLE_PURPLE,   "🧠 DISCUSSION MODE — I'll challenge ideas · /discussion_end"),
+        "PLAN":       (theme.ALERT_ORANGE,  "📋 PLANNING MODE — idea → roadmap · /plan_end"),
+        "STUDY":      (theme.ALERT_ORANGE,  "STUDY MODE — /study_end to finish"),
+        "DEBUG":      (theme.ERROR_RED,     "DEBUG MODE — /debug_end to finish"),
     }
 
     def set_mode(self, mode: str):

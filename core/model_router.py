@@ -44,11 +44,13 @@ GROQ_FALLBACKS = [
 
 # intent → primary model (display name)
 INTENT_PRIMARY = {
-    "CODING":   "Laguna M.1",
-    "RESEARCH": "Nemotron 3 Super",
-    "SEARCH":   "Nemotron 3 Super",
-    "CASUAL":   "Gemma 4 31B",
-    "PERSONAL": "Gemma 4 31B",
+    "CODING":     "Laguna M.1",
+    "RESEARCH":   "Nemotron 3 Super",
+    "SEARCH":     "Nemotron 3 Super",
+    "PLAN":       "Nemotron 3 Super",   # roadmaps need long-horizon reasoning
+    "DISCUSSION": "Gemma 4 31B",        # opinionated brainstorming
+    "CASUAL":     "Gemma 4 31B",
+    "PERSONAL":   "Gemma 4 31B",
 }
 
 

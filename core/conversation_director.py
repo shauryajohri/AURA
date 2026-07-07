@@ -33,7 +33,11 @@ from dataclasses import dataclass
 class Mode:
     NORMAL = "NORMAL"
     PROMPT = "PROMPT"
-    # V2.2: STUDY, DEBUG, RESEARCH, MEMORY
+    # v2.1 workspace modes — each entered via /<name>, left via /<name>_end
+    CODE = "CODE"
+    RESEARCH = "RESEARCH"
+    DISCUSSION = "DISCUSSION"
+    PLAN = "PLAN"
 
 
 @dataclass
@@ -124,6 +128,36 @@ STATEMENT_PREFIXES = ("i will ", "i'll ", "i am going to", "i'm going to",
 # ...unless AURA is being asked to participate
 ASK_MARKERS = ("you", "aura", "?", "please", "help")
 
+# First-person NARRATION: the user describing what THEY are doing / just did,
+# optionally after a filler ("yess", "ok", "lol"). This is the fix for the
+# coding-menu misfire — "i am doing some vibe coding" name-drops a coding topic
+# ("coding") but is a statement about the user, NOT a request for AURA to act,
+# so it must get a warm reply, never the work menu. A real question or an
+# AURA-directed ask ("...can you help?") still falls through to the gate.
+_NARRATION_RE = _re.compile(
+    r"^(?:yes+|yeah|yep|yup|nah|ok(?:ay)?|so|and|well|lol|haha|hmm|dude|bro|man|"
+    r"just|currently|right now)?[\s,]*"
+    r"i(?:'?m|'?ve| am| have| just| was| did| been| finished| already|'?ll be)\b"
+    r".*\b(?:doing|do|working|work|coding|code|writing|wrote|building|built|"
+    r"making|made|learning|studying|grinding|practicing|practising|messing|"
+    r"hacking|debugging|playing|reading|watching|trying|busy|on)\b"
+)
+# If any of these appear, treat it as a real request and let the gate decide.
+# NOTE: "aura" is intentionally NOT here — the project itself is named AURA, so
+# "i'm working on aura" is narration, and a real command like "aura write X"
+# won't match _NARRATION_RE anyway (it requires a first-person "i ..." start).
+_NARRATION_ASK_GUARD = ("?", "you", "please", "can you", "could you",
+                        "how do", "how to", "help me", "show me", "give me",
+                        "teach", "walk me", "should i")
+
+
+def _is_narration(low: str) -> bool:
+    """True when the message is the user narrating their own activity rather
+    than asking AURA for anything."""
+    if any(m in low for m in _NARRATION_ASK_GUARD):
+        return False
+    return bool(_NARRATION_RE.search(low))
+
 # Personal/emotional talk → PERSONAL lane (warm persona, no 2-sentence clamp,
 # never snaps "send me something that makes sense" at an interjection)
 PERSONAL_MARKERS = (
@@ -151,6 +185,66 @@ def _keywords(text: str) -> frozenset:
     words = text.lower().replace("/", " ").replace(",", " ").split()
     return frozenset(w.strip("!?.") for w in words
                      if w.strip("!?.") not in _STOPWORDS and len(w) > 1)
+
+
+# ── Workspace modes (v2.1) ───────────────────────────────────────────────────
+# Each mode is entered with /<name>, stays active (so every following message
+# is handled in that mode, like /prompt), and is left with /<name>_end. Adding
+# a new mode later = one WORKSPACE entry + one instruction + one UI chip.
+
+RESEARCH_INSTRUCTION = (
+    "You are in RESEARCH mode. Do NOT answer off the cuff — deliver a "
+    "structured, evidence-based research report on the user's goal. Use these "
+    "sections as headings (skip any that genuinely don't apply):\n"
+    "Objective\nCurrent Position\nRequired Skills / Knowledge\nGap Analysis\n"
+    "Roadmap (phased)\nKey Companies / Players\nTimeline\n"
+    "Salary / Market (if relevant)\nResources\nRecommendation\n"
+    "Be objective and specific. End by offering to go deeper on any section."
+)
+
+DISCUSSION_INSTRUCTION = (
+    "You are in DISCUSSION mode — a sharp brainstorming partner, NOT a yes-man. "
+    "Do not simply agree; pressure-test the idea. Use these headings:\n"
+    "Pros\nCons\nRisks\nAlternatives\nRecommendation\n"
+    "Be opinionated and honest — if it's a weak idea, say so and explain why. "
+    "End with one pointed question that pushes the thinking further."
+)
+
+PLAN_INSTRUCTION = (
+    "You are in PLANNING mode. Turn the user's idea into an executable "
+    "roadmap. Use these headings:\n"
+    "Goal\nArchitecture / Approach\nDependencies\nSteps (ordered)\n"
+    "Estimated Time\nRisks\nTesting\nCompletion Criteria\n"
+    "Be concrete and realistic. No code — this is the plan, not the build."
+)
+
+# command name → behavior. instruction=None means the mode relies purely on its
+# intent's own formatting (CODE uses the CODING pipeline / Laguna).
+WORKSPACE = {
+    "code": {
+        "mode": Mode.CODE, "intent": "CODING", "instruction": None,
+        "blurb": "💻 Code mode on — every message is a coding task, straight to "
+                 "the code. What are we building? (/code_end to exit)",
+    },
+    "research": {
+        "mode": Mode.RESEARCH, "intent": "RESEARCH", "instruction": RESEARCH_INSTRUCTION,
+        "blurb": "🔍 Research mode on — I'll research and build a structured "
+                 "report instead of answering off the cuff. What's the goal? "
+                 "(/research_end to exit)",
+    },
+    "discussion": {
+        "mode": Mode.DISCUSSION, "intent": "DISCUSSION", "instruction": DISCUSSION_INSTRUCTION,
+        "blurb": "🧠 Discussion mode on — I'll challenge the idea, not just "
+                 "agree. What's on your mind? (/discussion_end to exit)",
+    },
+    "plan": {
+        "mode": Mode.PLAN, "intent": "PLAN", "instruction": PLAN_INSTRUCTION,
+        "blurb": "📋 Planning mode on — give me an idea and I'll turn it into a "
+                 "roadmap. (/plan_end to exit)",
+    },
+}
+# active Mode → its spec, for routing in-mode messages
+MODE_BY_STATE = {spec["mode"]: spec for spec in WORKSPACE.values()}
 
 
 class ConversationDirector:
@@ -181,11 +275,43 @@ class ConversationDirector:
             n = self.prompt_session.add(t)
             return Directive("reply", f"[prompt] line {n} captured. /prompt_end to build, /prompt clear to restart.")
 
+        # In a workspace mode (CODE/RESEARCH/DISCUSSION/PLAN) every message is
+        # handled in-mode until the matching /<name>_end.
+        if self.mode in MODE_BY_STATE:
+            return self._mode_directive(MODE_BY_STATE[self.mode], t)
+
         return self._handle_normal(t)
+
+    def _mode_directive(self, spec: dict, text: str) -> Directive:
+        """Route one message through an active workspace mode: prepend the
+        mode's structured instruction (if any) and pin its routing intent."""
+        if spec["instruction"]:
+            payload = spec["instruction"] + "\n\nUser request: " + text
+        else:
+            payload = text
+        return Directive("chat", payload, intent=spec["intent"])
 
     # ── slash commands (work in ANY mode) ────────────────────────────────
     def _handle_command(self, t: str) -> Directive:
         cmd = " ".join(t.lower().split())
+
+        # ── Workspace modes: /code /research /discussion /plan (+ *_end) ────
+        parts = t.split(maxsplit=1)
+        head = parts[0].lower()          # "/research"
+        rest = parts[1].strip() if len(parts) > 1 else ""   # keep original case
+        name = head[1:]                  # "research"
+        if name in WORKSPACE:
+            spec = WORKSPACE[name]
+            self._set_mode(spec["mode"])
+            # An inline goal runs immediately; bare "/research" just enters.
+            if rest:
+                return self._mode_directive(spec, rest)
+            return Directive("reply", spec["blurb"])
+        if name.endswith("_end") and name[:-4] in WORKSPACE:
+            was = name[:-4]
+            self._set_mode(Mode.NORMAL)
+            return Directive("reply",
+                f"{was.capitalize()} mode closed — back to normal chat.")
 
         if cmd in ("/prompt", "/prompt start"):
             self._set_mode(Mode.PROMPT)
@@ -217,9 +343,14 @@ class ConversationDirector:
 
         if cmd == "/help":
             return Directive("reply",
-                "Commands: /prompt (start session) · /prompt_end (build) · "
-                "/prompt clear · /prompt save · /prompt export · /help\n"
-                "Coming in V2.2: /study, /research, /memory, /debug.")
+                "Workspace modes (type the command, work, then /<name>_end):\n"
+                "💻 /code — coding partner (straight to code)\n"
+                "🔍 /research — structured, evidence-based reports\n"
+                "🧠 /discussion — brainstorming that challenges your idea\n"
+                "📋 /plan — turn an idea into an executable roadmap\n"
+                "✍️ /prompt — prompt engineering (buffers, /prompt_end to build)\n"
+                "Tip: /research <goal> enters the mode AND runs it in one go.\n"
+                "Prompt extras: /prompt clear · /prompt save · /prompt export")
 
         return Directive("reply", f"Unknown command: {t.split()[0]}. Try /help.")
 
@@ -279,6 +410,13 @@ class ConversationDirector:
         # unsolicited code, bypassing the permission gate entirely.
         if (any(low.startswith(p) for p in STATEMENT_PREFIXES)
                 and not any(m in low for m in ASK_MARKERS)):
+            return Directive("chat", t, intent="PERSONAL")
+
+        # First-person narration ("yess i am doing some vibe coding") — the
+        # user is describing what THEY are up to, not asking for help. Route to
+        # warm chat before the coding gate can pop the work menu on the topic
+        # word. Real asks ("...can you help?") are excluded by the guard.
+        if _is_narration(low):
             return Directive("chat", t, intent="PERSONAL")
 
         # Emotional / personal talk → warm lane

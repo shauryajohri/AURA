@@ -271,8 +271,7 @@ class MemoryPanel(QWidget):
         self._add_input.setPlaceholderText("Add something AURA should remember...")
         self._add_input.setFont(body_font(13))
         self._add_input.setFixedHeight(38)
-        self._add_input.setStyleSheet(f"""
-            QLineEdit {{
+        self._add_input.setStyleSheet(f"""QLineEdit {{
                 background-color: rgba(255,255,255,0.04);
                 border: 1px solid {EVENT_VIOLET};
                 border-radius: 10px; padding: 0 14px; color: {TEXT_PRIMARY};

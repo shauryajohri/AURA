@@ -141,19 +141,25 @@ INTENT_PROMPT = """
 Classify the user's message into EXACTLY ONE category. Reply with ONLY the category word, nothing else.
 
 Categories:
-- CODING: user wants code written, fixed, explained, or debugged. Includes any request mentioning a programming language, "code", "function", "script", "program", "array", "linked list", or similar CS/programming terms.
+- CODING: user explicitly wants CODE written, fixed, refactored, or debugged — an actual program, function, or script. Just MENTIONING a technical/CS topic, or ASKING FOR INFORMATION or an EXPLANATION about one, is NOT coding.
 - CASUAL: general chit-chat, opinions, greetings, small talk — nothing technical.
 - SAVE: user wants something saved/remembered for later.
 - REMINDER: user wants to be reminded of something at a future time.
-- SEARCH: needs current/live information (news, prices, facts you don't know).
+- SEARCH: wants information, facts, or an explanation about a topic (technical or not) — e.g. "get me info on X", "tell me about X", "how does X work", "explain X".
 - COMMAND: open an app or perform a system action.
 - RECALL: retrieve something previously saved.
+
+KEY DISTINCTION: "write a function to sort a list" = CODING (produce code). "explain how sorting works" or "get me info on sorting" = SEARCH (wants information). If the user is NOT asking you to PRODUCE or FIX code, it is NOT CODING.
 
 Examples:
 "make a code to print hello world in c" -> CODING
 "give me code for a linked list" -> CODING
 "write a python function to sort a list" -> CODING
 "fix this bug" -> CODING
+"get me info for dna storage system" -> SEARCH
+"tell me about quantum computing" -> SEARCH
+"explain how tcp works" -> SEARCH
+"what is a hash map" -> SEARCH
 "how are you" -> CASUAL
 "what's up" -> CASUAL
 "remind me to call mom at 5" -> REMINDER

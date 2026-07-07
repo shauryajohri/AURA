@@ -13,6 +13,10 @@ from core.personality import (INTENT_PROMPT, ANTICIPATE_PROMPT, SHOULD_RESPOND_P
 
 DEBUG_SPEECH = True
 
+# Workspace modes whose answers are full structured reports, not 2-sentence
+# chat — the guard trim is skipped for these (see process_streaming).
+LONGFORM_INTENTS = {"RESEARCH", "DISCUSSION", "PLAN"}
+
 _last_context = {
     "app": "unknown",
     "visible_text": "",
@@ -105,6 +109,39 @@ def guard_output(response: str, max_sentences: int = 2) -> str:
         response = ". ".join(sentences[:max_sentences]) + "."
     return response
 
+# A CODING verdict is only trusted if the message actually asks for code to be
+# produced/modified. "get me info for dna storage system" sounds technical, so
+# the LLM classifier sometimes mislabels it CODING → wrong (Laguna coding)
+# model. These cues gate that.
+_CODE_ACTION_CUES = (
+    "write ", "code", "implement", "refactor", "rewrite", "debug", "fix ",
+    "patch", "compile", "function", "class ", "def ", "script", "program",
+    "snippet", "syntax", "```", "leetcode", "regex", "algorithm to",
+    ".py", ".js", ".ts", ".cpp", ".java", ".cs", ".go", ".rs", ".html", ".css",
+)
+_INFO_CUES = (
+    "info", "information", "tell me about", "what is", "what are", "what's",
+    "who is", "how does", "how do", "how to", "explain", "overview", "details",
+    "research", "find out", "look up", "learn about", "difference between",
+    "meaning of", "summary of", "facts about", "get me info", "give me info",
+)
+
+
+def _correct_intent(query: str, intent: str) -> str:
+    """Deterministic safety net over the LLM classifier. Stops technical-
+    sounding INFORMATION requests from being routed to the coding model."""
+    q = query.lower()
+    has_code_cue = any(c in q for c in _CODE_ACTION_CUES)
+    has_info_cue = any(c in q for c in _INFO_CUES)
+    if intent == "CODING" and not has_code_cue:
+        # CODING with no "produce code" cue → it's really an info/general ask.
+        return "SEARCH" if has_info_cue else "CASUAL"
+    if intent == "CASUAL" and has_info_cue and not has_code_cue:
+        # Route genuine info requests to the research model, not small-talk.
+        return "SEARCH"
+    return intent
+
+
 def classify_intent(query: str) -> str:
     prompt = INTENT_PROMPT.format(
         query=query,
@@ -115,7 +152,11 @@ def classify_intent(query: str) -> str:
     intent = re.sub(r"[^A-Z]", "", intent)  # strip punctuation, whitespace, etc.
     print(f"[AURA] Raw classifier output: '{intent}'")
     valid = ["CASUAL", "CODING", "SAVE", "REMINDER", "SEARCH", "COMMAND", "RECALL"]
-    return intent if intent in valid else "CASUAL"
+    intent = intent if intent in valid else "CASUAL"
+    corrected = _correct_intent(query, intent)
+    if corrected != intent:
+        print(f"[AURA] Intent corrected: {intent} → {corrected} (no matching cue)")
+    return corrected
 
 def conversational_recall(query: str) -> str:
     """Answer memory questions like a companion, not a filing cabinet.
@@ -657,7 +698,13 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
     if answer == "RATE_LIMIT":
         return "Hit my rate limit — give me a moment."
 
-    final_answer = guard_output(answer, 4 if intent == "PERSONAL" else 2)
+    # Long-form workspace modes (research/discussion/plan) produce full
+    # structured reports — the 2-sentence guard would shred them. Let them
+    # through whole; only trim wrapping quotes.
+    if intent in LONGFORM_INTENTS:
+        final_answer = answer.strip().strip('"').strip()
+    else:
+        final_answer = guard_output(answer, 4 if intent == "PERSONAL" else 2)
     post_think(query, final_answer, intent)
     _history.append({"role": "user", "text": query})
     _history.append({"role": "aura", "text": final_answer})

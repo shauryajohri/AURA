@@ -6,6 +6,15 @@ env/
 # Environment variables
 .env
 
+# Personal data — never publish (conversation history, relationship state)
+memory/aura_memory.db
+memory/*.json
+.aura_index.pkl
+
+# Tool caches
+.ruff_cache/
+.codex_pycache/
+
 # Python cache
 __pycache__/
 *.pyc

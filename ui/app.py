@@ -56,6 +56,10 @@ class AuraAppController(QObject):
 
         self.main_window.sendMessage.connect(self._on_user_message)
         self.main_window.micToggled.connect(self._on_mic_toggled)
+        try:
+            self.main_window.center.natureSelected.connect(self._on_nature_selected)
+        except Exception:
+            pass
         self.voiceHeard.connect(self._on_voice_heard)
         self.wakeDetected.connect(self._on_wake_detected)
         self.ttsStateChanged.connect(self._on_tts_state)
@@ -322,6 +326,16 @@ class AuraAppController(QObject):
                 args=(directive.text, directive.intent or None),
                 daemon=True,
             ).start()
+
+    @Slot(str)
+    def _on_nature_selected(self, key: str):
+        try:
+            from core.nature import NATURES
+            label = NATURES.get(key, {}).get("label", key)
+        except Exception:
+            label = key
+        self.main_window.add_activity_note(
+            f"Nature: {label}" + ("" if key == "auto" else " (locked)"))
 
     # ── Director hooks ────────────────────────────────────────────────────
     def _on_director_mode(self, mode: str):

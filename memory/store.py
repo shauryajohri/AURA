@@ -484,5 +484,129 @@ def get_working_memory() -> dict | None:
         conn.close()
         return None
 
+# ── V2.2: life-memory layer — small persistent facts about the user ─────────
+
+_USER_FACTS_DDL = '''
+    CREATE TABLE IF NOT EXISTS user_facts (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        fact       TEXT NOT NULL UNIQUE,
+        category   TEXT,
+        created_at TEXT
+    )
+'''
+
+
+def save_user_fact(fact: str, category: str = "general"):
+    """One small fact ('learning: dsa for placements'). UNIQUE → re-saying
+    the same thing doesn't duplicate."""
+    conn = _connect()
+    try:
+        conn.execute(_USER_FACTS_DDL)
+        conn.execute(
+            'INSERT OR IGNORE INTO user_facts (fact, category, created_at) VALUES (?, ?, ?)',
+            (fact.strip(), category, datetime.datetime.now().isoformat()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_user_facts(limit: int = 12) -> list:
+    conn = _connect()
+    try:
+        conn.execute(_USER_FACTS_DDL)
+        cur = conn.cursor()
+        cur.execute('SELECT fact FROM user_facts ORDER BY id DESC LIMIT ?', (limit,))
+        return [r[0] for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+# ── Memory-panel CRUD: full rows + edit/delete for the in-app editor ─────────
+
+def get_user_facts_full(limit: int = 300) -> list:
+    """(id, fact, category, created_at) rows — the Memory panel needs ids to
+    edit/delete individual facts (get_user_facts returns only strings)."""
+    conn = _connect()
+    try:
+        conn.execute(_USER_FACTS_DDL)
+        cur = conn.cursor()
+        cur.execute(
+            'SELECT id, fact, category, created_at FROM user_facts '
+            'ORDER BY id DESC LIMIT ?', (limit,))
+        return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def update_user_fact(fact_id: int, new_fact: str):
+    """Edit a fact in place. The fact column is UNIQUE, so if the edit would
+    collide with an existing fact we drop this row instead of raising."""
+    new_fact = (new_fact or "").strip()
+    if not new_fact:
+        return
+    conn = _connect()
+    try:
+        conn.execute('UPDATE user_facts SET fact=? WHERE id=?', (new_fact, fact_id))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.execute('DELETE FROM user_facts WHERE id=?', (fact_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def delete_user_fact(fact_id: int):
+    conn = _connect()
+    try:
+        conn.execute('DELETE FROM user_facts WHERE id=?', (fact_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_all_knowledge(limit: int = 300) -> list:
+    """(id, title, summary, created_at) for the saved-notes section."""
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute(
+        'SELECT id, title, summary, created_at FROM knowledge '
+        'ORDER BY created_at DESC LIMIT ?', (limit,))
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+
+def delete_knowledge(entry_id: int):
+    conn = _connect()
+    conn.execute('DELETE FROM knowledge WHERE id=?', (entry_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_all_snapshots(limit: int = 60) -> list:
+    """(id, app, summary, created_at) for the session-recap section."""
+    conn = _connect()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            'SELECT id, app, summary, created_at FROM session_snapshots '
+            'ORDER BY created_at DESC LIMIT ?', (limit,))
+        rows = cur.fetchall()
+    except sqlite3.OperationalError:
+        rows = []   # table not created until first save_session_snapshot
+    conn.close()
+    return rows
+
+
+def delete_snapshot(snap_id: int):
+    conn = _connect()
+    try:
+        conn.execute('DELETE FROM session_snapshots WHERE id=?', (snap_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 init_db()
 init_tasks()

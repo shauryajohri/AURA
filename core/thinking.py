@@ -237,3 +237,44 @@ def post_think(query: str, response: str, intent: str):
 
     memory["last_action"] = response[:80]
     save_working_memory(memory)
+
+    _extract_user_facts(query)
+
+
+# ── V2.2: passive life-memory extraction (pure regex, no LLM) ────────────────
+
+_FACT_PATTERNS = [
+    (r"\bmy name is ([a-z][a-z ]{1,29})", "identity"),
+    (r"\bcall me ([a-z][a-z ]{1,29})", "identity"),
+    (r"\bi(?:'m| am) (?:currently )?(?:learning|studying) ([^.,!?]{3,60})", "learning"),
+    (r"\bi(?:'m| am) (?:building|working on|making) ([^.,!?]{3,60})", "project"),
+    (r"\bmy (exam|interview|test|deadline|viva)s? (?:is|are)?\s?(?:on )?([^.,!?]{3,40})", "dates"),
+    (r"\bi (?:really )?(?:love|like|enjoy) ([^.,!?]{3,50})", "likes"),
+    (r"\bi (?:really )?hate ([^.,!?]{3,50})", "dislikes"),
+    (r"\bmy favou?rite ([^.,!?]{3,60})", "likes"),
+    (r"\bmy (?:best )?friend'?s? (?:name is |is )?([a-z][a-z ]{1,29})", "people"),
+    (r"\bmy goal is (?:to )?([^.,!?]{3,60})", "goals"),
+    # "my bike's name is toothless", "my dog name is bruno"
+    (r"\bmy (\w{2,15})(?:'s)? name is (?:also )?([a-z0-9][a-z0-9 ]{1,29})", "names"),
+]
+
+
+def _extract_user_facts(query: str):
+    """Quietly save small personal facts from what the user says, so AURA
+    can reference them later ('how did the DSA prep go?')."""
+    import re as _re
+    q = query.lower().strip()
+    if q.startswith("/") or len(q) > 300:      # commands/specs aren't life facts
+        return
+    try:
+        from memory.store import save_user_fact
+        for pattern, cat in _FACT_PATTERNS:
+            m = _re.search(pattern, q)
+            if m:
+                fact = " ".join(g.strip() for g in m.groups() if g)
+                # greedy captures run across conjunctions — keep the first clause
+                fact = _re.split(r"\s+(?:and|but|so|because|then)\s+", fact)[0].strip()
+                if 3 <= len(fact) <= 100:
+                    save_user_fact(f"{cat}: {fact}", cat)
+    except Exception:
+        pass

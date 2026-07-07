@@ -55,6 +55,14 @@ def mark_user_active(text: str = ""):
             energy.note_user_text(text)
     except Exception:
         pass
+    # Durable-fact capture: turn stable statements ("its name is AURA",
+    # "I'm learning DSA") into memory that survives past the chat window.
+    try:
+        if text:
+            from modules.fact_extractor import capture as capture_facts
+            capture_facts(text)
+    except Exception:
+        pass
 def update_context(ctx: dict):
     global _last_context
     _last_context = ctx
@@ -83,7 +91,7 @@ def speak_response(text: str, mode: str = "CHAT"):
         print(plan_debug(text, mode))
     tts.speak_chunks(chunks)
 
-def guard_output(response: str) -> str:
+def guard_output(response: str, max_sentences: int = 2) -> str:
     response = response.strip().strip('"').strip("'").strip()
     # Additional pattern catches for stubborn leftovers
     if any(x in response for x in ["User is", "User asks", "AURA:", "Current app"]):
@@ -93,8 +101,8 @@ def guard_output(response: str) -> str:
         response = re.sub(r"(Current app .+?[,\.])", "", response, flags=re.IGNORECASE)
         response = re.sub(r"(AURA:?\s*)", "", response, flags=re.IGNORECASE)
     sentences = [s.strip() for s in response.split('.') if s.strip()]
-    if len(sentences) > 2:
-        response = ". ".join(sentences[:2]) + "."
+    if len(sentences) > max_sentences:
+        response = ". ".join(sentences[:max_sentences]) + "."
     return response
 
 def classify_intent(query: str) -> str:
@@ -109,23 +117,152 @@ def classify_intent(query: str) -> str:
     valid = ["CASUAL", "CODING", "SAVE", "REMINDER", "SEARCH", "COMMAND", "RECALL"]
     return intent if intent in valid else "CASUAL"
 
-def build_context_prompt(query: str, intent: str, thought_context: str) -> str:
-    history_text = ""
-    if _history:
-        last = _history[-3:]
-        history_text = "\n".join([f"{h['role']}: {h['text']}" for h in last])
+def conversational_recall(query: str) -> str:
+    """Answer memory questions like a companion, not a filing cabinet.
 
-    # include screen context
+    Old behavior: knowledge-table lookup with the whole sentence as key →
+    'I couldn't find anything saved about <echo>'. Now: gather everything
+    AURA actually knows (session snapshot, recent conversation, knowledge
+    hits) and let the LLM answer naturally."""
+    parts = []
+    try:
+        last = store.get_last_session()
+        if last and last.get("summary"):
+            parts.append(f"Last session: {last['summary']}")
+    except Exception:
+        pass
+    try:
+        convo = []
+        for role, message, _ts in store.get_recent_conversations(12):
+            text = (message or "").strip()
+            if not text or "Execution Plan:" in text or text.startswith("Task:"):
+                continue
+            convo.append(f"{'User' if role == 'user' else 'AURA'}: {text[:300]}")
+        if convo:
+            parts.append("Recent conversation:\n" + "\n".join(convo[-10:]))
+    except Exception:
+        pass
+    try:
+        results = store.search_entries(query)
+        if results:
+            top = results[0]
+            parts.append(f"Saved note '{top[0]}': {top[1] or top[4][:150]}")
+    except Exception:
+        pass
+    try:
+        facts = store.get_user_facts(limit=10)
+        if facts:
+            parts.append("Durable facts about them:\n" + "\n".join(f"- {f}" for f in facts))
+    except Exception:
+        pass
+
+    if not parts:
+        return "Honestly, that one's fuzzy — remind me what we were on?"
+
+    from core.ai_router import call_groq_raw
+    system = (
+        "You are AURA, a sharp, warm AI companion. The user is asking what you "
+        "remember. Answer naturally in 1-3 sentences, like a friend recalling "
+        "it — specifics first. If what you know doesn't cover their question, "
+        "say it's fuzzy and ask them to remind you. NEVER mention 'context', "
+        "'database', 'saved entries', or that you were given information."
+    )
+    prompt = f'The user asks: "{query}"\n\nWhat you know:\n' + "\n\n".join(parts)
+    result = call_groq_raw(prompt, system, max_tokens=200, temperature=0.6)
+    if result in ("RATE_LIMIT", "CONNECTION_ERROR"):
+        return "My memory's being slow — give me a second and ask again."
+    return result
+
+
+# Lines that must never be fed back as "context": compiled plan templates
+# and the tell-tale junk from failed runs (feeding those back made the model
+# echo garbage — seen live on 2026-07-06). Mirrors ui/app._CTX_JUNK.
+_CTX_JUNK = (
+    "Execution Plan:",
+    "no specific code or implementation details",
+    "hypothetical coding task",
+    "I couldn't find",
+    "Try saying the full app name",
+    "Run this program to test the functions",
+)
+
+
+def _is_context_junk(text: str) -> bool:
+    return text.startswith("Task:") or any(j in text for j in _CTX_JUNK)
+
+
+def _recent_turns(max_turns: int = 8) -> str:
+    """Recent conversation as labelled lines.
+
+    Reads from the PERSISTED store, not the in-RAM `_history`. The store is
+    the complete record — every branch (chat, RECALL, tasks, commands) calls
+    `store.save_conversation`, and it survives restarts. This is what fixes
+    the bug where AURA forgot things said one turn ago: `_history` was empty
+    at launch and never recorded RECALL/command turns, so the model saw at
+    most the last 3 chat lines. Junk template blobs are filtered out."""
+    lines = []
+    try:
+        for role, message, _ts in store.get_recent_conversations(max_turns * 2):
+            text = (message or "").strip()
+            if not text or _is_context_junk(text):
+                continue
+            label = "User" if role == "user" else "AURA"
+            lines.append(f"{label}: {text[:400]}")
+    except Exception:
+        # Fall back to in-RAM history if the store read fails.
+        for h in _history[-max_turns:]:
+            text = (h.get("text") or "").strip()
+            if text and not _is_context_junk(text):
+                label = "User" if h.get("role") == "user" else "AURA"
+                lines.append(f"{label}: {text[:400]}")
+    return "\n".join(lines[-max_turns:])
+
+
+def _facts_block() -> str:
+    """Compact 'what you know about the user' block from the durable
+    user_facts store. Empty string when there's nothing yet."""
+    try:
+        facts = store.get_user_facts(limit=10)
+    except Exception:
+        facts = []
+    if not facts:
+        return ""
+    bullets = "\n".join(f"- {f}" for f in facts)
+    return f"What you know about them (use naturally, don't recite):\n{bullets}"
+
+
+def build_context_prompt(query: str, intent: str, thought_context: str) -> str:
+    history_text = _recent_turns(8)
+    facts_text = _facts_block()
+
+    # include screen context. For PERSONAL talk it's framed as a friend
+    # hanging out — react to WHAT they're doing (F1 race, video, game,
+    # code), never push work. For task intents it stays informational.
     screen_info = ""
-    if _last_context.get("app") and _last_context["app"] != "unknown":
-        screen_info = f"\nCurrently on: {_last_context['app']}"
-    if _last_context.get("visible_text"):
-        screen_info += f"\nVisible content: {_last_context['visible_text'][:300]}"
+    app = _last_context.get("app")
+    visible = _last_context.get("visible_text") or ""
+    if intent == "PERSONAL":
+        if app and app != "unknown":
+            screen_info = (
+                f"\n(You can see their screen: {app}"
+                + (f" — \"{visible[:200]}\"" if visible else "")
+                + ". You're hanging out with them. If it fits the conversation, "
+                "react to the CONTENT like a friend on the couch — the race, "
+                "the video, the game, whatever it is. Never use their screen "
+                "as a reason to push work or ask for code.)"
+            )
+    else:
+        if app and app != "unknown":
+            screen_info = f"\nCurrently on: {app}"
+        if visible:
+            screen_info += f"\nVisible content: {visible[:300]}"
 
     thought_section = f"\nContext: {thought_context}" if thought_context else ""
+    facts_section = f"\n{facts_text}" if facts_text else ""
 
     return f"""Recent conversation:
 {history_text}
+{facts_section}
 {screen_info}
 {thought_section}
 
@@ -295,9 +432,7 @@ def process(query: str) -> str:
     print(f"[AURA] Intent: {intent}")
 
     if intent == "RECALL":
-        from modules.knowledge import recall
-        query_words = query.lower().replace("what did i save about", "").strip()
-        result = recall(query_words)
+        result = conversational_recall(query)
         store.save_conversation("user", query)
         store.save_conversation("aura", result)
         return result
@@ -321,7 +456,7 @@ def process(query: str) -> str:
     if answer == "RATE_LIMIT":
         return "Hit my rate limit — give me a moment."
 
-    final_answer = guard_output(answer)
+    final_answer = guard_output(answer, 4 if intent == "PERSONAL" else 2)
     post_think(query, final_answer, intent)
 
     # Classify mode (still needed for UI to know how to speak, maybe pass back via tuple? We'll keep simple)
@@ -403,7 +538,13 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
             on_chunk(result)
         return result
 
-    instant_response = check_csv(query) or handle_command(query)
+    # Canned/command handlers fire ONLY when the Director hasn't already
+    # ruled this a conversation. Without this, "i will ... start with work"
+    # (a PERSONAL statement) hit the app launcher, which tried to open an
+    # app literally called "with work".
+    instant_response = None
+    if intent_hint is None:
+        instant_response = check_csv(query) or handle_command(query)
     if instant_response:
         store.save_conversation("user", query)
         store.save_conversation("aura", instant_response)
@@ -516,7 +657,7 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
     if answer == "RATE_LIMIT":
         return "Hit my rate limit — give me a moment."
 
-    final_answer = guard_output(answer)
+    final_answer = guard_output(answer, 4 if intent == "PERSONAL" else 2)
     post_think(query, final_answer, intent)
     _history.append({"role": "user", "text": query})
     _history.append({"role": "aura", "text": final_answer})

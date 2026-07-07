@@ -4,9 +4,9 @@ Center column: greeting header, the cosmos hero panel, model-routing
 waveform bar, shortcuts row, and the music player. Mock content for now.
 """
 
-from PySide6.QtCore import Qt, QTime, QTimer
+from PySide6.QtCore import Qt, QTime, QTimer, Signal
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QMenu, QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
 
 from ui import theme
@@ -41,7 +41,18 @@ class _Chip(GlassPanel):
         lay.addWidget(self.bottom)
 
 
+class _NatureChip(_Chip):
+    """The top-bar chip is clickable → nature picker menu."""
+    clicked = Signal()
+
+    def mousePressEvent(self, event):
+        self.clicked.emit()
+        super().mousePressEvent(event)
+
+
 class CenterPanel(QWidget):
+    natureSelected = Signal(str)   # nature key, e.g. "chill"
+
     def __init__(self, bus: StateBus, user_name: str = "Shaurya", parent=None):
         super().__init__(parent)
         self._bus = bus
@@ -66,11 +77,16 @@ class CenterPanel(QWidget):
 
         self._clock_chip = _Chip("--:--", "Today")
         head.addWidget(self._clock_chip)
-        focus_chip = _Chip("◎ Focus Mode", "Ready")
-        focus_chip.top.setStyleSheet(
+
+        # V2.3: nature selector chip (was the static "Focus Mode Ready" chip)
+        self.nature_chip = _NatureChip("🟢 Auto", "Nature · tap to change")
+        self.nature_chip.setCursor(Qt.PointingHandCursor)
+        self.nature_chip.top.setStyleSheet(
             f"color: {theme.FOCUS_GREEN}; background: transparent; border: none;")
-        head.addWidget(focus_chip)
+        self.nature_chip.clicked.connect(self._show_nature_menu)
+        head.addWidget(self.nature_chip)
         lay.addLayout(head)
+        self._seed_nature_chip()
 
         clock_timer = QTimer(self)
         clock_timer.timeout.connect(self._update_clock)
@@ -203,6 +219,64 @@ class CenterPanel(QWidget):
         bus.stateChanged.connect(self._on_state)
         bus.activeModelChanged.connect(
             lambda m: self._routing_label.setText(f"Model Routing: {m}"))
+
+    # ── V2.3 nature picker ───────────────────────────────────────────────
+    _NATURE_COLORS = {
+        "auto": theme.FOCUS_GREEN,
+        "chill": theme.ACCRETION_BLUE,
+        "focus": theme.FOCUS_GREEN,
+        "savage": theme.ERROR_RED,
+        "professional": theme.TEXT_PRIMARY,
+    }
+
+    def _seed_nature_chip(self):
+        try:
+            from core.nature import NATURES, get_nature
+            self._apply_nature_chip(get_nature(), NATURES)
+        except Exception:
+            pass   # UI preview without backend — chip stays on Auto
+
+    def _apply_nature_chip(self, key: str, natures: dict):
+        n = natures[key]
+        color = self._NATURE_COLORS.get(key, theme.FOCUS_GREEN)
+        self.nature_chip.top.setText(f"{n['icon']} {n['label']}")
+        self.nature_chip.top.setStyleSheet(
+            f"color: {color}; background: transparent; border: none;")
+        self.nature_chip.bottom.setText(
+            "Nature · auto-shifts" if key == "auto" else "Nature · locked")
+
+    def _show_nature_menu(self):
+        try:
+            from core.nature import NATURES, get_nature
+        except Exception:
+            return
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            f"""
+            QMenu {{ background-color: {theme.VOID_BLACK};
+                     color: {theme.TEXT_PRIMARY};
+                     border: 1px solid {theme.EVENT_VIOLET};
+                     border-radius: 8px; padding: 6px; }}
+            QMenu::item {{ padding: 6px 18px; border-radius: 6px; }}
+            QMenu::item:selected {{ background-color: rgba(91, 127, 255, 0.18); }}
+            """
+        )
+        current = get_nature()
+        for key, n in NATURES.items():
+            mark = "  ✓" if key == current else ""
+            action = menu.addAction(f"{n['icon']}  {n['label']}{mark}")
+            action.triggered.connect(lambda _=False, k=key: self._pick_nature(k))
+        menu.exec(self.nature_chip.mapToGlobal(
+            self.nature_chip.rect().bottomLeft()))
+
+    def _pick_nature(self, key: str):
+        try:
+            from core.nature import NATURES, set_nature
+            if set_nature(key):
+                self._apply_nature_chip(key, NATURES)
+                self.natureSelected.emit(key)
+        except Exception as e:
+            print(f"[AURA UI] nature pick error: {e}")
 
     def _update_clock(self):
         self._clock_chip.top.setText(QTime.currentTime().toString("hh:mm AP"))

@@ -26,6 +26,7 @@ Directive telling the controller (ui/app.py) what to do:
                             task (user picked "code"/"2" after the build)
 """
 
+import re as _re
 from dataclasses import dataclass
 
 
@@ -122,6 +123,24 @@ STATEMENT_PREFIXES = ("i will ", "i'll ", "i am going to", "i'm going to",
                       "im going to", "let me ", "about to ", "gonna ")
 # ...unless AURA is being asked to participate
 ASK_MARKERS = ("you", "aura", "?", "please", "help")
+
+# Personal/emotional talk → PERSONAL lane (warm persona, no 2-sentence clamp,
+# never snaps "send me something that makes sense" at an interjection)
+PERSONAL_MARKERS = (
+    "i feel", "i'm tired", "im tired", "i am tired", "stressed", "sad",
+    "happy", "excited", "bored", "lonely", "annoyed", "frustrated",
+    "my day", "my life", "how are you", "how r u", "how was your",
+    "talk to me", "i'm done", "im done", "i give up", "proud of",
+    "love", "hate", "miss you", "thank",
+    "chill", "chilling", "relax", "vibing", "taking a break", "just watching",
+)
+
+# negation up to 2 words before a coding topic = declining, not requesting
+_NEG_NEAR_TOPIC = _re.compile(
+    r"\b(?:no|not|nah|nope|don'?t|dont|stop|quit|enough|zero|done with)\s+(?:\w+\s+){0,2}(?:"
+    + "|".join(_re.escape(topic) for topic in sorted(CODING_TOPICS, key=len, reverse=True))
+    + r")\b"
+)
 
 _STOPWORDS = {"the", "a", "an", "on", "in", "at", "to", "for", "of", "and",
               "or", "is", "it", "my", "me", "i", "you", "with", "this",
@@ -240,7 +259,13 @@ class ConversationDirector:
             self._pending_gate = None
 
         if low in CASUAL_BYPASS:
-            return Directive("chat", t)
+            return Directive("chat", t, intent="PERSONAL")
+
+        # "wassup, nothing just chilling" — casual opener, casual message,
+        # even though the whole string isn't an exact bypass match.
+        first_word = low.split()[0].strip(",.!?") if low.split() else ""
+        if first_word in CASUAL_BYPASS:
+            return Directive("chat", t, intent="PERSONAL")
 
         if any(low.startswith(p) for p in PLANNER_PREFIXES):
             return Directive("plan", t)
@@ -254,7 +279,19 @@ class ConversationDirector:
         # unsolicited code, bypassing the permission gate entirely.
         if (any(low.startswith(p) for p in STATEMENT_PREFIXES)
                 and not any(m in low for m in ASK_MARKERS)):
-            return Directive("chat", t, intent="CASUAL")
+            return Directive("chat", t, intent="PERSONAL")
+
+        # Emotional / personal talk → warm lane
+        if any(m in low for m in PERSONAL_MARKERS):
+            return Directive("chat", t, intent="PERSONAL")
+
+        # Tiny interjections ("nono", "ugh", "bruh") aren't tasks — respond
+        # like a person, don't demand "something that makes sense".
+        # (Coding-topic words like a bare "code" still go to the gate/menu.)
+        if (len(low.split()) <= 2
+                and not any(ch.isdigit() for ch in low)
+                and not any(topic in low for topic in CODING_TOPICS)):
+            return Directive("chat", t, intent="PERSONAL")
 
         return self._coding_gate(t, low)
 
@@ -281,6 +318,18 @@ class ConversationDirector:
         has_topic = any(topic in low for topic in CODING_TOPICS)
         if not has_topic:
             return Directive("chat", t)   # not code-adjacent → normal chat
+
+        # Negation NEAR the coding word: "no code for now", "not doing python
+        # today", "done with dsa" — declining must not pop the options menu,
+        # at ANY message length ("i mean no code for now so jusst chill").
+        # Negation AFTER the topic ("why does my python code not work") is a
+        # real request → still gates.
+        if _NEG_NEAR_TOPIC.search(low):
+            return Directive("chat", t, intent="PERSONAL")
+        # Short declines without the topic adjacency ("nah not today man")
+        if (len(low.split()) <= 6
+                and _re.search(r"\b(no|not|nah|nope|don'?t|dont|stop|quit|enough|done|later)\b", low)):
+            return Directive("chat", t, intent="PERSONAL")
 
         # Explicit action verb → route directly, no menu.
         if any(v in low for v in GENERATE_VERBS):

@@ -17,7 +17,8 @@ from PySide6.QtCore import (
     Property, Signal, QRectF, QSettings
 )
 from PySide6.QtGui import (
-    QPainter, QColor, QRadialGradient, QPen, QBrush, QAction, QPainterPath
+    QPainter, QColor, QRadialGradient, QConicalGradient, QPen, QBrush,
+    QAction, QPainterPath
 )
 
 # ── Palette ───────────────────────────────────────────────────────────────
@@ -173,88 +174,109 @@ class OrbWidget(QWidget):
         self.update()
 
     # ── Painting ──────────────────────────────────────────────────────────
+    # The floating orb is now a true black hole, matching the cosmos core and
+    # the sidebar mini-orb: a genuinely BLACK event horizon with a bright
+    # accretion ring and orbiting disk sparks, rather than the old glowing
+    # violet blob. State drives the accent color, ring speed, and glow.
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
         cx, cy = self.width() / 2, self.height() / 2
-        scale = min(self.width(), self.height()) / _REFERENCE_SIZE
+        base = min(self.width(), self.height())
 
-        core_r = (22 + 3 * math.sin(self._pulse_phase) * (
-            1.4 if self._state == self.STATE_LISTENING else
-            1.0 if self._state == self.STATE_SPEAKING else 0.5
-        )) * scale
+        # breathing core; listening/speaking pulse a little harder
+        amp = (0.09 if self._state == self.STATE_LISTENING else
+               0.06 if self._state == self.STATE_SPEAKING else 0.035)
+        breathe = 1.0 + amp * math.sin(self._pulse_phase)
+        core_r = base * 0.17 * breathe
 
-        self._paint_outer_glow(painter, cx, cy, scale)
-        self._paint_particles(painter, cx, cy, scale)
-        self._paint_core(painter, cx, cy, core_r, scale)
+        self._paint_outer_glow(painter, cx, cy, core_r)
+        self._paint_disk_sparks(painter, cx, cy, base)
+        self._paint_accretion_ring(painter, cx, cy, core_r)
+        self._paint_event_horizon(painter, cx, cy, core_r)
 
         painter.end()
 
     def _state_colors(self):
-        """Returns (inner, mid, outer) colors for the current state."""
+        """Returns (accent, mid, outer) colors for the current state.
+        `accent` is the bright ring/rim color that reads the state."""
         if self._state == self.STATE_IDLE:
             return EVENT_VIOLET, ACCRETION_BLUE, NEBULA_PURPLE
         if self._state == self.STATE_LISTENING:
             return ACCRETION_BLUE, ION_CYAN, EVENT_VIOLET
         if self._state == self.STATE_THINKING:
-            return EVENT_VIOLET, ACCRETION_BLUE, QColor("#2A1A55")
+            return ACCRETION_BLUE, EVENT_VIOLET, QColor("#2A1A55")
         if self._state == self.STATE_SPEAKING:
-            return STARLIGHT_WHITE, ION_CYAN, ACCRETION_BLUE
+            return ION_CYAN, STARLIGHT_WHITE, ACCRETION_BLUE
         return EVENT_VIOLET, ACCRETION_BLUE, NEBULA_PURPLE
 
-    def _paint_outer_glow(self, painter, cx, cy, scale):
-        inner, mid, outer = self._state_colors()
-        glow_r = 50 * (0.85 + 0.3 * self._glow_intensity) * scale
-
+    def _paint_outer_glow(self, painter, cx, cy, core_r):
+        accent, _, _ = self._state_colors()
+        glow_r = core_r * 3.2
         gradient = QRadialGradient(cx, cy, glow_r)
-        c1 = QColor(mid); c1.setAlphaF(0.35 * self._glow_intensity)
-        c2 = QColor(outer); c2.setAlphaF(0.0)
-        gradient.setColorAt(0.0, c1)
+        c1 = QColor(accent); c1.setAlphaF(0.22 * (0.6 + 0.4 * self._glow_intensity))
+        c2 = QColor(accent); c2.setAlphaF(0.0)
+        gradient.setColorAt(0.25, c1)
         gradient.setColorAt(1.0, c2)
         painter.setBrush(QBrush(gradient))
         painter.setPen(Qt.NoPen)
         painter.drawEllipse(QRectF(cx - glow_r, cy - glow_r, glow_r * 2, glow_r * 2))
 
-    def _paint_particles(self, painter, cx, cy, scale):
-        _, mid, _ = self._state_colors()
+    def _paint_disk_sparks(self, painter, cx, cy, base):
+        """Orbiting motes, squashed into a tilted disk around the hole."""
+        accent, _, _ = self._state_colors()
+        scale = base / _REFERENCE_SIZE
         for p in self._particles:
             rad = math.radians(p.angle)
-            # slight elliptical squash gives a disk-like orbital feel
             x = cx + p.radius * scale * math.cos(rad)
-            y = cy + p.radius * scale * 0.55 * math.sin(rad)
-            color = QColor(mid)
-            color.setAlphaF(p.brightness * self._glow_intensity)
+            y = cy + p.radius * scale * 0.42 * math.sin(rad)   # disk tilt
+            color = QColor(accent)
+            color.setAlphaF(min(1.0, p.brightness * (0.5 + 0.5 * self._glow_intensity)))
             painter.setBrush(QBrush(color))
             painter.setPen(Qt.NoPen)
             size = p.size * scale
             painter.drawEllipse(QRectF(x - size / 2, y - size / 2, size, size))
 
-    def _paint_core(self, painter, cx, cy, radius, scale):
-        inner, mid, _ = self._state_colors()
-        gradient = QRadialGradient(cx, cy, radius)
-        c_in = QColor(inner); c_in.setAlphaF(min(1.0, 0.85 + 0.15 * self._glow_intensity))
-        c_out = QColor(mid); c_out.setAlphaF(0.9 * self._glow_intensity)
-        gradient.setColorAt(0.0, c_in)
-        gradient.setColorAt(0.7, c_out)
-        gradient.setColorAt(1.0, QColor(0, 0, 0, 0))
-        painter.setBrush(QBrush(gradient))
-        painter.setPen(Qt.NoPen)
-        painter.drawEllipse(QRectF(cx - radius, cy - radius, radius * 2, radius * 2))
+    def _paint_accretion_ring(self, painter, cx, cy, core_r):
+        """Bright conical-gradient ring, rotating, squashed to read as a disk
+        seen at an angle — the signature black-hole accretion disk."""
+        accent, _, _ = self._state_colors()
+        painter.save()
+        painter.translate(cx, cy)
+        painter.scale(1.0, 0.42)
 
-        # subtle event-horizon ring — a thin bright edge, more visible when thinking
-        if self._state == self.STATE_THINKING:
-            pen = QPen(QColor(ION_CYAN))
-            pen.setWidthF(1.4 * scale)
-            ring_alpha = 0.4 + 0.3 * math.sin(self._pulse_phase * 2)
-            pen_color = QColor(ION_CYAN)
-            pen_color.setAlphaF(max(0.0, ring_alpha))
-            pen.setColor(pen_color)
-            painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-            ring_offset = 4 * scale
-            painter.drawEllipse(QRectF(cx - radius - ring_offset, cy - radius - ring_offset,
-                                        (radius + ring_offset) * 2, (radius + ring_offset) * 2))
+        cone = QConicalGradient(0, 0, self._rotation)
+        bright = QColor(accent); bright.setAlphaF(0.95)
+        mid = QColor(EVENT_VIOLET); mid.setAlphaF(0.55)
+        dim = QColor(NEBULA_PURPLE); dim.setAlphaF(0.25)
+        cone.setColorAt(0.00, bright)
+        cone.setColorAt(0.25, mid)
+        cone.setColorAt(0.50, dim)
+        cone.setColorAt(0.75, mid)
+        cone.setColorAt(1.00, bright)
+
+        ring_r = core_r * 2.0
+        pen = QPen(QBrush(cone), core_r * 0.36)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(QRectF(-ring_r, -ring_r, ring_r * 2, ring_r * 2))
+        painter.restore()
+
+    def _paint_event_horizon(self, painter, cx, cy, core_r):
+        """A truly black core with a thin bright rim — the event horizon."""
+        accent, _, _ = self._state_colors()
+        r = core_r * 1.15
+        hole = QRadialGradient(cx, cy, r)
+        hole.setColorAt(0.0, QColor(0, 0, 0))
+        hole.setColorAt(0.86, QColor(0, 0, 0))
+        rim = QColor(accent)
+        rim.setAlphaF(min(1.0, 0.7 + 0.3 * self._glow_intensity))
+        hole.setColorAt(0.97, rim)
+        hole.setColorAt(1.0, QColor(0, 0, 0, 0))
+        painter.setBrush(QBrush(hole))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(QRectF(cx - r, cy - r, r * 2, r * 2))
 
     # ── Mouse interaction ─────────────────────────────────────────────────
     def mousePressEvent(self, event):

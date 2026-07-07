@@ -7,6 +7,10 @@ from core.personality import DONNA_SYSTEM_PROMPT, INTENT_PERSONALITY_ADJUSTMENTS
 load_dotenv()  # must be before os.getenv
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")  # get from console.groq.com
 GROQ_MODEL   = "llama-3.3-70b-versatile"
+# Background/meta calls (classifier, think, anticipate, nudges, summaries)
+# run on the small model — Groq rate limits are PER MODEL, so this keeps
+# the whole 70B quota for actual user-facing replies (429s were eating chat).
+GROQ_MODEL_LIGHT = "llama-3.1-8b-instant"
 GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
 
 _rate_limit_until = 0.0
@@ -108,14 +112,28 @@ def clean_response(text: str) -> str:
         result += "."
     return result.strip()
 
+_PERSONAL_SYSTEM_ADDON = """
+
+PERSONAL MODE — you're a close friend right now, not a tool:
+- Warm, real, present. Up to 4 short sentences.
+- NO lists, NO code, NO advice-dumps unless they ask.
+- Never demand code, never call their message "a mess" or "jumbled" —
+  if it's unclear, respond like a person would ("wait, no to what?").
+- No emoji unless they use them first. No therapy-speak.
+- It's fine to reference what you know about them and your shared history."""
+
+
 def call_groq_streaming(prompt: str, system: str = DONNA_SYSTEM_PROMPT, intent: str = "CASUAL", model: str = None):
     if _in_rate_limit_cooldown():
         yield "RATE_LIMIT"
         return
 
     is_coding = (intent == "CODING")
+    is_personal = (intent == "PERSONAL")
     if is_coding:
         strict_system = system + _CODING_SYSTEM_ADDON
+    elif is_personal:
+        strict_system = system + _PERSONAL_SYSTEM_ADDON
     else:
         strict_system = system + """
 
@@ -139,7 +157,7 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
                     {"role": "system", "content": strict_system},
                     {"role": "user",   "content": prompt}
                 ],
-                "max_tokens": 1024 if is_coding else 150,
+                "max_tokens": 1024 if is_coding else (300 if is_personal else 150),
                 "temperature": 0.3 if is_coding else 0.7,
                 "stream": True
             },
@@ -172,7 +190,9 @@ _CLASSIFIER_SYSTEM = "You are a classifier. Output ONLY the requested single wor
 
 
 def call_claude(prompt: str, system: str = DONNA_SYSTEM_PROMPT) -> str:
-    return call_groq(prompt, system, intent="CASUAL")
+    """Meta-call alias used by think/anticipate/knowledge/tasks/curiosity —
+    routed to the LIGHT model so it never competes with chat for 70B quota."""
+    return call_groq(prompt, system, intent="CASUAL", model=GROQ_MODEL_LIGHT)
 
 
 def call_classifier(prompt: str) -> str:
@@ -187,7 +207,7 @@ def call_classifier(prompt: str) -> str:
                 "Content-Type": "application/json"
             },
             json={
-                "model": GROQ_MODEL,
+                "model": GROQ_MODEL_LIGHT,   # 1-word task — never burn 70B quota
                 "messages": [
                     {"role": "system", "content": _CLASSIFIER_SYSTEM},
                     {"role": "user", "content": prompt}
@@ -221,9 +241,83 @@ def route(intent: str, prompt: str) -> str:
         return call_groq(prompt, system, intent="SEARCH")
     return call_groq(prompt, system, intent=intent)
 
+# ── V2.2: life-memory injection (cached; refreshed every 5 min) ─────────────
+_facts_cache = {"ts": 0.0, "text": ""}
+
+
+def _user_facts_block() -> str:
+    import time as _t
+    if _t.time() - _facts_cache["ts"] > 300:
+        try:
+            from memory.store import get_user_facts
+            facts = get_user_facts(10)
+            _facts_cache["text"] = (
+                "\n\nThings you know about the user (reference naturally, "
+                "never recite as a list):\n- " + "\n- ".join(facts)
+            ) if facts else ""
+        except Exception:
+            _facts_cache["text"] = ""
+        _facts_cache["ts"] = _t.time()
+    return _facts_cache["text"]
+
+
+def _nature_overlay() -> str:
+    """V2.3: user-selected nature lock (empty string on Auto)."""
+    try:
+        from core.nature import overlay
+        return overlay()
+    except Exception:
+        return ""
+
+
+# ── V2.2 item 5: relationship state shapes the voice (auto nature only) ─────
+_rel_cache = {"ts": 0.0, "text": ""}
+
+
+def _trust_tier_line(trust: float, mood: str) -> str:
+    if trust < 0.3:
+        return (f"You're still getting to know each other (trust {trust:.2f}). "
+                "Friendly but a little reserved — earn the teasing rights first.")
+    if trust < 0.55:
+        return (f"You're familiar now (trust {trust:.2f}, mood: {mood}). "
+                "Light teasing is fine, occasional callbacks to past chats.")
+    if trust < 0.8:
+        return (f"You're close friends (trust {trust:.2f}, mood: {mood}). "
+                "Callbacks to shared history, inside references, real teasing, "
+                "and taking initiative all feel natural.")
+    return (f"You're best friends (trust {trust:.2f}, mood: {mood}). "
+            "Full comfort: running jokes, blunt honesty, initiative, callbacks "
+            "to everything you've been through together. You KNOW this person.")
+
+
+def _relationship_block() -> str:
+    import time as _t
+    if _t.time() - _rel_cache["ts"] > 60:
+        try:
+            from core.nature import get_nature
+            if get_nature() != "auto":
+                _rel_cache["text"] = ""   # manual nature lock wins outright
+            else:
+                from modules.relationship_engine import get_engine
+                state = get_engine().get_state()
+                trust = float(state.get("trust", 0.3))
+                mood = state.get("mood", "neutral")
+                _rel_cache["text"] = "\n\nRELATIONSHIP:\n" + _trust_tier_line(trust, mood)
+        except Exception:
+            _rel_cache["text"] = ""
+        _rel_cache["ts"] = _t.time()
+    return _rel_cache["text"]
+
+
 def route_streaming(intent: str, prompt: str, system_prompt: str | None = None, model: str | None = None):
     extra = INTENT_PERSONALITY_ADJUSTMENTS.get(intent, "")
-    system = system_prompt if system_prompt is not None else DONNA_SYSTEM_PROMPT + extra
+    if system_prompt is not None:
+        system = system_prompt   # compiled plans stay untouched
+    else:
+        # relationship shapes the voice on Auto; nature overlay goes LAST so
+        # a manual lock overrides everything (including relationship tone)
+        system = (DONNA_SYSTEM_PROMPT + extra + _user_facts_block()
+                  + _relationship_block() + _nature_overlay())
     for chunk in call_groq_streaming(prompt, system, intent=intent, model=model):
         yield chunk
 def call_groq_raw(prompt: str, system: str, max_tokens: int = 1024,
@@ -265,13 +359,16 @@ def call_groq_raw(prompt: str, system: str, max_tokens: int = 1024,
         return "CONNECTION_ERROR"
 
 
-def call_groq(prompt: str, system: str = DONNA_SYSTEM_PROMPT, intent: str = "CASUAL") -> str:
+def call_groq(prompt: str, system: str = DONNA_SYSTEM_PROMPT, intent: str = "CASUAL", model: str = None) -> str:
     if _in_rate_limit_cooldown():
         return "RATE_LIMIT"
 
     is_coding = (intent == "CODING")
+    is_personal = (intent == "PERSONAL")
     if is_coding:
         strict_system = system + _CODING_SYSTEM_ADDON
+    elif is_personal:
+        strict_system = system + _PERSONAL_SYSTEM_ADDON
     else:
         strict_system = system + """
 
@@ -293,12 +390,12 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
                 "Content-Type": "application/json"
             },
             json={
-                "model": GROQ_MODEL,
+                "model": model or GROQ_MODEL,
                 "messages": [
                     {"role": "system", "content": strict_system},
                     {"role": "user",   "content": prompt}
                 ],
-                "max_tokens": 1024 if is_coding else 150,
+                "max_tokens": 1024 if is_coding else (300 if is_personal else 150),
                 "temperature": 0.3 if is_coding else 0.7,
                 "stream": False
             },
@@ -318,6 +415,8 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
         raw = data["choices"][0]["message"]["content"]
         if is_coding:
             print(f"[AURA CODE RAW]\n{raw}\n[END RAW]")
+        if is_personal:
+            return raw.strip()   # personal talk keeps its length (guard caps at 4)
         return raw if is_coding else clean_response(raw)
     except Exception as e:
         print(f"[AURA] Groq error: {e}")

@@ -15,6 +15,15 @@ try:
 except ModuleNotFoundError:
     pygame = None
 
+# ── Audio serialization ───────────────────────────────────────────────────────
+# pygame's music channel is a SINGLE global stream. AURA drives TTS from three
+# independent background threads (attention engine, proactive loop, chat reply),
+# and two of them hitting mixer.load/play/unload at the same moment is a classic
+# native segfault — a crash with NO Python traceback, exactly what happened on
+# 2026-07-07. This lock guarantees only one utterance touches the mixer at a
+# time; the others simply wait their turn.
+_audio_lock = threading.Lock()
+
 # ── Voice map ─────────────────────────────────────────────────────────────────
 VOICE_MAP = {
     "normal":  "en-US-AriaNeural",
@@ -89,24 +98,31 @@ def speak(text: str):
             print("[AURA TTS Error] pygame is not installed")
             return
 
-        # generate audio
+        # generate audio (safe to do concurrently — writes its own temp file)
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as f:
             tmp_path = f.name
 
         asyncio.run(_generate(clean, tone, tmp_path))
 
-        # play audio
-        if not pygame.mixer.get_init():
-            pygame.mixer.init()
+        # play audio — serialized: the mixer's music channel is global, so
+        # only one thread may load/play/unload it at a time (see _audio_lock).
+        with _audio_lock:
+            try:
+                if not pygame.mixer.get_init():
+                    pygame.mixer.init()
 
-        pygame.mixer.music.load(tmp_path)
-        pygame.mixer.music.play()
+                pygame.mixer.music.load(tmp_path)
+                pygame.mixer.music.play()
 
-        while pygame.mixer.music.get_busy():
-            pygame.time.wait(50)
+                while pygame.mixer.music.get_busy():
+                    pygame.time.wait(50)
 
-        pygame.mixer.music.unload()
-        os.unlink(tmp_path)
+                pygame.mixer.music.unload()
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
     except Exception as e:
         print(f"[AURA TTS Error] {e}")

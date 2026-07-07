@@ -31,7 +31,20 @@ MINOR_REFILL         = 25.0    # a small/background signal tops up a little
 BUSY_PHRASES   = ("busy", "brb", "one sec", "hold on", "in a meeting",
                   "on a call", "give me a minute", "not now", "later")
 FREE_PHRASES   = ("i'm back", "im back", "back now", "free now", "okay done",
-                  "ok done", "done now", "what's up", "whats up")
+                  "ok done", "done now", "what's up", "whats up",
+                  "movie's over", "movie over", "done watching",
+                  "back to work", "let's code", "lets code")
+
+# "I'm watching something" — freeze that SURVIVES chit-chat. Unlike "busy",
+# talking to AURA during a movie shouldn't re-arm the boredom nudges the
+# moment you go quiet again (learned live: AURA nagged through a movie
+# night — "you went quiet", "night is getting boring", "okay I give up").
+WATCH_PHRASES  = ("watching a movie", "watching movie", "movie time",
+                  "movie night", "watching a show", "watching a series",
+                  "watching netflix", "netflix time", "watching youtube",
+                  "watching a video", "watching f1", "watching the race",
+                  "watching the match", "watching cricket", "watching football",
+                  "gonna watch", "going to watch", "about to watch")
 
 
 class ConversationEnergy:
@@ -73,11 +86,13 @@ class ConversationEnergy:
             self._last_update = time.time()
 
     def note_user_text(self, text: str):
-        """Inspect a user message for explicit busy/free signals and freeze or
-        thaw accordingly. Always counts as an interaction refill too."""
+        """Inspect a user message for explicit busy/free/watching signals and
+        freeze or thaw accordingly. Always counts as an interaction refill too."""
         low = (text or "").lower().strip()
         if any(p in low for p in FREE_PHRASES):
             self.unfreeze()
+        elif any(p in low for p in WATCH_PHRASES):
+            self.freeze("watching")   # survives chit-chat; clears on FREE_PHRASES
         elif any(p in low for p in BUSY_PHRASES):
             self.freeze("busy")
 

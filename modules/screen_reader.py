@@ -133,11 +133,32 @@ def get_clipboard() -> str:
     except:
         return ""
 
-def get_screen_context(target_app_name: str = None) -> dict:
-    window = find_window(target_app_name) if target_app_name else None
+_OWN_WINDOW_MARKERS = ("aura", "prime core online")
+_last_external = {"app": "unknown", "visible_text": "", "ts": 0.0}
+_EXTERNAL_STALE_SECONDS = 600   # forget what was on screen after 10 min
 
-    return {
-        "app": window.title if window else get_active_window(),
-        "visible_text": extract_text_from_screen(window),
-        "clipboard": get_clipboard()
-    }
+
+def get_screen_context(target_app_name: str = None) -> dict:
+    import time as _t
+    window = find_window(target_app_name) if target_app_name else None
+    app = window.title if window else get_active_window()
+    visible = extract_text_from_screen(window)
+
+    app_low = (app or "").lower()
+    if any(m in app_low for m in _OWN_WINDOW_MARKERS):
+        # Focused window is AURA itself. Its own chat text must NEVER be fed
+        # back as "the user's screen" — it read its own UI and hallucinated a
+        # "keyboard mishap" from the user's rendered message. Report the last
+        # real app instead (blanked if too old).
+        stale = (_t.time() - _last_external["ts"]) > _EXTERNAL_STALE_SECONDS
+        return {
+            "app": "unknown" if stale else _last_external["app"],
+            "visible_text": "" if stale else _last_external["visible_text"],
+            "clipboard": get_clipboard(),
+            "note": "user is focused on the AURA window (talking to you)",
+        }
+
+    _last_external["app"] = app
+    _last_external["visible_text"] = visible or ""
+    _last_external["ts"] = _t.time()
+    return {"app": app, "visible_text": visible, "clipboard": get_clipboard()}

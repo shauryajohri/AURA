@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 from ui import theme
 from ui.center_panel import CenterPanel
 from ui.chat_panel import ChatPanel
+from ui.memory_panel import MemoryPanel
 from ui.sidebar import Sidebar
 from ui.state import AuraState, StateBus
 from ui.stats_bar import StatsBar
@@ -68,14 +69,16 @@ class AuraWindow(QWidget):
         self.sidebar = Sidebar(self.bus)
         self.center = CenterPanel(self.bus)
         self.tasks_panel = TasksPanel()
+        self.memory_panel = MemoryPanel()
         self.chat = ChatPanel(self.bus)
         self.chat.setFixedWidth(320)
 
-        # Center area is a stack: Home (cosmos) ⇄ Tasks (full list,
-        # completed included). Sidebar nav switches pages.
+        # Center area is a stack: Home (cosmos) ⇄ Tasks ⇄ Memory. Sidebar
+        # nav switches pages.
         self.center_stack = QStackedWidget()
-        self.center_stack.addWidget(self.center)       # index 0 — Home
-        self.center_stack.addWidget(self.tasks_panel)  # index 1 — Tasks
+        self.center_stack.addWidget(self.center)        # index 0 — Home
+        self.center_stack.addWidget(self.tasks_panel)   # index 1 — Tasks
+        self.center_stack.addWidget(self.memory_panel)  # index 2 — Memory
 
         columns.addWidget(self.sidebar)
         columns.addWidget(self.center_stack, 1)
@@ -119,6 +122,9 @@ class AuraWindow(QWidget):
         if name == "Tasks":
             self.tasks_panel.refresh()
             self.center_stack.setCurrentWidget(self.tasks_panel)
+        elif name == "Memory":
+            self.memory_panel.refresh()
+            self.center_stack.setCurrentWidget(self.memory_panel)
         else:
             # Home and everything not yet implemented → cosmos view
             self.center_stack.setCurrentWidget(self.center)

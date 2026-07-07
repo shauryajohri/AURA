@@ -1,6 +1,10 @@
 import signal
 import sys
 
+# Install crash logging BEFORE anything else can die silently.
+from core.crashlog import install as _install_crashlog
+_install_crashlog()
+
 from core.brain import _history, get_context, start_proactive
 from core.curiosity_engine import start_curiosity_loop
 from modules.session_memory import get_greeting_with_memory, save_on_exit

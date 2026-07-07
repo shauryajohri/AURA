@@ -27,10 +27,22 @@ class _Planet:
         self.name = name
         self.role = role
         self.color = QColor(color)
-        self.rx = rx          # orbit radii as fractions of panel size
+        # The tuple's rx/ry are the NEAR (unlocked) orbit. A locked model
+        # drifts out to an edge orbit; rx/ry animate between the two so the
+        # transition glides instead of snapping.
+        self.near_rx = rx
+        self.near_ry = ry
+        self.edge_rx = rx + 0.24
+        self.edge_ry = ry + 0.18
+        self.rx = rx          # current animated orbit radii (fractions)
         self.ry = ry
         self.speed = speed
         self.angle = phase
+        self.locked = False
+
+    def target(self):
+        return ((self.edge_rx, self.edge_ry) if self.locked
+                else (self.near_rx, self.near_ry))
 
 
 class _Dust:
@@ -47,13 +59,15 @@ class _Dust:
 class CosmosPanel(QWidget):
     """Animated cosmos canvas. Reads presence + active model from StateBus."""
 
+    # The real models AURA routes to. Names MUST match core/model_router.MODELS
+    # and the lock keys, so locking a planet actually parks that model.
     PLANETS = [
-        # name           role                    color                          rx     ry     speed  phase
-        ("GPT-4o",       "General Intelligence", theme.MODEL_COLORS["GPT-4o"],       0.38, 0.30, 0.30, 200),
-        ("Claude 3.5",   "Deep Reasoning",       theme.MODEL_COLORS["Claude 3.5"],   0.44, 0.34, 0.22, 330),
-        ("Gemini 1.5",   "Research & Analysis",  theme.MODEL_COLORS["Gemini 1.5"],   0.42, 0.33, 0.26, 140),
-        ("Grok 2",       "Real-time Intel",      theme.MODEL_COLORS["Grok 2"],       0.46, 0.36, 0.19, 30),
-        ("Local (LLM)",  "Local Processing",     theme.MODEL_COLORS["Local (LLM)"],  0.33, 0.26, 0.36, 80),
+        # name                role                color                  rx     ry     speed  phase
+        ("Laguna M.1",       "Coding",           theme.ACCRETION_BLUE,  0.38, 0.30, 0.30, 200),
+        ("Nemotron 3 Super", "Research",         theme.FOCUS_GREEN,     0.44, 0.34, 0.22, 330),
+        ("Gemma 4 31B",      "Everyday chat",    theme.EVENT_VIOLET,    0.42, 0.33, 0.26, 140),
+        ("Llama 3.3 70B",    "Fallback · heavy", theme.ALERT_ORANGE,    0.33, 0.26, 0.36, 80),
+        ("Llama 3.1 8B",     "Fast · light",     theme.ION_CYAN,        0.46, 0.36, 0.19, 30),
     ]
 
     def __init__(self, bus: StateBus, parent=None):
@@ -65,6 +79,16 @@ class CosmosPanel(QWidget):
         self._dust = [_Dust() for _ in range(70)]
         self._planets = [_Planet(*p) for p in self.PLANETS]
         self.setMinimumHeight(360)
+
+        # Apply persisted lock state — locked planets start already parked at
+        # the edge (no fly-out animation on launch).
+        try:
+            from core.model_lock import is_locked
+            for p in self._planets:
+                p.locked = is_locked(p.name)
+                p.rx, p.ry = p.target()
+        except Exception:
+            pass
 
         bus.stateChanged.connect(lambda *_: self.update())
         bus.activeModelChanged.connect(lambda *_: self.update())
@@ -92,7 +116,19 @@ class CosmosPanel(QWidget):
         for d in self._dust:
             d.angle = (d.angle + d.speed * speed) % 360
         for p in self._planets:
-            p.angle = (p.angle + p.speed) % 360
+            # Locked planets idle slower; all planets ease their orbit radius
+            # toward the current lock target for a smooth drift in/out.
+            p.angle = (p.angle + p.speed * (0.4 if p.locked else 1.0)) % 360
+            trx, try_ = p.target()
+            p.rx += (trx - p.rx) * 0.06
+            p.ry += (try_ - p.ry) * 0.06
+        self.update()
+
+    def set_locked(self, name: str, locked: bool):
+        """Toggle a model's parked/edge state. Called by the ModelDock."""
+        for p in self._planets:
+            if p.name == name:
+                p.locked = locked
         self.update()
 
     def resizeEvent(self, event):
@@ -209,10 +245,13 @@ class CosmosPanel(QWidget):
         depth = 0.75 + 0.25 * math.sin(rad)   # slightly smaller when "behind"
         r = base * 0.032 * depth
 
-        is_active = p.name == self._bus.active_model
+        # A locked model is parked at the edge and not in play — render it
+        # muted so the eye reads it as "idle out there", never as active.
+        is_active = (not p.locked) and p.name == self._bus.active_model
+        dim = 0.4 if p.locked else 1.0
 
         # faint orbit path
-        pen = QPen(QColor(255, 255, 255, 14))
+        pen = QPen(QColor(255, 255, 255, 8 if p.locked else 14))
         pen.setWidthF(1.0)
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
@@ -221,7 +260,7 @@ class CosmosPanel(QWidget):
         # glow
         glow = QRadialGradient(x, y, r * 3.0)
         gc = QColor(p.color)
-        gc.setAlphaF(0.45 if is_active else 0.18)
+        gc.setAlphaF((0.45 if is_active else 0.18) * dim)
         ge = QColor(p.color); ge.setAlphaF(0.0)
         glow.setColorAt(0.0, gc)
         glow.setColorAt(1.0, ge)
@@ -231,15 +270,15 @@ class CosmosPanel(QWidget):
 
         # body
         body = QRadialGradient(x - r * 0.35, y - r * 0.35, r * 1.7)
-        lit = QColor(p.color).lighter(130)
-        dark = QColor(p.color).darker(320)
+        lit = QColor(p.color).lighter(130 if not p.locked else 100)
+        dark = QColor(p.color).darker(320 if not p.locked else 460)
         body.setColorAt(0.0, lit)
         body.setColorAt(1.0, dark)
         painter.setBrush(QBrush(body))
         painter.drawEllipse(QPointF(x, y), r, r)
 
         # label
-        painter.setPen(QColor(theme.TEXT_PRIMARY))
+        painter.setPen(QColor(theme.TEXT_SECONDARY if p.locked else theme.TEXT_PRIMARY))
         painter.setFont(theme.display_font(9))
         painter.drawText(QRectF(x - 70, y + r + 4, 140, 14),
                          Qt.AlignHCenter, p.name)
@@ -248,8 +287,12 @@ class CosmosPanel(QWidget):
         painter.drawText(QRectF(x - 70, y + r + 18, 140, 12),
                          Qt.AlignHCenter, p.role)
 
-        chip = "ACTIVE" if is_active else "STANDBY"
-        chip_color = QColor(p.color) if is_active else QColor(theme.TEXT_DIM)
+        if p.locked:
+            chip, chip_color = "🔒 LOCKED", QColor(theme.TEXT_DIM)
+        elif is_active:
+            chip, chip_color = "ACTIVE", QColor(p.color)
+        else:
+            chip, chip_color = "STANDBY", QColor(theme.TEXT_DIM)
         painter.setPen(chip_color)
         painter.setFont(theme.mono_font(7))
         painter.drawText(QRectF(x - 70, y + r + 31, 140, 11),

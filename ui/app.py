@@ -234,8 +234,11 @@ class AuraAppController(QObject):
 
     # ── Model display ─────────────────────────────────────────────────────
     _MODEL_LABELS = {
-        "llama-3.3-70b-versatile": "Llama 3.3 70B",
-        "llama-3.1-8b-instant":    "Llama 3.1 8B",
+        "poolside/laguna-m.1:free":                "Laguna M.1",
+        "nvidia/nemotron-3-super-120b-a12b:free":  "Nemotron 3 Super",
+        "google/gemma-4-31b-it:free":              "Gemma 4 31B",
+        "llama-3.3-70b-versatile":                 "Llama 3.3 70B",
+        "llama-3.1-8b-instant":                    "Llama 3.1 8B",
     }
 
     @Slot(str)
@@ -367,9 +370,11 @@ class AuraAppController(QObject):
     # ── Direct LLM (no planning) ──────────────────────────────────────────
     def _process_direct(self, text: str, intent_hint: str = None):
         try:
-            from core.ai_router import GROQ_MODEL
+            from core.ai_router import GROQ_MODEL, resolve_model
             from core.brain import process_streaming
-            self.modelChanged.emit(GROQ_MODEL)
+            # Show the model that will actually handle this (honors locks);
+            # falls back to the Groq default if every candidate is locked.
+            self.modelChanged.emit(resolve_model(intent_hint or "CASUAL") or GROQ_MODEL)
             process_streaming(
                 text,
                 on_chunk=lambda c: self.responseChunk.emit(c),

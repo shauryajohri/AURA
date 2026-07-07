@@ -13,20 +13,119 @@ GROQ_MODEL   = "llama-3.3-70b-versatile"
 GROQ_MODEL_LIGHT = "llama-3.1-8b-instant"
 GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
 
-_rate_limit_until = 0.0
+# OpenRouter — OpenAI-compatible, so the same request/response shape works;
+# only the endpoint + key differ. User-facing chat/coding/research routes go
+# here (see model_router); background/meta calls stay on Groq. Add your key as
+# OPENROUTER_API_KEY in .env.
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")  # shared/default fallback
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+# Per-model OpenRouter keys — AURA uses a SEPARATE key for each model so work
+# is spread across three independent free-tier quotas instead of exhausting
+# one. Each falls back to the shared OPENROUTER_API_KEY if its own key is
+# blank, so a single key still works too. Model ids mirror core/model_router.
+_OPENROUTER_MODEL_KEYS = {
+    "poolside/laguna-m.1:free":
+        os.getenv("OPENROUTER_KEY_CODING") or OPENROUTER_API_KEY,
+    "nvidia/nemotron-3-super-120b-a12b:free":
+        os.getenv("OPENROUTER_KEY_RESEARCH") or OPENROUTER_API_KEY,
+    "google/gemma-4-31b-it:free":
+        os.getenv("OPENROUTER_KEY_CHAT") or OPENROUTER_API_KEY,
+}
+
 RATE_LIMIT_COOLDOWN_SECONDS = 20
+# Per-PROVIDER cooldown: an OpenRouter 429 must not freeze Groq (and vice
+# versa), otherwise the fallback would be pointless.
+_provider_cooldown = {}   # provider name -> unix ts until which it's paused
+
+# The model actually used for the last user-facing generation — the UI model
+# chip reads this so it shows the real model, not a guess.
+_last_model_used = GROQ_MODEL
 
 
-def _in_rate_limit_cooldown() -> bool:
+def _provider_for(model_id: str) -> str:
+    """OpenRouter ids look like 'vendor/model:free' (contain a slash); Groq
+    ids like 'llama-3.3-70b-versatile' don't."""
+    return "openrouter" if (model_id and "/" in model_id) else "groq"
+
+
+def _endpoint_for(model_id: str):
+    """Return (provider, url, api_key) for a model id. OpenRouter models use
+    their own per-model key (see _OPENROUTER_MODEL_KEYS) so each draws from a
+    separate free quota."""
+    if _provider_for(model_id) == "openrouter":
+        key = _OPENROUTER_MODEL_KEYS.get(model_id, OPENROUTER_API_KEY)
+        return "openrouter", OPENROUTER_URL, key
+    return "groq", GROQ_URL, GROQ_API_KEY
+
+
+def _cooldown_key(provider: str, model_id: str) -> str:
+    """Cooldown is tracked PER OpenRouter model (each has its own key/quota),
+    but shared for Groq. So a 429 on one model's quota never pauses another."""
+    return model_id if provider == "openrouter" else "groq"
+
+
+def _headers(provider: str, api_key: str) -> dict:
+    h = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    if provider == "openrouter":
+        # Optional but recommended by OpenRouter for attribution.
+        h["HTTP-Referer"] = "https://aura.local"
+        h["X-Title"] = "AURA"
+    return h
+
+
+def _in_rate_limit_cooldown(provider: str = "groq") -> bool:
     import time as _time
-    return _time.time() < _rate_limit_until
+    return _time.time() < _provider_cooldown.get(provider, 0.0)
 
 
-def _start_rate_limit_cooldown():
-    global _rate_limit_until
+def _start_rate_limit_cooldown(provider: str = "groq"):
     import time as _time
-    _rate_limit_until = _time.time() + RATE_LIMIT_COOLDOWN_SECONDS
-    print(f"[AURA] Rate limited — pausing Groq calls for {RATE_LIMIT_COOLDOWN_SECONDS}s")
+    _provider_cooldown[provider] = _time.time() + RATE_LIMIT_COOLDOWN_SECONDS
+    print(f"[AURA] Rate limited — pausing {provider} calls for {RATE_LIMIT_COOLDOWN_SECONDS}s")
+
+
+def last_model_used() -> str:
+    return _last_model_used
+
+
+def _set_last_model(model_id: str):
+    global _last_model_used
+    _last_model_used = model_id
+
+
+def resolve_model(intent: str):
+    """The model id AURA WOULD use for this intent right now, honoring locks.
+    Used by the UI to show the model chip before a call runs. None if every
+    candidate is locked."""
+    cands = _resolve_candidates(intent, None)
+    return cands[0][1] if cands else None
+
+
+def _resolve_candidates(intent: str, explicit_model: str | None) -> list:
+    """Ordered [(name, id)] to try, with LOCKED models removed entirely.
+    A locked model is never used, no matter what. When an explicit model is
+    given (from the plan engine), it leads, then the Groq fallback chain."""
+    from core import model_router, model_lock
+    if explicit_model:
+        lead_name = model_router.name_for_id(explicit_model) or explicit_model
+        base = [(lead_name, explicit_model)] + model_router.groq_fallbacks()
+    else:
+        base = model_router.candidates_for(intent)
+
+    seen, out = set(), []
+    for name, mid in base:
+        if mid in seen:
+            continue
+        seen.add(mid)
+        if model_lock.is_locked(name):
+            continue   # locked → AURA may never use it
+        out.append((name, mid))
+    return out
+
+
+_ALL_LOCKED_MSG = ("Every model I'd use for that is locked — unlock one in the "
+                   "cosmos and I'll answer.")
 
 
 _CODING_SYSTEM_ADDON = """
@@ -124,7 +223,10 @@ PERSONAL MODE — you're a close friend right now, not a tool:
 
 
 def call_groq_streaming(prompt: str, system: str = DONNA_SYSTEM_PROMPT, intent: str = "CASUAL", model: str = None):
-    if _in_rate_limit_cooldown():
+    model_id = model or GROQ_MODEL
+    provider, url, api_key = _endpoint_for(model_id)
+    cd_key = _cooldown_key(provider, model_id)
+    if _in_rate_limit_cooldown(cd_key):
         yield "RATE_LIMIT"
         return
 
@@ -146,13 +248,10 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
 """
     try:
         response = requests.post(
-            GROQ_URL,
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json"
-            },
+            url,
+            headers=_headers(provider, api_key),
             json={
-                "model": model or GROQ_MODEL,
+                "model": model_id,
                 "messages": [
                     {"role": "system", "content": strict_system},
                     {"role": "user",   "content": prompt}
@@ -165,8 +264,12 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
             stream=True
         )
         if response.status_code == 429:
-            _start_rate_limit_cooldown()
+            _start_rate_limit_cooldown(cd_key)
             yield "RATE_LIMIT"
+            return
+        if response.status_code >= 400:
+            print(f"[AURA] {provider} stream error {response.status_code}: {response.text[:200]}")
+            yield "CONNECTION_ERROR"
             return
         _debug_buffer = []
         for line in response.iter_lines():
@@ -235,11 +338,19 @@ def call_classifier(prompt: str) -> str:
 def route(intent: str, prompt: str) -> str:
     extra = INTENT_PERSONALITY_ADJUSTMENTS.get(intent, "")
     system = DONNA_SYSTEM_PROMPT + extra
-    if intent == "SEARCH":
-        # No dedicated web-search backend is wired up; answer with the base
-        # model instead of crashing on an undefined function (was NameError).
-        return call_groq(prompt, system, intent="SEARCH")
-    return call_groq(prompt, system, intent=intent)
+    candidates = _resolve_candidates(intent, None)
+    if not candidates:
+        return _ALL_LOCKED_MSG
+    last = "CONNECTION_ERROR"
+    for name, mid in candidates:
+        result = call_groq(prompt, system, intent=intent, model=mid)
+        if result in ("RATE_LIMIT", "CONNECTION_ERROR"):
+            last = result
+            print(f"[AURA] {name} unavailable ({result}) — falling back")
+            continue
+        _set_last_model(mid)
+        return result
+    return last
 
 # ── V2.2: life-memory injection (cached; refreshed every 5 min) ─────────────
 _facts_cache = {"ts": 0.0, "text": ""}
@@ -318,24 +429,49 @@ def route_streaming(intent: str, prompt: str, system_prompt: str | None = None, 
         # a manual lock overrides everything (including relationship tone)
         system = (DONNA_SYSTEM_PROMPT + extra + _user_facts_block()
                   + _relationship_block() + _nature_overlay())
-    for chunk in call_groq_streaming(prompt, system, intent=intent, model=model):
-        yield chunk
+
+    # Resolve the model chain for this intent (or the explicit plan model),
+    # with LOCKED models removed. Try each in order; if one is rate-limited or
+    # errors before any content, fall through to the next (Groq is the safety
+    # net). Only the very first sentinel-free stream is shown to the user.
+    candidates = _resolve_candidates(intent, model)
+    if not candidates:
+        yield _ALL_LOCKED_MSG
+        return
+
+    last_sentinel = "CONNECTION_ERROR"
+    for name, mid in candidates:
+        gen = call_groq_streaming(prompt, system, intent=intent, model=mid)
+        try:
+            first = next(gen)
+        except StopIteration:
+            continue
+        if first in ("RATE_LIMIT", "CONNECTION_ERROR"):
+            last_sentinel = first
+            print(f"[AURA] {name} unavailable ({first}) — falling back")
+            continue
+        _set_last_model(mid)
+        yield first
+        for chunk in gen:
+            yield chunk
+        return
+    yield last_sentinel
 def call_groq_raw(prompt: str, system: str, max_tokens: int = 1024,
                   temperature: float = 0.4, model: str = None) -> str:
     """Clean single call — NO personality addon, NO 2-sentence limit,
     NO response cleaning. Used by the Prompt Maker (/prompt_end) and any
     future session mode that needs full-length structured output."""
-    if _in_rate_limit_cooldown():
+    model_id = model or GROQ_MODEL
+    provider, url, api_key = _endpoint_for(model_id)
+    cd_key = _cooldown_key(provider, model_id)
+    if _in_rate_limit_cooldown(cd_key):
         return "RATE_LIMIT"
     try:
         response = requests.post(
-            GROQ_URL,
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json"
-            },
+            url,
+            headers=_headers(provider, api_key),
             json={
-                "model": model or GROQ_MODEL,
+                "model": model_id,
                 "messages": [
                     {"role": "system", "content": system},
                     {"role": "user",   "content": prompt}
@@ -347,20 +483,23 @@ def call_groq_raw(prompt: str, system: str, max_tokens: int = 1024,
             timeout=45
         )
         if response.status_code == 429:
-            _start_rate_limit_cooldown()
+            _start_rate_limit_cooldown(cd_key)
             return "RATE_LIMIT"
         data = response.json()
         if "choices" not in data:
-            print(f"[AURA] Groq raw API error (status {response.status_code}): {data}")
+            print(f"[AURA] {provider} raw API error (status {response.status_code}): {data}")
             return "CONNECTION_ERROR"
         return data["choices"][0]["message"]["content"].strip()
     except Exception as e:
-        print(f"[AURA] Groq raw error: {e}")
+        print(f"[AURA] {provider} raw error: {e}")
         return "CONNECTION_ERROR"
 
 
 def call_groq(prompt: str, system: str = DONNA_SYSTEM_PROMPT, intent: str = "CASUAL", model: str = None) -> str:
-    if _in_rate_limit_cooldown():
+    model_id = model or GROQ_MODEL
+    provider, url, api_key = _endpoint_for(model_id)
+    cd_key = _cooldown_key(provider, model_id)
+    if _in_rate_limit_cooldown(cd_key):
         return "RATE_LIMIT"
 
     is_coding = (intent == "CODING")
@@ -384,13 +523,10 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
 """
     try:
         response = requests.post(
-            GROQ_URL,
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json"
-            },
+            url,
+            headers=_headers(provider, api_key),
             json={
-                "model": model or GROQ_MODEL,
+                "model": model_id,
                 "messages": [
                     {"role": "system", "content": strict_system},
                     {"role": "user",   "content": prompt}
@@ -401,15 +537,15 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
             },
             timeout=30
         )
-        print(f"[AURA Groq Debug] Status: {response.status_code} | Intent: {intent}")
+        print(f"[AURA {provider} Debug] Status: {response.status_code} | Intent: {intent} | Model: {model_id}")
 
         if response.status_code == 429:
-            _start_rate_limit_cooldown()
+            _start_rate_limit_cooldown(cd_key)
             return "RATE_LIMIT"
 
         data = response.json()
         if "choices" not in data:
-            print(f"[AURA] Groq API error (status {response.status_code}): {data}")
+            print(f"[AURA] {provider} API error (status {response.status_code}): {data}")
             return "CONNECTION_ERROR"
 
         raw = data["choices"][0]["message"]["content"]
@@ -419,5 +555,5 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
             return raw.strip()   # personal talk keeps its length (guard caps at 4)
         return raw if is_coding else clean_response(raw)
     except Exception as e:
-        print(f"[AURA] Groq error: {e}")
+        print(f"[AURA] {provider} error: {e}")
         return "CONNECTION_ERROR"

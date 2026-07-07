@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 
 from ui import theme
 from ui.cosmos_panel import CosmosPanel
+from ui.model_dock import ModelDock
 from ui.state import StateBus, state_accent
 from ui.widgets import GlassPanel, WaveformWidget
 
@@ -93,11 +94,16 @@ class CenterPanel(QWidget):
         clock_timer.start(10_000)
         self._update_clock()
 
+        # ── model lock/unlock dock ──────────────────────────────────────
+        self.cosmos = CosmosPanel(bus)
+        self.model_dock = ModelDock()
+        self.model_dock.lockChanged.connect(self.cosmos.set_locked)
+        lay.addWidget(self.model_dock)
+
         # ── cosmos hero ─────────────────────────────────────────────────
         cosmos_card = GlassPanel(radius=18)
         cc = QVBoxLayout(cosmos_card)
         cc.setContentsMargins(4, 4, 4, 4)
-        self.cosmos = CosmosPanel(bus)
         cc.addWidget(self.cosmos)
         lay.addWidget(cosmos_card, 1)
 

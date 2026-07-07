@@ -38,6 +38,8 @@ class AuraAppController(QObject):
 
         self.orb = OrbWidget()
         self.main_window = AuraWindow()
+        # one presence: the window's StateBus drives the floating orb too
+        self.orb.attach_bus(self.main_window.bus)
 
         self.prompt_engine = PromptEngine()
 

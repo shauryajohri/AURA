@@ -119,11 +119,21 @@ _CODE_ACTION_CUES = (
     "snippet", "syntax", "```", "leetcode", "regex", "algorithm to",
     ".py", ".js", ".ts", ".cpp", ".java", ".cs", ".go", ".rs", ".html", ".css",
 )
+# Broad info cues — used ONLY to pick SEARCH vs CASUAL when downgrading a wrong
+# CODING verdict. "what is/are" included; bare "what's" is left out because it
+# overlaps greetings ("what's up").
 _INFO_CUES = (
-    "info", "information", "tell me about", "what is", "what are", "what's",
-    "who is", "how does", "how do", "how to", "explain", "overview", "details",
+    "info", "information", "tell me about", "what is", "what are", "who is",
+    "how does", "how do", "how to", "explain", "overview", "details",
     "research", "find out", "look up", "learn about", "difference between",
     "meaning of", "summary of", "facts about", "get me info", "give me info",
+)
+# Narrow, unambiguous info cues — safe to UPGRADE a CASUAL verdict to SEARCH
+# without stealing greetings/small-talk.
+_STRONG_INFO_CUES = (
+    "info", "information", "tell me about", "get me info", "give me info",
+    "explain", "research", "look up", "find out", "learn about",
+    "details about", "overview of", "summary of", "facts about",
 )
 
 
@@ -132,11 +142,10 @@ def _correct_intent(query: str, intent: str) -> str:
     sounding INFORMATION requests from being routed to the coding model."""
     q = query.lower()
     has_code_cue = any(c in q for c in _CODE_ACTION_CUES)
-    has_info_cue = any(c in q for c in _INFO_CUES)
     if intent == "CODING" and not has_code_cue:
         # CODING with no "produce code" cue → it's really an info/general ask.
-        return "SEARCH" if has_info_cue else "CASUAL"
-    if intent == "CASUAL" and has_info_cue and not has_code_cue:
+        return "SEARCH" if any(c in q for c in _INFO_CUES) else "CASUAL"
+    if intent == "CASUAL" and not has_code_cue and any(c in q for c in _STRONG_INFO_CUES):
         # Route genuine info requests to the research model, not small-talk.
         return "SEARCH"
     return intent

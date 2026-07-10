@@ -1,0 +1,129 @@
+====================================================================
+AURA — SETUP GUIDE
+====================================================================
+Follow these steps in order. Commands are shown for Windows (cmd/
+PowerShell) first, with the Mac/Linux equivalent under it where the
+command differs.
+
+--------------------------------------------------------------------
+1) PREREQUISITES
+--------------------------------------------------------------------
+- Python 3.10 or newer installed (check with: python --version)
+- Git installed (if you're cloning instead of copying the folder)
+- A microphone if you want voice features (optional)
+
+--------------------------------------------------------------------
+2) GET THE PROJECT
+--------------------------------------------------------------------
+If you received the folder directly (zip/drive/etc.), just place it
+somewhere on your computer and open a terminal inside it.
+
+If cloning from git:
+    git clone <repo-url>
+    cd AURA
+
+--------------------------------------------------------------------
+3) CREATE A VIRTUAL ENVIRONMENT (recommended)
+--------------------------------------------------------------------
+Windows:
+    python -m venv venv
+    venv\Scripts\activate
+
+Mac/Linux:
+    python3 -m venv venv
+    source venv/bin/activate
+
+You should see "(venv)" appear at the start of your terminal prompt
+once it's active. Do the remaining steps with it active.
+
+--------------------------------------------------------------------
+4) INSTALL DEPENDENCIES
+--------------------------------------------------------------------
+    pip install -r requirements.txt
+
+Notes:
+- PyAudio can fail to install with a plain pip install on some
+  systems.
+    Windows: if it fails, run:
+        pip install pipwin
+        pipwin install pyaudio
+    Mac: install portaudio first, then retry:
+        brew install portaudio
+        pip install pyaudio
+    Linux (Debian/Ubuntu):
+        sudo apt-get install portaudio19-dev python3-pyaudio
+        pip install pyaudio
+- "ollama" in requirements.txt is optional — AURA falls back
+  gracefully if it isn't installed/running.
+
+--------------------------------------------------------------------
+5) SET UP YOUR API KEYS (.env file)
+--------------------------------------------------------------------
+AURA reads its keys from a ".env" file in the project root. This
+file is never shared/committed — every person running AURA needs
+their own copy.
+
+Step 1 — copy the template:
+    Windows:
+        copy .env.example .env
+    Mac/Linux:
+        cp .env.example .env
+
+Step 2 — open ".env" in any text editor and fill in:
+
+    GROQ_API_KEY=            <- REQUIRED. AURA will not work without
+                                 this — it powers intent detection,
+                                 background reasoning, and the
+                                 fallback chain for every reply.
+                                 Get a free key at:
+                                 https://console.groq.com/keys
+
+    PICOVOICE_KEY=           <- Optional. Needed only for the "Aura"
+                                 voice wake word. Without it, wake-word
+                                 detection is off but typed input still
+                                 works fine.
+                                 Get a free key at:
+                                 https://console.picovoice.ai/
+
+    OPENROUTER_API_KEY=      <- Optional. Unlocks extra models
+                                 (Laguna / Nemotron / Gemma) alongside
+                                 Groq. Without it, AURA just runs on
+                                 Groq for everything.
+                                 Get a free key at:
+                                 https://openrouter.ai/keys
+
+    OPENROUTER_KEY_CODING=   <- Optional. Separate per-model OpenRouter
+    OPENROUTER_KEY_RESEARCH=    keys so each model draws its own free
+    OPENROUTER_KEY_CHAT=        quota. Leave blank to just use the
+                                 single OPENROUTER_API_KEY above for all
+                                 three.
+
+    GEMINI_API_KEY=          <- Unused/legacy. Safe to leave blank.
+
+IMPORTANT: GROQ_API_KEY is the only truly required key. An
+OpenRouter key by itself is NOT enough — Groq handles intent
+classification and is the fallback safety net for every model, so
+without it AURA will break even if OpenRouter is configured.
+
+--------------------------------------------------------------------
+6) RUN AURA
+--------------------------------------------------------------------
+    python main.py
+
+On first run, check the terminal output — it prints a line telling
+you which OpenRouter models (if any) are active, and will print
+clear errors if a required key is missing or invalid.
+
+--------------------------------------------------------------------
+7) TROUBLESHOOTING
+--------------------------------------------------------------------
+- "No Picovoice key set" message: expected if you skipped that key —
+  voice wake word is just disabled, everything else still works.
+- Replies never come back / "CONNECTION_ERROR": almost always means
+  GROQ_API_KEY is missing, blank, or invalid in .env.
+- PyAudio install errors: see step 4 notes above for your OS.
+- Make sure your virtual environment is activated (see step 3)
+  before running pip install or python main.py — otherwise packages
+  may install to the wrong Python.
+
+====================================================================

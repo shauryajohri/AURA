@@ -17,7 +17,7 @@ from ui.widgets import GlassPanel, WaveformWidget
 
 SHORTCUTS = [
     ("⧉", "Open VS Code", "Development"),
-    ("▶", "YouTube", "Entertainment"),
+    ("🛠", "Aura App", "Coding Platform"),
     ("✎", "Notion", "Notes"),
     ("⌘", "LeetCode", "Practice"),
     ("＋", "Add Shortcut", ""),
@@ -53,6 +53,7 @@ class _NatureChip(_Chip):
 
 class CenterPanel(QWidget):
     natureSelected = Signal(str)   # nature key, e.g. "chill"
+    openWorkspaceRequested = Signal()   # "Aura App" chip → Developer Workspace
 
     def __init__(self, bus: StateBus, user_name: str = "Shaurya", parent=None):
         super().__init__(parent)
@@ -145,6 +146,8 @@ class CenterPanel(QWidget):
                 }}
                 """
             )
+            if title == "Aura App":
+                btn.clicked.connect(self.openWorkspaceRequested.emit)
             sc_row.addWidget(btn, 1)
         lay.addLayout(sc_row)
 

@@ -93,8 +93,7 @@ class FactRow(QFrame):
 
         layout.addWidget(_delete_button(lambda: self._on_delete(self._id)))
 
-        self.setStyleSheet(f"""
-            QFrame {{
+        self.setStyleSheet(f"""QFrame {{
                 background-color: rgba(255,255,255,0.03);
                 border: 1px solid {EVENT_VIOLET};
                 border-radius: 10px;

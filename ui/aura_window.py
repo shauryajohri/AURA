@@ -9,10 +9,11 @@ Hotkeys 1–6 switch states while we're running on mock data.
 
 import time
 
-from PySide6.QtCore import Qt, QPoint, Signal
+from PySide6.QtCore import Qt, QPoint, QSettings, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QPushButton, QSplitter, QStackedWidget, QVBoxLayout,
+    QWidget,
 )
 
 from ui import theme
@@ -23,6 +24,7 @@ from ui.sidebar import Sidebar
 from ui.state import AuraState, StateBus
 from ui.stats_bar import StatsBar
 from ui.tasks_panel import TasksPanel
+from ui.workspace_panel import WorkspacePanel
 
 
 class AuraWindow(QWidget):
@@ -70,25 +72,47 @@ class AuraWindow(QWidget):
         self.center = CenterPanel(self.bus)
         self.tasks_panel = TasksPanel()
         self.memory_panel = MemoryPanel()
+        self.workspace_panel = WorkspacePanel()
         self.chat = ChatPanel(self.bus)
-        self.chat.setFixedWidth(320)
+        # Was a fixed 320px; now a minimum, so the chat can be widened but
+        # never shrinks to nothing.
+        self.chat.setMinimumWidth(300)
 
-        # Center area is a stack: Home (cosmos) ⇄ Tasks ⇄ Memory. Sidebar
-        # nav switches pages.
+        # Center area is a stack: Home (cosmos) ⇄ Tasks ⇄ Memory ⇄ Workspace.
+        # Sidebar nav switches pages; so does the "Aura App" shortcut chip.
         self.center_stack = QStackedWidget()
-        self.center_stack.addWidget(self.center)        # index 0 — Home
-        self.center_stack.addWidget(self.tasks_panel)   # index 1 — Tasks
-        self.center_stack.addWidget(self.memory_panel)  # index 2 — Memory
+        self.center_stack.addWidget(self.center)          # index 0 — Home
+        self.center_stack.addWidget(self.tasks_panel)     # index 1 — Tasks
+        self.center_stack.addWidget(self.memory_panel)    # index 2 — Memory
+        self.center_stack.addWidget(self.workspace_panel) # index 3 — Workspace
+        # The black hole can shrink as the chat grows, but only down to this
+        # floor — below it the orbiting planets would clip, so we stop here.
+        self.center_stack.setMinimumWidth(560)
+
+        # Cosmos ⇄ chat share a draggable handle so the developer can widen the
+        # chat; the split is saved, so the chat keeps its width next launch.
+        self._main_splitter = QSplitter(Qt.Horizontal)
+        self._main_splitter.setHandleWidth(8)
+        self._main_splitter.setChildrenCollapsible(False)
+        self._main_splitter.setStyleSheet(
+            f"QSplitter::handle {{ background: {theme.EVENT_VIOLET}; border-radius: 3px; }}")
+        self._main_splitter.addWidget(self.center_stack)
+        self._main_splitter.addWidget(self.chat)
+        self._main_splitter.setStretchFactor(0, 1)
+        self._main_splitter.setStretchFactor(1, 0)
+        self._main_splitter.splitterMoved.connect(self._save_main_split)
 
         columns.addWidget(self.sidebar)
-        columns.addWidget(self.center_stack, 1)
-        columns.addWidget(self.chat)
+        columns.addWidget(self._main_splitter, 1)
         root.addLayout(columns, 1)
+
+        self._settings = QSettings("AURA", "MainWindow")
 
         self.stats = StatsBar()
         root.addWidget(self.stats)
 
         self.sidebar.navSelected.connect(self._on_nav_selected)
+        self.center.openWorkspaceRequested.connect(self._open_workspace)
         self.tasks_panel.countsChanged.connect(
             lambda done, total: self.stats.set_tasks(f"{done}/{total}")
         )
@@ -103,6 +127,19 @@ class AuraWindow(QWidget):
         self.chat.input.returnPressed.connect(self._on_send)
         self.chat.send_button.clicked.connect(self._on_send)
         self.chat.mic_button.clicked.connect(self._toggle_mic)
+
+        self._restore_main_split()
+
+    # ── resizable / persistent chat width ────────────────────────────────
+    def _save_main_split(self, *args):
+        self._settings.setValue("main_splitter", self._main_splitter.saveState())
+
+    def _restore_main_split(self):
+        state = self._settings.value("main_splitter")
+        if state is not None:
+            self._main_splitter.restoreState(state)
+        else:
+            self._main_splitter.setSizes([900, 320])  # default chat width
 
     # ── input handlers ───────────────────────────────────────────────────
     def _on_send(self):
@@ -125,9 +162,30 @@ class AuraWindow(QWidget):
         elif name == "Memory":
             self.memory_panel.refresh()
             self.center_stack.setCurrentWidget(self.memory_panel)
+        elif name == "Workspace":
+            self._open_workspace()
+        elif name == "Workbench":
+            self._open_workbench()
         else:
             # Home and everything not yet implemented → cosmos view
             self.center_stack.setCurrentWidget(self.center)
+
+    def _open_workspace(self):
+        self.workspace_panel.refresh()
+        self.center_stack.setCurrentWidget(self.workspace_panel)
+
+    def _open_workbench(self):
+        """Open the AURA Workbench as a SEPARATE window above the companion.
+        The companion (orb + this window) keeps running; Workbench becomes
+        the active development environment. Shares our StateBus so orb, cosmos
+        and workbench are one presence. Lazy-imported so the heavy engineering
+        UI only loads when actually opened."""
+        if getattr(self, "_workbench", None) is None:
+            from ui.workbench_window import WorkbenchWindow
+            self._workbench = WorkbenchWindow(bus=self.bus)
+        self._workbench.showMaximized()
+        self._workbench.raise_()
+        self._workbench.activateWindow()
 
     def is_mic_on(self) -> bool:
         return self._mic_on

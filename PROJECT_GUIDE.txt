@@ -1,0 +1,170 @@
+====================================================================
+AURA — WHAT IT IS & HOW TO USE IT
+====================================================================
+(For setup/API keys, see SETUP_INSTRUCTIONS.txt instead — this file
+is about what AURA does and how to talk to it once it's running.)
+
+--------------------------------------------------------------------
+WHAT IS AURA?
+--------------------------------------------------------------------
+AURA is a desktop AI companion built for a software developer's
+day-to-day work — not a generic chatbot. It runs as a PySide6
+desktop app with a voice pipeline, a memory system, a proactive
+"notice things and speak up" engine, and (as of the latest build) an
+in-app Developer Workspace so it doubles as a lightweight coding
+platform.
+
+You can talk to it by typing or by voice (wake word "aura"), and it
+routes what you say to different models/behaviors depending on what
+you're asking for — casual chat, coding help, research, planning,
+task tracking, or straight file/app control on your machine.
+
+--------------------------------------------------------------------
+HOW TO START IT
+--------------------------------------------------------------------
+    python main.py
+
+(after the one-time setup in SETUP_INSTRUCTIONS.txt). On startup
+AURA prints which models are active, greets you with a one-line
+recap of your last session, and opens the main window.
+
+--------------------------------------------------------------------
+THE MAIN WINDOW, PANEL BY PANEL
+--------------------------------------------------------------------
+LEFT SIDEBAR
+    Home       — the default cosmos/orb view
+    Tasks      — your to-do list (see Task Commands below)
+    Memory     — what AURA remembers about you: durable facts, saved
+                 notes, and session recaps — all editable/deletable
+    Workspace  — the Developer Workspace (see below)
+    Models     — model picker/lock (placeholder nav item)
+    Music      — placeholder nav item
+    Automation — placeholder nav item
+    Settings   — placeholder nav item
+    + a mini presence orb and a "Voice Mode — tap to speak" button
+
+CENTER PANEL
+    - The cosmos hero panel: a black-hole visualization with 5
+      orbiting "model planets" — whichever model is actually
+      answering right now glows; the ring color reflects AURA's
+      current state (idle/listening/thinking/speaking/etc).
+    - A model-routing bar showing which LLM just answered.
+    - Shortcuts row:
+        Open VS Code   — launch your editor
+        Aura App       — opens the in-app Developer Workspace
+                         (NOT a second copy of AURA — a coding
+                         platform living inside this same window)
+        Notion         — quick launch
+        LeetCode       — quick launch
+        Add Shortcut   — placeholder for adding your own
+    - A "Nature" chip (top right) — sets AURA's tone: Auto (default,
+      shifts with context), Chill, Focus, Savage, Professional. Once
+      set, it overrides the automatic tone logic until you change it.
+
+DEVELOPER WORKSPACE ("Aura App" shortcut, or Workspace nav item)
+    - Today's Mission — a short line for what you're focused on today
+    - Project Selector — switch between registered projects
+    - Git Integration — live branch name, dirty/clean status, and
+      last commit, read directly from the real repo
+    - File Explorer — a lazy-loaded tree of the project's files
+    - Terminal — run real shell commands in the project folder,
+      output streams back live
+
+--------------------------------------------------------------------
+COMMANDS YOU CAN TYPE OR SAY
+--------------------------------------------------------------------
+These are recognized as SPECIAL commands, not sent to the LLM as
+plain chat:
+
+WORKSPACE MODES (slash-commands — type these, then keep chatting
+normally until you exit the mode):
+    /code             enter Code Mode — every message becomes a
+                       straight-to-code request, no menus
+    /code_end         leave Code Mode
+    /research [goal]  enter Research Mode — structured reports
+                       (Objective / Current Position / Gap Analysis /
+                       Roadmap / etc). Can also run inline as
+                       "/research <goal>" for a one-shot report.
+    /research_end     leave Research Mode
+    /discussion       enter Discussion Mode — AURA pressure-tests
+                       your ideas (Pros / Cons / Risks / Alternatives
+                       / Recommendation)
+    /discussion_end   leave Discussion Mode
+    /plan             enter Plan Mode — turns an idea into a roadmap
+                       (Goal / Architecture / Steps / Risks / Testing)
+    /plan_end         leave Plan Mode
+    /prompt           enter Prompt Maker — everything you type after
+                       this is buffered as prompt instructions and
+                       NOT sent to the model yet
+    /prompt_end       builds everything you buffered into one clean,
+                       optimized LLM call
+    /prompt clear     clears the current prompt buffer
+    /prompt save      saves the built prompt
+    /prompt export    copies the built prompt to your clipboard
+    /help             lists all available commands
+
+    After /prompt_end, you can reply "run" / "execute" / "go" /
+    "use it" / "do it" (or pick a menu number) to execute the built
+    prompt immediately without a second approval step.
+
+TASKS (no slash needed — just say it naturally):
+    "add task ..." / "add a task ..." / "new task ..." /
+    "i need to ..." / "remind me to ..." / "todo: ..."
+        → adds a task
+    "done with ..." / "completed ..." / "finished ..." / "mark done"
+        → marks a task complete
+    "remove task ..." / "delete task ..." / "cancel task ..."
+        → deletes a task
+
+APP / WINDOW CONTROL:
+    "open <app name>" / "launch <app name>" / "start <app name>" /
+    "run <app name>"
+        → finds and launches that app (Start Menu, PATH, installed
+          apps registry, common install folders)
+    "look at <window/app>" / "check out <window/app>"
+        → AURA looks at what's on your screen there
+    "what site/page is open in <app>"
+        → describes what's showing in that window
+    anything containing "afk"
+        → reports how long you've been away
+
+ERRORS:
+    "check for error" / "any error" / "is there an error" / "errors?"
+        → runs AURA's error detector on your current screen/output
+
+MARKETS (instant, no LLM call):
+    mentions of "eurusd" / "gbpusd" / "usdjpy" / "gold"
+        → instant quote lookup
+
+MEMORY (natural language, not fixed phrases):
+    Asking AURA to recall something ("what did I tell you about...")
+        → pulls from its memory store
+    Copying text and asking AURA to remember/save it
+        → AURA summarizes and tags it automatically
+
+--------------------------------------------------------------------
+BEHIND THE SCENES (so you know what's actually running)
+--------------------------------------------------------------------
+- Proactive engine — watches your screen/state and speaks up if you
+  seem stuck, idle, or hit an error, without you asking
+- Curiosity engine — a slower background loop that looks for
+  patterns across a longer time window than the proactive engine
+- Error Intelligence — a rule-based knowledge base that classifies
+  errors into 4 severity levels and tracks recurring mistakes; only
+  falls back to the LLM when it can't classify something itself
+- Session memory — builds the "last time you were..." greeting you
+  see on startup, from your real conversation history
+- Crash logging — every crash (including silent/native ones) gets
+  written to logs/aura_crash.log automatically
+
+--------------------------------------------------------------------
+A NOTE ON WHAT'S "COMING SOON"
+--------------------------------------------------------------------
+Not everything mentioned in the project roadmap is live yet. A few
+pieces (e.g. a deeper session-awareness/"developer state" engine)
+are coded and tested standalone but not yet wired into the running
+app — if something in an older doc sounds like it should exist but
+doesn't respond, it's most likely one of those pending pieces rather
+than a bug.
+
+====================================================================

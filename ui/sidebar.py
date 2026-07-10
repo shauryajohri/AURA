@@ -21,6 +21,8 @@ NAV_ITEMS = [
     ("⌂", "Home"),
     ("☑", "Tasks"),
     ("◈", "Memory"),
+    ("🛠", "Workspace"),
+    ("⚡", "Workbench"),
     ("✦", "Models"),
     ("♫", "Music"),
     ("⚙", "Automation"),

@@ -1,0 +1,5 @@
+# AURA web bridge — extra deps for the React/Electron face.
+# Install alongside requirements.txt:  pip install -r requirements-web.txt
+fastapi
+uvicorn[standard]
+websockets

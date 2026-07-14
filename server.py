@@ -204,9 +204,16 @@ async def api_delete_task(task_id: int) -> dict[str, Any]:
 
 # The models shown in the constellation + their live lock state.
 _MODELS = [
+    # Live roster — names match core/model_router.MODELS = the model_lock
+    # keys, so locking these actually removes them from routing.
+    {"id": "laguna", "name": "Laguna M.1"},
+    {"id": "nemotron", "name": "Nemotron 3 Super"},
+    {"id": "gemma", "name": "Gemma 4 31B"},
+    {"id": "llama", "name": "Llama 3.3 70B"},
+    {"id": "llama8b", "name": "Llama 3.1 8B"},
+    # Display-only constellation planets (not currently routed).
     {"id": "gpt4o", "name": "GPT-4o"},
     {"id": "gemini", "name": "Gemini 1.5 Pro"},
-    {"id": "llama", "name": "Llama 3.3 70B"},
     {"id": "claude", "name": "Claude 3.5"},
     {"id": "grok", "name": "Grok 2 (xAI)"},
 ]
@@ -292,17 +299,28 @@ def _send(ws: WebSocket, msg: dict[str, Any]):
     return ws.send_text(json.dumps(msg))
 
 
-async def _run_streaming(ws: WebSocket, brain_call: Callable[[Callable[[str], None]], str]) -> None:
-    """Run a blocking brain call in a thread, streaming its on_chunk output."""
+async def _run_streaming(ws: WebSocket, brain_call: Callable[..., str]) -> None:
+    """Run a blocking brain call in a thread, streaming its on_chunk output.
+
+    brain_call receives (on_chunk, on_code). Code blocks arrive via on_code
+    (the brain strips them out of the chat text), so they are re-emitted as
+    fenced chunks AND appended to the final "done" text — otherwise the web
+    UI would show "Here's the code:" with no code at all."""
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
+    code_blocks: list[str] = []
 
     def on_chunk(chunk: str) -> None:
         loop.call_soon_threadsafe(queue.put_nowait, chunk)
 
+    def on_code(lang: str, code: str) -> None:
+        block = f"\n\n```{lang or 'text'}\n{code}\n```"
+        code_blocks.append(block)
+        on_chunk(block)
+
     def run() -> str:
         try:
-            return brain_call(on_chunk)
+            return brain_call(on_chunk, on_code)
         finally:
             loop.call_soon_threadsafe(queue.put_nowait, _DONE)
 
@@ -334,7 +352,8 @@ async def _run_streaming(ws: WebSocket, brain_call: Callable[[Callable[[str], No
     except Exception:  # noqa: BLE001
         pass
 
-    await _send(ws, {"type": "done", "payload": {"text": full or "", "model": model}})
+    done_text = (full or "") + "".join(code_blocks)
+    await _send(ws, {"type": "done", "payload": {"text": done_text, "model": model}})
     await _send(ws, {"type": "state", "payload": {"state": "idle"}})
 
 
@@ -342,7 +361,7 @@ async def _dispatch(ws: WebSocket, text: str) -> None:
     """Route one user message through the Director, then act on the directive."""
     if DIRECTOR is None:
         # Fallback: raw brain if the Director failed to init.
-        await _run_streaming(ws, lambda oc: process_streaming(text, on_chunk=oc))
+        await _run_streaming(ws, lambda oc, occ: process_streaming(text, on_chunk=oc, on_code=occ))
         return
 
     try:
@@ -363,37 +382,52 @@ async def _dispatch(ws: WebSocket, text: str) -> None:
     if kind == "llm_once":
         await _run_streaming(
             ws,
-            lambda oc: process_streaming(directive.user, on_chunk=oc, system_prompt=directive.system),
+            lambda oc, occ: process_streaming(
+                directive.user, on_chunk=oc, on_code=occ, system_prompt=directive.system),
         )
         return
 
     if kind in ("execute_prompt", "generate"):
         await _run_streaming(
             ws,
-            lambda oc: process_streaming(directive.text, on_chunk=oc, intent_hint="CODING"),
+            lambda oc, occ: process_streaming(
+                directive.text, on_chunk=oc, on_code=occ, intent_hint="CODING"),
         )
         return
 
     if kind == "plan":
-        # Build a plan via the prompt engine and return it as a message.
-        # (The interactive approve/run panel is a later milestone; for now the
-        # plan text is delivered so nothing is silently dropped.)
-        def build_plan(oc: Callable[[str], None]) -> str:
+        # Compile the plan via the prompt engine, then EXECUTE it. The plan
+        # internals (intent analysis, execution steps, requirements) are
+        # backend detail — they go to the terminal only. The user gets the
+        # actual answer, never the compiled prompt.
+        _PLAN_INTENT = {"CODING": "CODING", "RESEARCH": "RESEARCH", "PLANNING": "PLAN"}
+
+        def run_plan(oc: Callable[[str], None], occ: Callable[[str, str], None]) -> str:
             try:
                 from core.prompt_engine import PromptEngine
                 res = PromptEngine().process(directive.text)
-                out = getattr(res, "text", None) or getattr(res, "prompt", None) or str(res)
             except Exception as e:  # noqa: BLE001
-                out = f"(planner unavailable: {e})"
-            oc(out)
-            return out
-        await _run_streaming(ws, build_plan)
+                out = f"That planner path hit a snag ({e}) — try rephrasing it."
+                oc(out)
+                return out
+            # Terminal-only visibility of what the engine decided.
+            print("[AURA bridge] ── Execution plan (terminal only) ──")
+            for k, v in res.summary_dict().items():
+                print(f"    {k}: {v}")
+            print("[AURA bridge] ─────────────────────────────────────")
+            intent = _PLAN_INTENT.get(res.plan.domain, "PLAN")
+            return process_streaming(
+                res.prompt, on_chunk=oc, on_code=occ,
+                system_prompt=res.system_prompt, model=res.model_id,
+                intent_hint=intent,
+            )
+        await _run_streaming(ws, run_plan)
         return
 
     # "chat" - normal streaming conversation
     intent = getattr(directive, "intent", "") or None
     body = getattr(directive, "text", "") or text
-    await _run_streaming(ws, lambda oc: process_streaming(body, on_chunk=oc, intent_hint=intent))
+    await _run_streaming(ws, lambda oc, occ: process_streaming(body, on_chunk=oc, on_code=occ, intent_hint=intent))
 
 
 @app.websocket("/ws")

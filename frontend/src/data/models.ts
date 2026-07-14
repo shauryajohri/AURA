@@ -19,7 +19,13 @@ export interface ModelNode {
 export const MODELS: ModelNode[] = [
   { id: "gpt4o", name: "GPT-4o", role: "General Intelligence", status: "active", color: "#a855f7", x: -26, y: -30 },
   { id: "gemini", name: "Gemini 1.5 Pro", role: "Research & Analysis", status: "active", color: "#22d3ee", x: -34, y: 2 },
-  { id: "llama", name: "Llama 3.3 70B", role: "Local Processing", status: "standby", color: "#f59e0b", x: -22, y: 30 },
+  { id: "llama", name: "Llama 3.3 70B", role: "Groq · Heavy Fallback", status: "standby", color: "#f59e0b", x: -22, y: 30 },
   { id: "claude", name: "Claude 3.5", role: "Deep Reasoning", status: "standby", color: "#38bdf8", x: 28, y: -24 },
   { id: "grok", name: "Grok 2 (xAI)", role: "Real-time Intelligence", status: "standby", color: "#fb7185", x: 32, y: 8 },
+  // ── The live AURA roster (core/model_router.MODELS) — names must match
+  //    the model_lock keys so locking a planet really locks the model. ──
+  { id: "laguna", name: "Laguna M.1", role: "Coding Agent", status: "standby", color: "#34d399", x: 12, y: -36 },
+  { id: "nemotron", name: "Nemotron 3 Super", role: "Research & Planning", status: "standby", color: "#818cf8", x: 40, y: -8 },
+  { id: "gemma", name: "Gemma 4 31B", role: "Companion Chat", status: "standby", color: "#f472b6", x: 24, y: 30 },
+  { id: "llama8b", name: "Llama 3.1 8B", role: "Groq · Instant Fallback", status: "standby", color: "#fb923c", x: -40, y: -20 },
 ];

@@ -13,9 +13,9 @@ from core.personality import (INTENT_PROMPT, ANTICIPATE_PROMPT, SHOULD_RESPOND_P
 
 DEBUG_SPEECH = True
 
-# Workspace modes whose answers are full structured reports, not 2-sentence
-# chat — the guard trim is skipped for these (see process_streaming).
-LONGFORM_INTENTS = {"RESEARCH", "DISCUSSION", "PLAN"}
+# Intents whose answers are full-length (reports, explanations), not
+# 2-sentence chat — the guard trim is skipped for these (see process_streaming).
+LONGFORM_INTENTS = {"RESEARCH", "DISCUSSION", "PLAN", "EXPLAIN"}
 
 _last_context = {
     "app": "unknown",
@@ -185,7 +185,7 @@ def conversational_recall(query: str) -> str:
         convo = []
         for role, message, _ts in store.get_recent_conversations(12):
             text = (message or "").strip()
-            if not text or "Execution Plan:" in text or text.startswith("Task:"):
+            if not text or _is_context_junk(text):
                 continue
             convo.append(f"{'User' if role == 'user' else 'AURA'}: {text[:300]}")
         if convo:
@@ -234,6 +234,15 @@ _CTX_JUNK = (
     "I couldn't find",
     "Try saying the full app name",
     "Run this program to test the functions",
+    # Director-injected instruction wrappers — backend detail, never context.
+    "You are in RESEARCH mode",
+    "You are in DISCUSSION mode",
+    "You are in PLANNING mode",
+    "Explain this clearly and conversationally",
+    "Review this — point out issues",
+    "Make a concise, practical plan",
+    "Give a few practice questions",
+    "User request:",
 )
 
 
@@ -301,11 +310,19 @@ def build_context_prompt(query: str, intent: str, thought_context: str) -> str:
                 "the video, the game, whatever it is. Never use their screen "
                 "as a reason to push work or ask for code.)"
             )
-    else:
+    elif intent in {"CODING", "SEARCH", "COMMAND", "SAVE"}:
+        # Task intents: screen content is real working context.
         if app and app != "unknown":
             screen_info = f"\nCurrently on: {app}"
         if visible:
             screen_info += f"\nVisible content: {visible[:300]}"
+    else:
+        # CASUAL small-talk: never dump raw screen text — the model kept
+        # narrating the user's own screen back at them ("looks like you're
+        # browsing through some design updates..."). Ambient mention only.
+        if app and app != "unknown":
+            screen_info = (f"\n(Background: {app} is open. Do NOT comment on "
+                           "their screen or apps unless they ask about it.)")
 
     thought_section = f"\nContext: {thought_context}" if thought_context else ""
     facts_section = f"\n{facts_text}" if facts_text else ""
@@ -670,6 +687,8 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
 
         raw_chunks = []
         for chunk in route_streaming(intent, full_prompt, system_prompt=system_prompt, model=model):
+            if chunk in {"CONNECTION_ERROR", "RATE_LIMIT"} and raw_chunks:
+                continue   # mid-stream sentinel — status, not text
             raw_chunks.append(chunk)
         raw = "".join(raw_chunks).strip()
 
@@ -696,16 +715,22 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
         return chat_msg
 
     chunks = []
+    saw_sentinel = None
     for chunk in route_streaming(intent, full_prompt, system_prompt=system_prompt, model=model):
+        # Sentinels can arrive mid-stream (provider died after content began).
+        # They are status codes, not text — never show or store them.
+        if chunk in {"CONNECTION_ERROR", "RATE_LIMIT"}:
+            saw_sentinel = chunk
+            continue
         chunks.append(chunk)
-        if on_chunk and chunk not in {"CONNECTION_ERROR", "RATE_LIMIT"}:
+        if on_chunk:
             on_chunk(chunk)
 
     answer = "".join(chunks).strip()
-    if answer.startswith("ERROR") or answer == "CONNECTION_ERROR":
-        return "Connection trouble — one sec."
-    if answer == "RATE_LIMIT":
+    if not answer and saw_sentinel == "RATE_LIMIT":
         return "Hit my rate limit — give me a moment."
+    if answer.startswith("ERROR") or not answer:
+        return "Connection trouble — one sec."
 
     # Long-form workspace modes (research/discussion/plan) produce full
     # structured reports — the 2-sentence guard would shred them. Let them

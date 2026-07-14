@@ -48,6 +48,7 @@ INTENT_PRIMARY = {
     "RESEARCH":   "Nemotron 3 Super",
     "SEARCH":     "Nemotron 3 Super",
     "PLAN":       "Nemotron 3 Super",   # roadmaps need long-horizon reasoning
+    "EXPLAIN":    "Nemotron 3 Super",   # teaching needs depth, not chat vibes
     "DISCUSSION": "Gemma 4 31B",        # opinionated brainstorming
     "CASUAL":     "Gemma 4 31B",
     "PERSONAL":   "Gemma 4 31B",

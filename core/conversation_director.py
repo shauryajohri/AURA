@@ -151,12 +151,24 @@ _NARRATION_ASK_GUARD = ("?", "you", "please", "can you", "could you",
                         "teach", "walk me", "should i")
 
 
+# Past-tense narration: "i changed frontend tech from qt to electron",
+# "yes i switched to nodejs" — the user REPORTING a done action. Name-drops
+# coding topics but is not a request, so it must never pop the work menu.
+_PAST_NARRATION_RE = _re.compile(
+    r"^(?:yes+|yeah|yep|yup|nah|ok(?:ay)?|so|and|well|lol|haha|hmm|dude|bro|man|"
+    r"btw|also|oh)?[\s,]*"
+    r"i\s+(?:changed|switched|moved|migrated|swapped|updated|replaced|rewrote|"
+    r"redid|added|removed|installed|upgraded|ported|converted|refactored|"
+    r"rebuilt|renamed|deleted|deployed|pushed|merged|committed|set up|setup)\b"
+)
+
+
 def _is_narration(low: str) -> bool:
     """True when the message is the user narrating their own activity rather
     than asking AURA for anything."""
     if any(m in low for m in _NARRATION_ASK_GUARD):
         return False
-    return bool(_NARRATION_RE.search(low))
+    return bool(_NARRATION_RE.search(low) or _PAST_NARRATION_RE.search(low))
 
 # Personal/emotional talk → PERSONAL lane (warm persona, no 2-sentence clamp,
 # never snaps "send me something that makes sense" at an interjection)
@@ -472,10 +484,10 @@ class ConversationDirector:
         # Explicit action verb → route directly, no menu.
         if any(v in low for v in GENERATE_VERBS):
             return Directive("plan", t)   # code generation still goes through approval
-        for verbs, intent in ((EXPLAIN_VERBS, "EXPLAIN"), (REVIEW_VERBS, "REVIEW"),
+        for verbs, choice in ((EXPLAIN_VERBS, "EXPLAIN"), (REVIEW_VERBS, "REVIEW"),
                               (PLAN_VERBS, "PLAN"), (PRACTICE_VERBS, "PRACTICE")):
             if any(v in low for v in verbs):
-                return Directive("chat", INTENT_INSTRUCTIONS[intent] + t)
+                return self._route_choice(choice, t)
 
         # Ambiguous ("focus on DSA") — do we remember a choice for this topic?
         kw = _keywords(t)
@@ -484,15 +496,22 @@ class ConversationDirector:
             if stored_kw and overlap / len(stored_kw) >= 0.5:
                 return self._route_choice(choice, t)
 
-        # Genuinely ambiguous → ask.
-        self._pending_gate = t
-        return Directive("reply", OPTIONS_MENU)
+        # V3: no options menu — AURA infers the intent itself and just answers.
+        # A topic mention without a generate/review/plan verb is a request to
+        # be TOLD about it ("get me info for dsa", "focus on recursion") →
+        # explain. Code is still only generated on explicit generate verbs.
+        return self._route_choice("EXPLAIN", t)
+
+    # intent pins per choice — EXPLAIN/PRACTICE get the teaching lane (no
+    # 2-sentence clamp, no screen dump); PLAN gets the longform plan lane.
+    _CHOICE_INTENT = {"EXPLAIN": "EXPLAIN", "PRACTICE": "EXPLAIN", "PLAN": "PLAN"}
 
     def _route_choice(self, choice: str, original: str) -> Directive:
         if choice == "GENERATE":
             # The menu choice is the approval — skip the plan panel.
             return Directive("generate", original)
-        return Directive("chat", INTENT_INSTRUCTIONS[choice] + original)
+        return Directive("chat", INTENT_INSTRUCTIONS[choice] + original,
+                         intent=self._CHOICE_INTENT.get(choice, ""))
 
     # ── hooks for the controller ──────────────────────────────────────────
     def note_prompt_result(self, text: str):

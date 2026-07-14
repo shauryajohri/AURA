@@ -7,6 +7,24 @@ interface Props {
   onSend: (text: string) => void;
 }
 
+/** Split a message into plain-text and fenced ```code``` segments. */
+function renderMessage(text: string) {
+  const parts = text.split(/```(\w*)\n?([\s\S]*?)```/g);
+  const out: React.ReactNode[] = [];
+  for (let i = 0; i < parts.length; i += 3) {
+    if (parts[i]) out.push(<span key={i}>{parts[i]}</span>);
+    if (i + 2 < parts.length) {
+      out.push(
+        <pre className="bubble__code" key={i + 2}>
+          {parts[i + 1] && <span className="bubble__lang">{parts[i + 1]}</span>}
+          <code>{parts[i + 2]}</code>
+        </pre>
+      );
+    }
+  }
+  return out;
+}
+
 export default function ChatPanel({ status, turns, onSend }: Props) {
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -20,8 +38,6 @@ export default function ChatPanel({ status, turns, onSend }: Props) {
     onSend(input);
     setInput("");
   };
-
-  const now = new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
 
   return (
     <section className="chat">
@@ -43,10 +59,10 @@ export default function ChatPanel({ status, turns, onSend }: Props) {
               {t.source && t.source !== "greeting" && (
                 <span className={"bubble__src bubble__src--" + t.source}>{t.source}</span>
               )}
-              <span className="bubble__time">{now}</span>
+              {t.ts && <span className="bubble__time">{t.ts}</span>}
             </span>
             <p className="bubble__text">
-              {t.text}
+              {renderMessage(t.text)}
               {t.streaming && <span className="caret" />}
             </p>
           </div>

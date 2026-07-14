@@ -253,6 +253,20 @@ WORKSPACE MODE — this OVERRIDES your default brevity rules:
 """
 
 
+_EXPLAIN_SYSTEM_ADDON = """
+
+TEACHING MODE — this OVERRIDES your default brevity rules:
+- IGNORE any 2-sentence / "keep it short" guidance.
+- Give a clear, well-organized explanation of the TOPIC THE USER NAMED.
+- Structure it like a good teacher: what it is, why it matters, the key
+  pieces, a small concrete example, and where to go next.
+- Do NOT write code unless explicitly asked.
+- NEVER mention or describe the user's screen, apps, context, or anything
+  you were given besides the topic itself. Answer the topic only.
+- No filler, no hype, no emoji.
+"""
+
+
 _PERSONAL_SYSTEM_ADDON = """
 
 PERSONAL MODE — you're a close friend right now, not a tool:
@@ -274,9 +288,12 @@ def call_groq_streaming(prompt: str, system: str = DONNA_SYSTEM_PROMPT, intent: 
 
     is_coding = (intent == "CODING")
     is_personal = (intent == "PERSONAL")
+    is_explain = (intent == "EXPLAIN")
     is_longform = (intent in _LONGFORM_INTENTS)
     if is_coding:
         strict_system = system + _CODING_SYSTEM_ADDON
+    elif is_explain:
+        strict_system = system + _EXPLAIN_SYSTEM_ADDON
     elif is_longform:
         strict_system = system + _LONGFORM_SYSTEM_ADDON
     elif is_personal:
@@ -301,11 +318,11 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
                     {"role": "system", "content": strict_system},
                     {"role": "user",   "content": prompt}
                 ],
-                "max_tokens": 2048 if (is_coding or is_longform) else (300 if is_personal else 150),
-                "temperature": 0.6 if is_longform else (0.3 if is_coding else 0.7),
+                "max_tokens": 2048 if (is_coding or is_longform) else (1024 if is_explain else (300 if is_personal else 150)),
+                "temperature": 0.6 if is_longform else (0.5 if is_explain else (0.3 if is_coding else 0.7)),
                 "stream": True
             },
-            timeout=60 if is_longform else 30,
+            timeout=60 if (is_longform or is_explain) else 30,
             stream=True
         )
         if response.status_code == 429:
@@ -551,9 +568,12 @@ def call_groq(prompt: str, system: str = DONNA_SYSTEM_PROMPT, intent: str = "CAS
 
     is_coding = (intent == "CODING")
     is_personal = (intent == "PERSONAL")
+    is_explain = (intent == "EXPLAIN")
     is_longform = (intent in _LONGFORM_INTENTS)
     if is_coding:
         strict_system = system + _CODING_SYSTEM_ADDON
+    elif is_explain:
+        strict_system = system + _EXPLAIN_SYSTEM_ADDON
     elif is_longform:
         strict_system = system + _LONGFORM_SYSTEM_ADDON
     elif is_personal:
@@ -581,11 +601,11 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
                     {"role": "system", "content": strict_system},
                     {"role": "user",   "content": prompt}
                 ],
-                "max_tokens": 2048 if (is_coding or is_longform) else (300 if is_personal else 150),
-                "temperature": 0.6 if is_longform else (0.3 if is_coding else 0.7),
+                "max_tokens": 2048 if (is_coding or is_longform) else (1024 if is_explain else (300 if is_personal else 150)),
+                "temperature": 0.6 if is_longform else (0.5 if is_explain else (0.3 if is_coding else 0.7)),
                 "stream": False
             },
-            timeout=60 if is_longform else 30
+            timeout=60 if (is_longform or is_explain) else 30
         )
         print(f"[AURA {provider} Debug] Status: {response.status_code} | Intent: {intent} | Model: {model_id}")
 
@@ -603,6 +623,8 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
             print(f"[AURA CODE RAW]\n{raw}\n[END RAW]")
         if is_personal:
             return raw.strip()   # personal talk keeps its length (guard caps at 4)
+        if is_explain or is_longform:
+            return raw.strip()   # full-length lanes — never clamp to 2 sentences
         return raw if is_coding else clean_response(raw)
     except Exception as e:
         print(f"[AURA] {provider} error: {e}")

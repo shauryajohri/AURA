@@ -28,6 +28,7 @@ export interface ChatTurn {
   text: string;
   streaming?: boolean;
   source?: string; // for auto-chat pushes: proactive | curiosity | greeting
+  ts?: string;     // wall-clock time when the turn was created
 }
 
 declare global {

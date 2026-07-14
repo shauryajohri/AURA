@@ -333,6 +333,17 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
 .bubble__src--reply { background: rgba(139, 92, 255, 0.16); color: var(--violet-bright); }
 .bubble__src--error { background: rgba(232, 90, 90, 0.18); color: #e85a5a; }
 .bubble__text { margin: 4px 0 0; white-space: pre-wrap; line-height: 1.5; font-size: 14px; }
+.bubble__code {
+  display: block; margin: 8px 0; padding: 10px 12px;
+  background: rgba(6, 4, 16, 0.85); border: 1px solid rgba(140, 100, 255, 0.25);
+  border-radius: 8px; overflow-x: auto;
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-size: 12.5px; line-height: 1.55; white-space: pre;
+}
+.bubble__lang {
+  display: block; margin-bottom: 6px; font-size: 10px; letter-spacing: 1px;
+  text-transform: uppercase; opacity: 0.55;
+}
 .caret { display: inline-block; width: 7px; height: 15px; margin-left: 3px; background: var(--cyan); vertical-align: text-bottom; animation: blink 1s step-end infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 

@@ -14,14 +14,23 @@ function newId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
+function nowTime(): string {
+  return new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+}
+
 // Map a model id string (e.g. "llama-3.3-70b-versatile") to a constellation
 // node id in data/models.ts, so the node that answered lights up ACTIVE.
 function modelIdToNode(model: string): string | null {
   const m = model.toLowerCase();
+  // Real AURA roster first (core/model_router ids).
+  if (m.includes("laguna")) return "laguna";
+  if (m.includes("nemotron")) return "nemotron";
+  if (m.includes("gemma")) return "gemma";
+  if (m.includes("8b") || m.includes("instant")) return "llama8b";
   if (m.includes("llama")) return "llama";
   if (m.includes("gpt")) return "gpt4o";
   if (m.includes("claude")) return "claude";
-  if (m.includes("gemini") || m.includes("gemma")) return "gemini";
+  if (m.includes("gemini")) return "gemini";
   if (m.includes("grok")) return "grok";
   return null;
 }
@@ -52,15 +61,24 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
       if (last && last.role === "aura" && last.streaming) {
         return [...prev.slice(0, -1), { ...last, text: last.text + text }];
       }
-      return [...prev, { id: newId(), role: "aura", text, streaming: true }];
+      return [...prev, { id: newId(), role: "aura", text, streaming: true, ts: nowTime() }];
     });
   }, []);
 
-  const finishStream = useCallback(() => {
+  // On "done" the backend sends the REFINED final text (guard-cleaned, with
+  // code blocks). Replace the raw streamed text with it so backend context
+  // (intent analysis, screen info, etc.) never survives in the chat bubble.
+  const finishStream = useCallback((finalText?: string) => {
     setTurns((prev) => {
       const last = prev[prev.length - 1];
       if (last && last.role === "aura" && last.streaming) {
-        return [...prev.slice(0, -1), { ...last, streaming: false }];
+        const text = finalText && finalText.trim() ? finalText : last.text;
+        return [...prev.slice(0, -1), { ...last, text, streaming: false }];
+      }
+      // No streamed chunks arrived (e.g. instant rate-limit / error reply
+      // resolved without streaming) - still show the final text.
+      if (finalText && finalText.trim()) {
+        return [...prev, { id: newId(), role: "aura", text: finalText, streaming: false, ts: nowTime() }];
       }
       return prev;
     });
@@ -68,7 +86,7 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
 
   // Unsolicited AURA message - always a fresh, complete bubble.
   const pushMessage = useCallback((text: string, source: string) => {
-    setTurns((prev) => [...prev, { id: newId(), role: "aura", text, streaming: false, source }]);
+    setTurns((prev) => [...prev, { id: newId(), role: "aura", text, streaming: false, source, ts: nowTime() }]);
   }, []);
 
   const connect = useCallback(() => {
@@ -95,7 +113,7 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
           appendChunk(msg.payload.text);
           break;
         case "done":
-          finishStream();
+          finishStream(msg.payload.text);
           if (msg.payload.model) setActiveModelId(modelIdToNode(msg.payload.model));
           break;
         case "push":
@@ -140,7 +158,7 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
-    setTurns((prev) => [...prev, { id: newId(), role: "user", text: trimmed }]);
+    setTurns((prev) => [...prev, { id: newId(), role: "user", text: trimmed, ts: nowTime() }]);
     const msg: ClientMessage = { type: "message", payload: { text: trimmed } };
     ws.send(JSON.stringify(msg));
   }, []);

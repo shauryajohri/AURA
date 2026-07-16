@@ -1,3 +1,4 @@
+import { useCallback, useState } from "react";
 import { useAuraSocket } from "./hooks/useAuraSocket";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 import Sidebar from "./components/Sidebar";
@@ -7,6 +8,8 @@ import ChatPanel from "./components/ChatPanel";
 import ControlBar from "./components/ControlBar";
 import Resizer from "./components/Resizer";
 import CosmicBackground from "./components/CosmicBackground";
+import UniverseBackground from "./components/UniverseBackground";
+import ParticleField from "./components/ParticleField";
 import TasksView from "./views/TasksView";
 import ModelsView from "./views/ModelsView";
 import MemoryView from "./views/MemoryView";
@@ -28,6 +31,10 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useLocalStorage<boolean>("aura.sidebarOpen", true);
   const [chatWidth, setChatWidth] = useLocalStorage<number>("aura.chatWidth", 460);
   const [view, setView] = useLocalStorage<string>("aura.view", "home");
+  // Animated universe video (Layer 1). If the file is missing/unplayable we
+  // fall back to the procedural cosmic canvas so the app never goes flat black.
+  const [videoOk, setVideoOk] = useState(true);
+  const handleVideoFail = useCallback(() => setVideoOk(false), []);
 
   const cols = (sidebarOpen ? SIDEBAR_W : 0) + "px 1fr 6px " + chatWidth + "px";
 
@@ -49,7 +56,12 @@ export default function App() {
 
   return (
     <div className="app" style={{ gridTemplateColumns: cols }}>
-      <CosmicBackground state={auraState} />
+      {videoOk ? (
+        <UniverseBackground state={auraState} onFail={handleVideoFail} />
+      ) : (
+        <CosmicBackground state={auraState} />
+      )}
+      <ParticleField state={auraState} />
 
       {sidebarOpen ? (
         <Sidebar

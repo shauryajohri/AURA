@@ -5,6 +5,7 @@ interface Props {
   status: ConnStatus;
   turns: ChatTurn[];
   onSend: (text: string) => void;
+  onCollapse?: () => void;
 }
 
 /** Split a message into plain-text and fenced ```code``` segments. */
@@ -25,7 +26,7 @@ function renderMessage(text: string) {
   return out;
 }
 
-export default function ChatPanel({ status, turns, onSend }: Props) {
+export default function ChatPanel({ status, turns, onSend, onCollapse }: Props) {
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -44,6 +45,11 @@ export default function ChatPanel({ status, turns, onSend }: Props) {
       <header className="chat__header">
         <span>AURA CHAT</span>
         <span className={"chat__dot chat__dot--" + status} />
+        {onCollapse && (
+          <button className="chat__collapse" onClick={onCollapse} title="Hide chat">
+            {"»"}
+          </button>
+        )}
       </header>
 
       <div className="chat__log" ref={scrollRef}>

@@ -33,6 +33,11 @@ export interface ChatTurn {
 
 declare global {
   interface Window {
-    aura?: { version: string; bridgeUrl: string };
+    aura?: {
+      version: string;
+      bridgeUrl: string;
+      minimize?: () => void;
+      close?: () => void;
+    };
   }
 }

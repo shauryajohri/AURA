@@ -10,6 +10,7 @@ import CosmicBackground from "./components/CosmicBackground";
 import UniverseBackground from "./components/UniverseBackground";
 import ParticleField from "./components/ParticleField";
 import SanctuarySection from "./components/Home/SanctuarySection";
+import TransitionParticles from "./components/Home/TransitionParticles";
 import { useScrollJourney, seg } from "./components/Home/ScrollController";
 import TasksView from "./views/TasksView";
 import ModelsView from "./views/ModelsView";
@@ -49,6 +50,9 @@ export default function App() {
   const ambientWrapRef = useRef<HTMLDivElement>(null);
   const ambientVideoRef = useRef<HTMLVideoElement>(null);
   const sanRef = useRef<HTMLDivElement>(null);
+  const transTextRef = useRef<HTMLDivElement>(null);
+  const lastPRef = useRef(0);
+  const dirRef = useRef<1 | -1>(1);
 
   useScrollJourney((p) => {
     const recede = seg(p, 0.25, 0.45);   // universe pulls back
@@ -74,6 +78,16 @@ export default function App() {
     if (tv && tv.duration && vis > 0) {
       const t = tv.duration * seg(p, 0.45, 0.9);
       if (Math.abs(tv.currentTime - t) > 0.02) tv.currentTime = t;
+    }
+
+    // crossing-verses text: direction decides the message
+    if (p !== lastPRef.current) dirRef.current = p > lastPRef.current ? 1 : -1;
+    lastPRef.current = p;
+    const tt = transTextRef.current;
+    if (tt) {
+      const msg = dirRef.current === 1 ? "ENTERING AURA CITY" : "ASCENDING TO THE COSMOS";
+      if (tt.textContent !== msg) tt.textContent = msg;
+      tt.style.opacity = String(vis);
     }
 
     const aw = ambientWrapRef.current;
@@ -175,6 +189,10 @@ export default function App() {
             preload="auto"
             onError={() => setTransOk(false)}
           />
+          <TransitionParticles />
+          <div ref={transTextRef} className="trans-text" style={{ opacity: 0 }}>
+            ENTERING AURA CITY
+          </div>
         </div>
       )}
 

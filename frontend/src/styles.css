@@ -20,6 +20,19 @@
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
 
+/* ============ Custom cosmic cursor ============ */
+/* Violet orb for browsing, cyan-charged orb over anything clickable. */
+:root {
+  --cursor-default: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 26 26"><circle cx="13" cy="13" r="10" fill="rgba(139,92,255,0.14)"/><circle cx="13" cy="13" r="9.5" fill="none" stroke="rgba(177,139,255,0.55)" stroke-width="1"/><circle cx="13" cy="13" r="3.4" fill="%23b18bff"/><circle cx="13" cy="13" r="1.4" fill="white"/></svg>') 13 13, auto;
+  --cursor-point: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28"><circle cx="14" cy="14" r="11" fill="rgba(56,225,255,0.12)"/><circle cx="14" cy="14" r="10.5" fill="none" stroke="rgba(56,225,255,0.75)" stroke-width="1.2"/><circle cx="14" cy="14" r="4" fill="%2338e1ff"/><circle cx="14" cy="14" r="1.6" fill="white"/></svg>') 14 14, pointer;
+  --cursor-text: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="26" viewBox="0 0 20 26"><rect x="9" y="3" width="2" height="20" rx="1" fill="%23b18bff"/><rect x="5" y="2" width="10" height="2.4" rx="1.2" fill="%2338e1ff"/><rect x="5" y="21.6" width="10" height="2.4" rx="1.2" fill="%2338e1ff"/></svg>') 10 13, text;
+}
+html, body { cursor: var(--cursor-default); }
+button, a, [role="button"], select, summary,
+.nav__item, .sancard, .faculty, .model,
+input[type="range"], input[type="checkbox"] { cursor: var(--cursor-point); }
+input[type="text"], input:not([type]), textarea { cursor: var(--cursor-text); }
+
 body {
   /* Pitch black. All colour/light comes from the live cosmic canvas on top. */
   background: #000;
@@ -503,6 +516,23 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
 
 /* the bridge — scroll-scrubbed transition video */
 .screen--transition { z-index: 1; background: #000; }
+.trans-particles { position: absolute; inset: 0; pointer-events: none; }
+.trans-text {
+  position: absolute; left: 50%; top: 14%; transform: translateX(-50%);
+  font-family: var(--font-display);
+  font-size: 30px; letter-spacing: 14px; white-space: nowrap;
+  color: rgba(240, 234, 255, 0.92);
+  text-shadow:
+    0 0 18px rgba(168, 130, 255, 0.9),
+    0 0 60px rgba(139, 92, 255, 0.5),
+    0 0 2px rgba(56, 225, 255, 0.8);
+  animation: verse-shimmer 3s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes verse-shimmer {
+  0%, 100% { letter-spacing: 14px; filter: brightness(1); }
+  50%      { letter-spacing: 17px; filter: brightness(1.35); }
+}
 .screen--transition video {
   position: absolute; inset: 0; width: 100%; height: 100%;
   object-fit: cover; object-position: center;

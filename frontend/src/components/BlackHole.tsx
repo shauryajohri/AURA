@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AuraState } from "../types";
 import { useCoreStore } from "../stores/coreStore";
+import { journey } from "./Home/ScrollController";
 
 // ============================================================================
 // AURA CORE — Black Hole, built 1:1 from the design spec:
@@ -247,6 +248,12 @@ export default function BlackHole({ state, size: sizeProp }: Props) {
     let last = performance.now();
 
     const draw = (now: number) => {
+      // off in the descent → the core sleeps until the universe returns
+      if (journey.p > 0.55) {
+        last = now;
+        raf = requestAnimationFrame(draw);
+        return;
+      }
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       const os: OrbState = (stateRef.current as OrbState) in SPIN ? (stateRef.current as OrbState) : "idle";

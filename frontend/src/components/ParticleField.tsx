@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { AuraState } from "../types";
+import { journey } from "./Home/ScrollController";
 
 interface Props {
   state: AuraState;
@@ -109,8 +110,16 @@ export default function ParticleField({ state }: Props) {
     };
 
     let prev = performance.now();
+    let sleeping = false;
     const draw = (t: number) => {
       raf = requestAnimationFrame(draw);
+      // journey has left the universe → stop burning CPU on invisible particles
+      if (journey.p > 0.55) {
+        if (!sleeping) { ctx.clearRect(0, 0, W, H); sleeping = true; }
+        prev = t;
+        return;
+      }
+      sleeping = false;
       const dt = Math.min(50, t - prev); prev = t;
 
       const st = stateRef.current as string;

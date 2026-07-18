@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useAuraSocket } from "./hooks/useAuraSocket";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 import Sidebar from "./components/Sidebar";
@@ -9,7 +9,8 @@ import Resizer from "./components/Resizer";
 import CosmicBackground from "./components/CosmicBackground";
 import UniverseBackground from "./components/UniverseBackground";
 import ParticleField from "./components/ParticleField";
-import Sanctuary from "./components/Sanctuary";
+import SanctuarySection from "./components/Home/SanctuarySection";
+import { useScrollJourney, seg } from "./components/Home/ScrollController";
 import TasksView from "./views/TasksView";
 import ModelsView from "./views/ModelsView";
 import MemoryView from "./views/MemoryView";
@@ -26,69 +27,76 @@ const TITLES: Record<string, string> = {
   settings: "Settings",
 };
 
-const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
-
 export default function App() {
   const { status, auraState, presence, mode, activeModelId, turns, send } = useAuraSocket();
   const [sidebarOpen, setSidebarOpen] = useLocalStorage<boolean>("aura.sidebarOpen", true);
   const [chatOpen, setChatOpen] = useLocalStorage<boolean>("aura.chatOpen", true);
   const [chatWidth, setChatWidth] = useLocalStorage<number>("aura.chatWidth", 460);
   const [view, setView] = useLocalStorage<string>("aura.view", "home");
-  // Animated universe video (Layer 1). If the file is missing/unplayable we
-  // fall back to the procedural cosmic canvas so the app never goes flat black.
   const [videoOk, setVideoOk] = useState(true);
   const handleVideoFail = useCallback(() => setVideoOk(false), []);
-
-  // ---- Screen 1 ⇄ Screen 2 cinematic transition ---------------------------
-  // Wheel-driven: scrolling down glides into the sanctuary, scrolling up
-  // returns. Progress p ∈ [0,1] is eased every frame — no cuts, no routes.
-  const [target, setTarget] = useState(0);
-  const [p, setP] = useState(0);
-  const pRef = useRef(0);
   const [ambientOk, setAmbientOk] = useState(true);
-  const ambientRef = useRef<HTMLVideoElement>(null);
+  const [transOk, setTransOk] = useState(true);
 
-  // Some Chromium builds refuse autoplay for videos that mount at opacity 0.
-  // Kick playback explicitly whenever the sanctuary comes into view (and the
-  // wheel gesture itself counts as user activation, so play() always succeeds).
-  useEffect(() => {
-    const v = ambientRef.current;
-    if (target === 1 && v && v.paused) {
-      v.play().catch(() => { /* retried on next transition */ });
+  // React state only flips at the very end of the journey (card reveal).
+  const [entered, setEntered] = useState(false);
+  const enteredRef = useRef(false);
+
+  // Imperative layer refs — mutated per-frame, zero React re-renders.
+  const screen1Ref = useRef<HTMLDivElement>(null);
+  const transWrapRef = useRef<HTMLDivElement>(null);
+  const transVideoRef = useRef<HTMLVideoElement>(null);
+  const ambientWrapRef = useRef<HTMLDivElement>(null);
+  const ambientVideoRef = useRef<HTMLVideoElement>(null);
+  const sanRef = useRef<HTMLDivElement>(null);
+
+  useScrollJourney((p) => {
+    const recede = seg(p, 0.25, 0.45);   // universe pulls back
+    const uniFade = seg(p, 0.2, 0.5);    // and fades away
+    const sanIn = seg(p, 0.88, 1);       // sanctuary emerges
+    const vis = seg(p, 0.38, 0.48) * (1 - seg(p, 0.9, 0.99)); // bridge video
+
+    const s1 = screen1Ref.current;
+    if (s1) {
+      s1.style.opacity = String(1 - uniFade);
+      s1.style.transform = `scale(${1 - 0.1 * recede}) translateY(${-6 * recede}vh)`;
+      s1.style.pointerEvents = p < 0.15 ? "auto" : "none";
+      // fully faded → stop compositing the blurred panels entirely
+      s1.style.visibility = uniFade >= 1 ? "hidden" : "visible";
     }
-  }, [target]);
 
-  useEffect(() => {
-    let raf = 0;
-    const step = () => {
-      const cur = pRef.current;
-      const next = cur + (target - cur) * 0.085;
-      if (Math.abs(next - target) < 0.001) {
-        pRef.current = target;
-        setP(target);
-        return; // settled
-      }
-      pRef.current = next;
-      setP(next);
-      raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
-  }, [target]);
+    const tw = transWrapRef.current;
+    if (tw) {
+      tw.style.opacity = String(vis);
+      tw.style.visibility = vis <= 0 ? "hidden" : "visible";
+    }
+    const tv = transVideoRef.current;
+    if (tv && tv.duration && vis > 0) {
+      const t = tv.duration * seg(p, 0.45, 0.9);
+      if (Math.abs(tv.currentTime - t) > 0.02) tv.currentTime = t;
+    }
 
-  useEffect(() => {
-    const onWheel = (e: WheelEvent) => {
-      const el = e.target as HTMLElement | null;
-      // don't hijack scrolling inside scrollable UI (chat log, views, nav)
-      if (el?.closest(".chat__log, .view, .nav, .coremenu, .sanctuary__grid")) return;
-      if (e.deltaY > 25) setTarget(1);
-      else if (e.deltaY < -25) setTarget(0);
-    };
-    window.addEventListener("wheel", onWheel, { passive: true });
-    return () => window.removeEventListener("wheel", onWheel);
-  }, []);
+    const aw = ambientWrapRef.current;
+    if (aw) {
+      aw.style.opacity = String(sanIn);
+      aw.style.visibility = sanIn <= 0 ? "hidden" : "visible";
+    }
+    const av = ambientVideoRef.current;
+    if (av && sanIn > 0 && av.paused) av.play().catch(() => {});
 
-  const entered = p > 0.85;
+    const sn = sanRef.current;
+    if (sn) {
+      sn.style.opacity = String(sanIn);
+      sn.style.visibility = sanIn <= 0 ? "hidden" : "visible";
+      sn.style.pointerEvents = p > 0.985 ? "auto" : "none";
+    }
+
+    const ent = p > 0.985;
+    if (ent !== enteredRef.current) {
+      enteredRef.current = ent;
+      setEntered(ent);
+    }
+  });
 
   // Only emit tracks for panels that are actually rendered —
   // otherwise the center section lands in a 0px track and the layout implodes.
@@ -115,15 +123,8 @@ export default function App() {
 
   return (
     <div className="scroll-root">
-      {/* ---- Screen 1: the cosmos dashboard (fades upward on scroll) ---- */}
-      <div
-        className="screen screen--one"
-        style={{
-          opacity: 1 - p,
-          transform: `translateY(${-38 * p}vh)`,
-          pointerEvents: p < 0.4 ? "auto" : "none",
-        }}
-      >
+      {/* ---- Section 1: the universe (scales back, then fades) ---- */}
+      <div ref={screen1Ref} className="screen screen--one">
         <div className="app" style={{ gridTemplateColumns: cols }}>
           {videoOk ? (
             <UniverseBackground state={auraState} onFail={handleVideoFail} />
@@ -163,11 +164,25 @@ export default function App() {
         </div>
       </div>
 
-      {/* ---- Screen 2 background: looping ambient video ---- */}
-      <div className="screen screen--ambient" style={{ opacity: p }} aria-hidden={p === 0}>
+      {/* ---- Section 2: the bridge — video scrubbed by scroll ---- */}
+      {transOk && (
+        <div ref={transWrapRef} className="screen screen--transition" style={{ visibility: "hidden", opacity: 0 }}>
+          <video
+            ref={transVideoRef}
+            src="/transition.mp4"
+            muted
+            playsInline
+            preload="auto"
+            onError={() => setTransOk(false)}
+          />
+        </div>
+      )}
+
+      {/* ---- Section 3 background: looping ambient world ---- */}
+      <div ref={ambientWrapRef} className="screen screen--ambient" style={{ visibility: "hidden", opacity: 0 }}>
         {ambientOk ? (
           <video
-            ref={ambientRef}
+            ref={ambientVideoRef}
             src="/ambient.mp4"
             autoPlay
             muted
@@ -182,15 +197,9 @@ export default function App() {
         <div className="ambient-shade" />
       </div>
 
-      {/* ---- Screen 2 UI: the sanctuary ---- */}
-      <div
-        className="screen screen--sanctuary"
-        style={{
-          opacity: clamp01((p - 0.35) / 0.65),
-          pointerEvents: p > 0.75 ? "auto" : "none",
-        }}
-      >
-        <Sanctuary entered={entered} onHome={() => setTarget(0)} />
+      {/* ---- Section 3 UI: the sanctuary ---- */}
+      <div ref={sanRef} className="screen screen--sanctuary" style={{ visibility: "hidden", opacity: 0, pointerEvents: "none" }}>
+        <SanctuarySection entered={entered} />
       </div>
     </div>
   );

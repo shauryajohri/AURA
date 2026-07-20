@@ -1,12 +1,9 @@
 const NAV = [
   { id: "home", label: "Home", icon: "⌂" },
   { id: "quests", label: "Quests", icon: "❖" },
-  { id: "tasks", label: "Tasks", icon: "✓" },
   { id: "skills", label: "Skills", icon: "⚚" },
-  { id: "inventory", label: "Inventory", icon: "❐" },
   { id: "models", label: "Models", icon: "◈" },
   { id: "memory", label: "Memory", icon: "❋" },
-  { id: "workspace", label: "Workspace", icon: "⎔" },
   { id: "analytics", label: "Analytics", icon: "♪" },
   { id: "settings", label: "Settings", icon: "⚙" },
 ];

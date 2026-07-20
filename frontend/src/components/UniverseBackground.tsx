@@ -7,7 +7,9 @@ interface Props {
   onFail?: () => void;
 }
 
-const SRC = "/universe.mp4";
+// Relative path — works from Vite's dev server AND Electron's file:// origin
+// (an absolute "/universe.mp4" resolves to the DISK root under file://).
+const SRC = "./universe.mp4";
 /** Seconds of crossfade around the loop point so the restart is invisible. */
 const FADE_S = 0.9;
 

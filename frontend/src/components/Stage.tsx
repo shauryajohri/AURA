@@ -7,11 +7,12 @@ interface Props {
   activeModelId?: string | null;
 }
 
-// ModelConstellation (planet orbs) removed — planets are being redesigned.
-export default function Stage({ state }: Props) {
+// Planets live inside the BlackHole canvas now — models orbiting the core,
+// the one that last answered lights up and orbits faster.
+export default function Stage({ state, activeModelId = null }: Props) {
   return (
     <div className="stage">
-      <BlackHole state={state} />
+      <BlackHole state={state} activeModelId={activeModelId} />
 
       <EventsPanel />
     </div>

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useClock } from "../hooks/useClock";
 import { useCoreStore } from "../stores/coreStore";
+import { usePlanetStore } from "../stores/planetStore";
+import { MODELS } from "../data/models";
 
 const USER = "Shaurya";
 
@@ -22,6 +24,21 @@ export default function TopBar({ mode = "CHAT" }: Props) {
   const save = useCoreStore((s) => s.save);
   const cancel = useCoreStore((s) => s.cancel);
   const resetSpec = useCoreStore((s) => s.resetSpec);
+
+  const pMenuOpen = usePlanetStore((s) => s.menuOpen);
+  const pSetMenuOpen = usePlanetStore((s) => s.setMenuOpen);
+  const pEditing = usePlanetStore((s) => s.editing);
+  const pOrbit = usePlanetStore((s) => s.orbit);
+  const pSize = usePlanetStore((s) => s.size);
+  const pSpeed = usePlanetStore((s) => s.speed);
+  const pRingsV = usePlanetStore((s) => s.rings);
+  const pSetCfg = usePlanetStore((s) => s.set);
+  const pStartEdit = usePlanetStore((s) => s.startEdit);
+  const pSave = usePlanetStore((s) => s.save);
+  const pCancel = usePlanetStore((s) => s.cancel);
+  const pResetSpec = usePlanetStore((s) => s.resetSpec);
+  const pMeta = usePlanetStore((s) => s.meta);
+  const pSetMeta = usePlanetStore((s) => s.setMeta);
 
   return (
     <header className="topbar">
@@ -94,6 +111,114 @@ export default function TopBar({ mode = "CHAT" }: Props) {
                       Cancel
                     </button>
                     <button className="coremenu__btn" onClick={resetSpec}>
+                      Reset
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="coremenu-wrap">
+          <button
+            className={"corebtn " + (pMenuOpen ? "corebtn--open" : "")}
+            onClick={() => pSetMenuOpen(!pMenuOpen)}
+            title="Planet system settings"
+          >
+            <span className="corebtn__orb corebtn__orb--planet" />
+            <span className="corebtn__label">Planets</span>
+            <span className="corebtn__caret">{pMenuOpen ? "▴" : "▾"}</span>
+          </button>
+
+          {pMenuOpen && (
+            <div className="coremenu">
+              <div className="coremenu__head">
+                <span>PLANET ADJUST</span>
+                {pEditing && <em className="coremenu__editing">editing</em>}
+              </div>
+
+              <label className="coremenu__row">
+                <span>Orbit</span>
+                <input
+                  type="range" min={20} max={300} step={5} value={pOrbit}
+                  disabled={!pEditing}
+                  onChange={(e) => pSetCfg({ orbit: Number(e.target.value) })}
+                />
+                <em>{pOrbit}%</em>
+              </label>
+              <label className="coremenu__row">
+                <span>Size</span>
+                <input
+                  type="range" min={50} max={600} step={10} value={pSize}
+                  disabled={!pEditing}
+                  onChange={(e) => pSetCfg({ size: Number(e.target.value) })}
+                />
+                <em>{pSize}%</em>
+              </label>
+              <label className="coremenu__row">
+                <span>Speed</span>
+                <input
+                  type="range" min={25} max={300} step={5} value={pSpeed}
+                  disabled={!pEditing}
+                  onChange={(e) => pSetCfg({ speed: Number(e.target.value) })}
+                />
+                <em>{pSpeed}%</em>
+              </label>
+              <label className="coremenu__row">
+                <span>Rings</span>
+                <input
+                  type="range" min={60} max={300} step={10} value={pRingsV}
+                  disabled={!pEditing}
+                  onChange={(e) => pSetCfg({ rings: Number(e.target.value) })}
+                />
+                <em>{pRingsV}%</em>
+              </label>
+
+              {pEditing && (
+                <>
+                  <p className="coremenu__hint">
+                    Drag a planet onto any orbit — one planet per orbit, the old
+                    tenant swaps to the vacated one.
+                  </p>
+                  <div className="coremenu__planets">
+                    {MODELS.map((m) => (
+                      <div key={m.id} className="coremenu__planetrow">
+                        <span className="coremenu__dot" style={{ background: m.color }} />
+                        <input
+                          className="coremenu__namein"
+                          value={pMeta[m.id]?.name ?? m.name}
+                          onChange={(e) => pSetMeta(m.id, { name: e.target.value })}
+                          placeholder={m.name}
+                          title="Planet name"
+                        />
+                        <input
+                          className="coremenu__rolein"
+                          value={pMeta[m.id]?.role ?? m.role}
+                          onChange={(e) => pSetMeta(m.id, { role: e.target.value })}
+                          placeholder={m.role}
+                          title="What this planet is for"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              <div className="coremenu__actions">
+                {!pEditing ? (
+                  <button className="coremenu__btn coremenu__btn--primary" onClick={pStartEdit}>
+                    Edit
+                  </button>
+                ) : (
+                  <>
+                    <button className="coremenu__btn coremenu__btn--primary" onClick={pSave}>
+                      Save
+                    </button>
+                    <button className="coremenu__btn" onClick={pCancel}>
+                      Cancel
+                    </button>
+                    <button className="coremenu__btn" onClick={pResetSpec}>
                       Reset
                     </button>
                   </>

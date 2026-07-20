@@ -271,6 +271,10 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
 .corebtn__orb { width: 18px; height: 18px; border-radius: 50%; background: radial-gradient(circle at 50% 50%, #000 45%, var(--violet) 72%, transparent 80%); box-shadow: 0 0 10px rgba(139, 92, 255, 0.7); }
 .corebtn__label { font-size: 13px; }
 .corebtn__caret { font-size: 10px; color: var(--violet-bright); }
+.corebtn__orb--planet {
+  background: radial-gradient(circle at 35% 35%, #fff 8%, #4cc9ff 40%, #6c6bff 75%, transparent 82%);
+  box-shadow: 0 0 10px rgba(76, 201, 255, 0.7);
+}
 
 .coremenu {
   position: absolute; top: calc(100% + 8px); right: 0; width: 250px;
@@ -292,6 +296,17 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
 .coremenu__row input[type="range"] { flex: 1; accent-color: var(--violet); }
 .coremenu__row input[type="range"]:disabled { opacity: 0.35; }
 .coremenu__hint { margin: 0; font-size: 11px; color: var(--cyan); }
+.coremenu__planets { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; padding-right: 4px; }
+.coremenu__planetrow { display: flex; align-items: center; gap: 6px; }
+.coremenu__dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 6px currentColor; }
+.coremenu__namein, .coremenu__rolein {
+  background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border);
+  border-radius: 7px; padding: 5px 8px; color: var(--text);
+  font-size: 11px; outline: none; min-width: 0;
+}
+.coremenu__namein { flex: 1.1; }
+.coremenu__rolein { flex: 1; color: var(--muted); }
+.coremenu__namein:focus, .coremenu__rolein:focus { border-color: var(--violet); }
 .coremenu__actions { display: flex; gap: 8px; }
 .coremenu__btn {
   flex: 1; border: 1px solid var(--border); border-radius: 8px;
@@ -317,8 +332,10 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
 .stage { position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
 
 /* Anchored to the viewport (not the stage) so collapsing the sidebar or chat
-   panel never shifts the black hole. Offsets come from the saved position. */
-.bh-wrap { position: fixed; left: 50%; top: 50%; display: grid; place-items: center; }
+   panel never shifts the black hole. Offsets come from the saved position.
+   z-index 0 keeps the huge full-screen canvas UNDER the UI panels. */
+.bh-wrap { position: fixed; left: 50%; top: 50%; display: grid; place-items: center; z-index: 0; }
+.sidebar, .chat, .topbar, .resizer, .events, .events-reveal { position: relative; z-index: 2; }
 .bh-canvas { display: block; pointer-events: none; }
 .bh-canvas--edit { pointer-events: auto; cursor: grab; }
 .bh-canvas--edit:active { cursor: grabbing; }

@@ -45,9 +45,10 @@ const REVEAL_ORDER = ["tasks", "memory", "music", "portfolio", "settings", "doma
 
 interface Props {
   entered: boolean; // journey reached the sanctuary
+  onEnterDomain?: () => void; // Enter Workspace → cross into the Domain
 }
 
-export default function SanctuarySection({ entered }: Props) {
+export default function SanctuarySection({ entered, onEnterDomain }: Props) {
   const { greeting } = useClock();
   const [layout, setLayout] = useLocalStorage<Layout>("aura.sanctuary", DEFAULT_LAYOUT);
   const [quickTasks, setQuickTasks] = useLocalStorage<string[]>("aura.sanctuary.tasks", []);
@@ -207,7 +208,7 @@ export default function SanctuarySection({ entered }: Props) {
         return (
           <>
             <p className="san-muted">Your AI workspace. Everything begins here.</p>
-            <button className="san-primarybtn san-domain__enter">Enter Workspace →</button>
+            <button className="san-primarybtn san-domain__enter" onClick={onEnterDomain}>Enter Workspace →</button>
             <div className="san-shortcuts">
               {[["⚒", "Build"], ["◎", "Research"], ["⌗", "Debug"], ["✦", "Create"]].map(([ic, lb]) => (
                 <button key={lb} className="san-shortcut">

@@ -12,6 +12,8 @@ import ParticleField from "./components/ParticleField";
 import SanctuarySection from "./components/Home/SanctuarySection";
 import TransitionParticles from "./components/Home/TransitionParticles";
 import { useScrollJourney, seg } from "./components/Home/ScrollController";
+import DomainScreen from "./components/Domain/DomainScreen";
+import PortalTransition from "./components/Domain/PortalTransition";
 import TasksView from "./views/TasksView";
 import ModelsView from "./views/ModelsView";
 import MemoryView from "./views/MemoryView";
@@ -42,6 +44,14 @@ export default function App() {
   // React state only flips at the very end of the journey (card reveal).
   const [entered, setEntered] = useState(false);
   const enteredRef = useRef(false);
+
+  // ---- AURA Domain: the workspace beyond the beam -------------------------
+  // portal: "in" = crossing into the Domain, "out" = returning to sanctuary.
+  const [domainOpen, setDomainOpen] = useState(false);
+  const [portal, setPortal] = useState<null | "in" | "out">(null);
+  const enterDomain = useCallback(() => setPortal("in"), []);
+  const exitDomain = useCallback(() => setPortal("out"), []);
+  const portalDone = useCallback(() => setPortal(null), []);
 
   // Imperative layer refs — mutated per-frame, zero React re-renders.
   const screen1Ref = useRef<HTMLDivElement>(null);
@@ -216,9 +226,29 @@ export default function App() {
       </div>
 
       {/* ---- Section 3 UI: the sanctuary ---- */}
-      <div ref={sanRef} className="screen screen--sanctuary" style={{ visibility: "hidden", opacity: 0, pointerEvents: "none" }}>
-        <SanctuarySection entered={entered} />
+      <div
+        ref={sanRef}
+        className={"screen screen--sanctuary" + (portal === "in" ? " screen--recede" : "")}
+        style={{ visibility: "hidden", opacity: 0, pointerEvents: "none" }}
+      >
+        <SanctuarySection entered={entered} onEnterDomain={enterDomain} />
       </div>
+
+      {/* ---- The Domain: workspace beyond the beam ---- */}
+      {domainOpen && (
+        <div className="screen screen--domain">
+          <DomainScreen onExit={exitDomain} />
+        </div>
+      )}
+
+      {/* ---- Portal overlay: crossing the threshold ---- */}
+      {portal && (
+        <PortalTransition
+          direction={portal}
+          onMid={() => setDomainOpen(portal === "in")}
+          onDone={portalDone}
+        />
+      )}
     </div>
   );
 }

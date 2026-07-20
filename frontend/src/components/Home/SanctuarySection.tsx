@@ -616,6 +616,10 @@ you: ${d.user_msgs} messages · saved: ${d.facts_saved} memories`}>
           <button title="Search">{"🔍"}</button>
           <button title="Notifications">{"🔔"}</button>
           <button className="sanctuary__profile" title="Profile">S</button>
+          <span className="winctl">
+            <button className="winctl__btn" title="Minimize" onClick={() => window.aura?.minimize?.()}>—</button>
+            <button className="winctl__btn winctl__btn--close" title="Close" onClick={() => window.aura?.close?.()}>✕</button>
+          </span>
         </div>
       </header>
 

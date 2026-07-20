@@ -40,7 +40,7 @@ export default function TransitionVideo({ p }: Props) {
     >
       <video
         ref={videoRef}
-        src="/transition.mp4"
+        src="./transition.mp4"
         muted
         playsInline
         preload="auto"

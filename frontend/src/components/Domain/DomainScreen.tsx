@@ -57,7 +57,7 @@ export default function DomainScreen({ onExit }: Props) {
       {videoOk ? (
         <video
           className="domain__video"
-          src="/domain.mp4"
+          src="./domain.mp4"
           autoPlay muted loop playsInline preload="auto"
           onError={() => setVideoOk(false)}
         />

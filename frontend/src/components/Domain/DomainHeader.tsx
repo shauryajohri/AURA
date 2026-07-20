@@ -66,6 +66,10 @@ export default function DomainHeader() {
         </div>
         <button className="dhead__iconbtn" title="Notifications">◔</button>
         <button className="dhead__avatar" title="Shaurya">S</button>
+        <span className="winctl">
+          <button className="winctl__btn" title="Minimize" onClick={() => window.aura?.minimize?.()}>—</button>
+          <button className="winctl__btn winctl__btn--close" title="Close" onClick={() => window.aura?.close?.()}>✕</button>
+        </span>
       </div>
     </header>
   );

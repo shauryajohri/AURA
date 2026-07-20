@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuraSocket } from "./hooks/useAuraSocket";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 import Sidebar from "./components/Sidebar";
@@ -14,20 +14,17 @@ import TransitionParticles from "./components/Home/TransitionParticles";
 import { useScrollJourney, seg } from "./components/Home/ScrollController";
 import DomainScreen from "./components/Domain/DomainScreen";
 import PortalTransition from "./components/Domain/PortalTransition";
-import TasksView from "./views/TasksView";
 import ModelsView from "./views/ModelsView";
 import MemoryView from "./views/MemoryView";
+import SkillsView from "./views/SkillsView";
+import SettingsView from "./views/SettingsView";
 import PlaceholderView from "./views/PlaceholderView";
 
 const SIDEBAR_W = 244;
 
 const TITLES: Record<string, string> = {
   quests: "Quests",
-  skills: "Skills",
-  inventory: "Inventory",
-  workspace: "Workspace",
   analytics: "Analytics",
-  settings: "Settings",
 };
 
 export default function App() {
@@ -63,20 +60,128 @@ export default function App() {
   const transTextRef = useRef<HTMLDivElement>(null);
   const lastPRef = useRef(0);
   const dirRef = useRef<1 | -1>(1);
+  const uniPausedRef = useRef(false);
+
+  // ---- Bridge-video scrubbing ---------------------------------------------
+  // Seeking a video on every scroll event is what makes scrub feel laggy: the
+  // wheel fires in coarse jumps and each one demands an immediate decode.
+  // Instead the scroll only sets a TARGET time; a rAF loop eases the video
+  // toward it and skips seeks the decoder can't service yet (seeking flag) or
+  // that are too small to see. Result: continuous glide, no stutter.
+  const seekTargetRef = useRef(0);
+  const seekActiveRef = useRef(false);
+  const prerollRef = useRef(false); // true while the warm-up pass is running
+
+  // Preload the bridge into MEMORY at startup.
+  //
+  // This is why scrolling down used to stutter while scrolling back up was
+  // smooth: on the way down every frame was being pulled off disk for the
+  // first time (seek + I/O + decode); on the way back those bytes were already
+  // in the OS cache. Fetching the whole file up front and playing it from a
+  // blob URL removes the disk entirely — the first pass is as smooth as the
+  // second. Then we pre-roll it once (fast, muted, invisible) so the decoder
+  // has already walked every frame before you ever get there.
+  useEffect(() => {
+    let cancelled = false;
+    let blobUrl = "";
+
+    (async () => {
+      try {
+        const res = await fetch("./transition.mp4");
+        const blob = await res.blob();
+        if (cancelled) return;
+        const v = transVideoRef.current;
+        if (!v) return;
+        blobUrl = URL.createObjectURL(blob);
+        v.src = blobUrl;
+        v.load();
+
+        // pre-roll: race through the clip once so every frame is decoded,
+        // then park at the start. Nothing is visible — the wrapper is hidden.
+        const preroll = () => {
+          prerollRef.current = true;
+          v.playbackRate = 16;
+          const stop = () => {
+            if (!prerollRef.current) return;
+            prerollRef.current = false;
+            v.pause();
+            v.playbackRate = 1;
+            v.removeEventListener("ended", stop);
+          };
+          v.play()
+            .then(() => {
+              v.addEventListener("ended", stop);
+              setTimeout(stop, 3000); // safety net if "ended" never fires
+            })
+            .catch(() => { prerollRef.current = false; v.playbackRate = 1; });
+        };
+        v.addEventListener("loadeddata", preroll, { once: true });
+        if (v.readyState >= 2) preroll();
+      } catch {
+        /* fetch failed — the plain src in the JSX still works, just colder */
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  }, []);
+
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      const v = transVideoRef.current;
+      if (!v || !seekActiveRef.current || !v.duration || v.seeking) return;
+      // If the user reaches the bridge while it's still warming up, cut the
+      // warm-up short and hand control straight to the scroll.
+      if (prerollRef.current) {
+        prerollRef.current = false;
+        v.pause();
+        v.playbackRate = 1;
+      }
+      const cur = v.currentTime;
+      const target = seekTargetRef.current;
+      const delta = target - cur;
+      if (Math.abs(delta) < 0.012) return;           // already there — don't thrash
+      // Big jumps snap (scroll flick), small ones ease — always forward-smooth.
+      const next = Math.abs(delta) > 1.2 ? target : cur + delta * 0.28;
+      try { v.currentTime = Math.max(0, Math.min(v.duration - 0.05, next)); } catch { /* seeking */ }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
 
   useScrollJourney((p) => {
-    const recede = seg(p, 0.25, 0.45);   // universe pulls back
-    const uniFade = seg(p, 0.2, 0.5);    // and fades away
+    const dive = seg(p, 0.25, 0.5);      // screen 1 rushes TOWARD you
+    const uniFade = seg(p, 0.2, 0.5);    // dissolving into light as it passes
     const sanIn = seg(p, 0.88, 1);       // sanctuary emerges
     const vis = seg(p, 0.38, 0.48) * (1 - seg(p, 0.9, 0.99)); // bridge video
 
     const s1 = screen1Ref.current;
     if (s1) {
+      // Never travels backwards: the screen accelerates forward as it fades,
+      // so the camera flies THROUGH it. transform + opacity ONLY — a CSS
+      // filter here would re-rasterize the whole UI (every glass panel has a
+      // backdrop-filter) on every frame, which is what made this stutter.
+      const ease = dive * dive * (3 - 2 * dive); // smoothstep for a real surge
       s1.style.opacity = String(1 - uniFade);
-      s1.style.transform = `scale(${1 - 0.1 * recede}) translateY(${-6 * recede}vh)`;
+      s1.style.transform = `scale(${1 + 0.5 * ease})`;
       s1.style.pointerEvents = p < 0.15 ? "auto" : "none";
       // fully faded → stop compositing the blurred panels entirely
       s1.style.visibility = uniFade >= 1 ? "hidden" : "visible";
+
+      // Two 1080p+ videos decoding at once is the other half of the stutter.
+      // Once the universe is mostly gone, park it; bring it back on the way up.
+      const shouldPause = uniFade > 0.55;
+      if (shouldPause !== uniPausedRef.current) {
+        uniPausedRef.current = shouldPause;
+        s1.querySelectorAll("video").forEach((v) => {
+          if (shouldPause) v.pause();
+          else v.play().catch(() => {});
+        });
+      }
     }
 
     const tw = transWrapRef.current;
@@ -84,10 +189,11 @@ export default function App() {
       tw.style.opacity = String(vis);
       tw.style.visibility = vis <= 0 ? "hidden" : "visible";
     }
+    // Only publish a target; the rAF loop above does the actual easing.
     const tv = transVideoRef.current;
-    if (tv && tv.duration && vis > 0) {
-      const t = tv.duration * seg(p, 0.45, 0.9);
-      if (Math.abs(tv.currentTime - t) > 0.02) tv.currentTime = t;
+    if (tv && tv.duration) {
+      seekTargetRef.current = tv.duration * seg(p, 0.45, 0.9);
+      seekActiveRef.current = vis > 0;
     }
 
     // crossing-verses text: direction decides the message
@@ -130,16 +236,22 @@ export default function App() {
     (chatOpen ? " 6px " + chatWidth + "px" : "");
 
   const renderCenterBody = () => {
+    // Views that no longer exist (tasks/inventory/workspace) could still be
+    // sitting in localStorage from an earlier run — send those home.
+    if (!["home", "quests", "skills", "models", "memory", "analytics", "settings"].includes(view)) {
+      return <Stage state={auraState} activeModelId={activeModelId} />;
+    }
     switch (view) {
       case "home":
         return <Stage state={auraState} activeModelId={activeModelId} />;
-      case "tasks":
-        return <TasksView />;
+      case "skills":
+        return <SkillsView />;
       case "models":
         return <ModelsView />;
       case "memory":
+        return <MemoryView />;
       case "settings":
-        return view === "memory" ? <MemoryView /> : <PlaceholderView title="Settings" />;
+        return <SettingsView />;
       default:
         return <PlaceholderView title={TITLES[view] || view} />;
     }
@@ -147,7 +259,7 @@ export default function App() {
 
   return (
     <div className="scroll-root">
-      {/* ---- Section 1: the universe (scales back, then fades) ---- */}
+      {/* ---- Section 1: the universe (surges forward, then dissolves) ---- */}
       <div ref={screen1Ref} className="screen screen--one">
         <div className="app" style={{ gridTemplateColumns: cols }}>
           {videoOk ? (
@@ -193,7 +305,7 @@ export default function App() {
         <div ref={transWrapRef} className="screen screen--transition" style={{ visibility: "hidden", opacity: 0 }}>
           <video
             ref={transVideoRef}
-            src="/transition.mp4"
+            src="./transition.mp4"
             muted
             playsInline
             preload="auto"
@@ -211,7 +323,7 @@ export default function App() {
         {ambientOk ? (
           <video
             ref={ambientVideoRef}
-            src="/ambient.mp4"
+            src="./ambient.mp4"
             autoPlay
             muted
             loop

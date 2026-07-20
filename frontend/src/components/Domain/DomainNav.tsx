@@ -5,6 +5,7 @@ import { DomainSection, useDomainStore } from "../../stores/domainStore";
 const ITEMS: { id: DomainSection; icon: string; label: string }[] = [
   { id: "dashboard", icon: "◈", label: "Dashboard" },
   { id: "projects", icon: "▣", label: "Projects" },
+  { id: "tasks", icon: "☑", label: "Tasks" },
   { id: "code", icon: "⌥", label: "Code" },
   { id: "research", icon: "◎", label: "Research" },
   { id: "documents", icon: "≡", label: "Documents" },

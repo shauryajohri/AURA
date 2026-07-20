@@ -440,6 +440,74 @@
 .dagents__think i:nth-child(3) { animation-delay: 0.36s; }
 @keyframes dthink { 0%, 100% { opacity: 0.25; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-3px); } }
 
+/* ---- tasks ---------------------------------------------------------------- */
+.dtasks { height: 100%; display: flex; flex-direction: column; gap: 16px; min-height: 0; }
+.dtasks__add {
+  display: flex; align-items: center; gap: 10px;
+  border: 1px solid rgba(150, 125, 255, 0.16); border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04); padding: 8px 10px;
+}
+.dtasks__add input {
+  flex: 1; border: none; background: transparent; outline: none;
+  color: var(--text); font-family: var(--font-body); font-size: 13px; padding: 4px 6px;
+}
+.dtasks__prioselect { display: flex; gap: 6px; }
+.dtasks__addbtn {
+  border: none; border-radius: 11px; padding: 8px 18px;
+  background: linear-gradient(135deg, rgba(139, 92, 255, 0.8), rgba(56, 225, 255, 0.45));
+  color: #fff; font-size: 12.5px; letter-spacing: 0.5px;
+}
+.dtasks__cols { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; min-height: 0; }
+.dtasks__col {
+  display: flex; flex-direction: column; gap: 8px; overflow-y: auto;
+  border: 1px solid rgba(150, 125, 255, 0.12); border-radius: 15px;
+  background: rgba(255, 255, 255, 0.03); padding: 12px;
+}
+.dtasks__colhead { display: flex; align-items: center; justify-content: space-between; padding-bottom: 4px; }
+.dtasks__colhead span:first-child { font-family: var(--font-display); font-size: 10.5px; letter-spacing: 2.5px; text-transform: uppercase; color: rgba(236, 234, 254, 0.72); }
+.dtasks__count {
+  min-width: 20px; height: 20px; border-radius: 7px; display: grid; place-items: center;
+  background: rgba(139, 92, 255, 0.18); color: var(--violet-bright); font-size: 10.5px;
+}
+.dtask {
+  display: flex; align-items: center; gap: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px;
+  background: rgba(18, 16, 40, 0.5); padding: 9px 12px;
+  transition: border-color 250ms ease, transform 250ms ease;
+}
+.dtask:hover { border-color: rgba(150, 125, 255, 0.35); transform: translateY(-1px); }
+.dtask--done { opacity: 0.5; }
+.dtask--done .dtask__title { text-decoration: line-through; }
+.dtask__check {
+  width: 18px; height: 18px; flex: none;
+  border: 1.5px solid rgba(150, 125, 255, 0.5); border-radius: 6px;
+  background: transparent; color: #fff; font-size: 10px; line-height: 1;
+  display: grid; place-items: center;
+  transition: background 200ms ease, border-color 200ms ease;
+}
+.dtask__check--on { background: linear-gradient(135deg, var(--violet), var(--cyan)); border-color: transparent; }
+.dtask__title { flex: 1; min-width: 0; font-size: 12.8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dtask__edit {
+  flex: 1; min-width: 0;
+  border: 1px solid var(--border-bright); border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07); color: var(--text);
+  font-family: var(--font-body); font-size: 12.5px; padding: 4px 8px; outline: none;
+}
+.dtask__prios { display: flex; gap: 5px; flex: none; }
+.dtask__prio {
+  width: 10px; height: 10px; border-radius: 50%; border: none; padding: 0;
+  background: var(--pc); opacity: 0.25;
+  transition: opacity 200ms ease, transform 200ms ease, box-shadow 200ms ease;
+}
+.dtask__prio:hover { opacity: 0.7; transform: scale(1.2); }
+.dtask__prio--on { opacity: 1; box-shadow: 0 0 8px var(--pc); }
+.dtask__x {
+  border: none; background: transparent; color: rgba(139, 143, 202, 0.45);
+  font-size: 10px; opacity: 0; transition: opacity 200ms ease, color 200ms ease;
+}
+.dtask:hover .dtask__x { opacity: 1; }
+.dtask__x:hover { color: #ff7a7a; }
+
 /* ---- placeholder ---------------------------------------------------------- */
 .dph {
   height: 100%; display: flex; flex-direction: column;

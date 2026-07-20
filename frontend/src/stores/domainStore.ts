@@ -8,7 +8,7 @@ import { persist } from "zustand/middleware";
 // ============================================================================
 
 export type DomainSection =
-  | "dashboard" | "projects" | "code" | "research" | "documents"
+  | "dashboard" | "projects" | "tasks" | "code" | "research" | "documents"
   | "images" | "notes" | "agents" | "terminal" | "history";
 
 export interface BoardCard {

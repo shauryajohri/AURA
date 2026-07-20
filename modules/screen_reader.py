@@ -121,7 +121,9 @@ def extract_text_from_screen(window=None) -> str:
         text = ' '.join(text.split())
         return text[:1000]
     except Exception as e:
-        print(f"[AURA Screen] OCR error: {e}")
+        # Tesseract failures dump a wall of internal diagnostics — keep one line.
+        msg = " ".join(str(e).split())
+        print(f"[AURA Screen] OCR error: {msg[:120]}{'…' if len(msg) > 120 else ''}")
         return ""
 
 def get_clipboard() -> str:

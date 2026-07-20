@@ -308,6 +308,9 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
 - NO made-up context. Only refer to what's in the conversation.
 - Talk like a sharp friend texting. Dry. Direct. No hype.
 """
+    # Reasoning models (Nemotron etc.) love narrating their process — block it
+    # at the source for EVERY lane, on top of the strict addons above.
+    strict_system += _NO_THINK_ALOUD
     try:
         response = requests.post(
             url,
@@ -483,6 +486,104 @@ def _relationship_block() -> str:
     return _rel_cache["text"]
 
 
+_NO_THINK_ALOUD = (
+    "\n\nCRITICAL: Reply with ONLY the final message to the user, addressed to "
+    "them directly. Do NOT think out loud, restate the rules, or narrate your "
+    "process. Never write phrases like \"the user wants\", \"looking at the "
+    "conversation history\", \"we need to\", or \"there's a typo\" — just answer."
+)
+
+
+# ── Reasoning-leak sanitizer ─────────────────────────────────────────────────
+# Reasoning models (Nemotron, R1-style) sometimes emit their private thinking
+# into the answer: "<think>...</think>" blocks, or plain meta-preamble like
+# "We need to obey the rules: 1-2 sentences, no emoji...". None of that should
+# ever reach the user. We buffer only the HEAD of the stream, peel the leak,
+# then stream the real answer live.
+_META_RE = __import__("re").compile(
+    r"(?i)("
+    # obeying-the-rules leaks
+    r"we need to|we must|we should|obey the rules|follow the rules|the rules?:|"
+    r"per the (?:rule|instruction)|according to the (?:rule|instruction)|"
+    r"max(?:imum)? \d+ sentence|\d+\s*-\s*\d+ sentences|two sentences|no emoji|"
+    r"no fluff|answer the question|sentence [12]\b|as an ai|"
+    # talking ABOUT the user in third person (a dead giveaway of leaked thinking)
+    r"the user (?:asks|wants|is asking|said|wrote|mentioned|means|typed|is trying|has)|"
+    r"the user'?s (?:message|question|query|request|input|typo|last)|"
+    r"they(?:'ve| have| are|'re| were) (?:been )?(?:discussing|talking about|asking|working on|building|mentioned)|"
+    # narrating the meta-task / reading the transcript
+    r"looking at (?:the |our )?(?:conversation|chat|history|context|previous message|screen)|"
+    r"(?:the |our )?conversation history|based on (?:the |our )?(?:context|conversation|history|chat|prior|previous|above|earlier)|"
+    r"(?:starts?|starting) with a typo|^\W*with a typo\b|there'?s a typo in (?:the|their|your) (?:message|question|query|input|last|text)|"
+    r"let me (?:think|see|check|refine|look|start)\b|the question is\b|to answer (?:this|the|their)|"
+    # first-person planning of the answer
+    r"i (?:need|should|must|'ll|will) (?:to )?(?:obey|answer|give|respond|follow|refine|provide|note that)|"
+    r"let'?s (?:obey|answer|start)\b|first,? i (?:need|should|must)"
+    r")"
+)
+_SENT_SPLIT = __import__("re").compile(r"([.!?\n]+)")
+
+
+def _is_meta_sentence(s: str) -> bool:
+    return bool(_META_RE.search(s))
+
+
+def _peel_head(head: str, final: bool = False):
+    """Return (emit_text, new_head, start_streaming). Strips <think> blocks and
+    leading meta-reasoning sentences until real content begins."""
+    import re
+    head = re.sub(r"(?is)<think>.*?</think>", "", head)
+    ti = head.lower().find("<think>")
+    if ti != -1:
+        if final:
+            head = head[:ti]
+        else:
+            return "", head, False  # wait for the closing tag
+
+    parts = _SENT_SPLIT.split(head)
+    sentences, cur = [], ""
+    for p in parts:
+        cur += p
+        if _SENT_SPLIT.fullmatch(p):
+            sentences.append(cur)
+            cur = ""
+    tail = cur  # incomplete trailing sentence
+
+    idx = 0
+    while idx < len(sentences) and _is_meta_sentence(sentences[idx]):
+        idx += 1
+    if idx < len(sentences):
+        return ("".join(sentences[idx:]) + tail).lstrip(), "", True
+    if final:
+        return tail.strip(), "", True
+    return "", tail, False
+
+
+def _sanitize_reasoning_stream(chunks):
+    head, streaming = "", False
+    for ch in chunks:
+        if ch in ("RATE_LIMIT", "CONNECTION_ERROR"):
+            yield ch
+            continue
+        if streaming:
+            yield ch
+            continue
+        head += ch
+        emit, head, streaming = _peel_head(head)
+        if streaming:
+            if emit:
+                yield emit
+        elif len(head) > 1200:  # safety: never buffer forever
+            emit, head, streaming = _peel_head(head, final=True)
+            if emit:
+                yield emit
+            streaming = True
+    if head and not streaming:
+        emit, _, _ = _peel_head(head, final=True)
+        if emit:
+            yield emit
+
+
 def route_streaming(intent: str, prompt: str, system_prompt: str | None = None, model: str | None = None):
     extra = INTENT_PERSONALITY_ADJUSTMENTS.get(intent, "")
     if system_prompt is not None:
@@ -515,9 +616,12 @@ def route_streaming(intent: str, prompt: str, system_prompt: str | None = None, 
             continue
         _set_last_model(mid)
         _announce_model(name, mid, intent)
-        yield first
-        for chunk in gen:
-            yield chunk
+
+        def _combined(first_chunk=first, rest=gen):
+            yield first_chunk
+            yield from rest
+
+        yield from _sanitize_reasoning_stream(_combined())
         return
     yield last_sentinel
 def call_groq_raw(prompt: str, system: str, max_tokens: int = 1024,

@@ -393,12 +393,20 @@ class AttentionEngine:
         self._attention_active       = False
         self._prev_idle              = 0.0
         self._presence_done          = False
+        self._comeback_pending       = None
 
     # ── Public API ────────────────────────────────────────────────────────────
 
     def record_user_message(self):
         """Call every time the user sends a message. Resets all stages and
-        refills conversation energy."""
+        refills conversation energy.
+
+        IMPORTANT: this does NOT emit a comeback quip. The user's message is
+        about to get its own real answer from the chat pipeline — firing a
+        separate "oh NOW you talk" push here made two messages land at once
+        (the quip AND the answer). The nudge already fired first; the reply
+        is the acknowledgment. Comebacks are now folded into that reply via
+        `consume_comeback_hint()` instead of broadcast as a parallel message."""
         with self._lock:
             was_sulking     = self._sulking
             had_fired_stage = bool(self._stage_fired_at)
@@ -408,6 +416,9 @@ class AttentionEngine:
             self._sulking                = False
             self._stage_fired_at         = {}
             self._attention_active       = False
+            # Remember that the user just came back after being nudged/ignored,
+            # so the NEXT reply can carry a light acknowledgment if it wants.
+            self._comeback_pending = "full" if was_sulking else ("light" if had_fired_stage else None)
 
         try:
             from modules.conversation_energy import get_energy
@@ -415,10 +426,14 @@ class AttentionEngine:
         except Exception:
             pass
 
-        if was_sulking:
-            self._do_comeback(FULL_COMEBACK)
-        elif had_fired_stage:
-            self._do_comeback(LIGHT_COMEBACK)
+    def consume_comeback_hint(self) -> str | None:
+        """One-shot: returns 'full'/'light' if the user just returned after a
+        nudge, else None. Clears itself. The chat layer can use this to colour
+        its tone — it is never broadcast as a separate message."""
+        with self._lock:
+            hint = getattr(self, "_comeback_pending", None)
+            self._comeback_pending = None
+        return hint
 
     def is_attention_active(self) -> bool:
         return self._attention_active

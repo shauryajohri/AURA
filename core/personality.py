@@ -90,6 +90,14 @@ Wrong responses (what NOT to say, and why):
 Now, with all that drilled in: be AURA.
 """
 
+# Bake AURA's sense of self into every system prompt so she always knows that
+# "AURA" is HER, and can answer questions about herself in first person.
+try:
+    from core.identity import IDENTITY_CORE as _IDENTITY_CORE
+    DONNA_SYSTEM_PROMPT = DONNA_SYSTEM_PROMPT + _IDENTITY_CORE
+except Exception:
+    pass
+
 INTENT_PERSONALITY_ADJUSTMENTS = {
     "CODING": """
 You're in debug mode now. Shift gears:

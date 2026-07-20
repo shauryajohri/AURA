@@ -26,6 +26,7 @@ Directive telling the controller (ui/app.py) what to do:
                             task (user picked "code"/"2" after the build)
 """
 
+import random as _random
 import re as _re
 from dataclasses import dataclass
 
@@ -259,6 +260,64 @@ WORKSPACE = {
 MODE_BY_STATE = {spec["mode"]: spec for spec in WORKSPACE.values()}
 
 
+# ── V3.1: natural-language mode recognition ──────────────────────────────────
+# Slash commands still work, but users shouldn't NEED them. When a normal
+# message clearly asks for research / a debate / a roadmap, AURA runs that
+# lane for THIS message (one-shot — the sticky mode stays whatever it was).
+_RESEARCH_CUES = (
+    "research", "deep dive", "deep-dive", "look into", "investigate",
+    "market analysis", "detailed report", "report on", "in-depth",
+    "feasibility", "state of the art", "landscape of", "compare the",
+    "which is better", "evidence",
+)
+_DISCUSS_CUES = (
+    "brainstorm", "what do you think", "your thoughts", "thoughts on",
+    "your opinion", "opinion on", "good idea", "bad idea", "should i build",
+    "should i make", "should i switch", "should i use", "pros and cons",
+    "devil's advocate", "pressure test", "let's discuss", "lets discuss",
+    "discuss this", "worth building", "worth doing", "worth it", "hear me out",
+)
+_PLAN_CUES = (
+    "make a plan", "plan out", "plan for", "plan this", "roadmap",
+    "milestones", "how should i approach", "steps to build", "steps to make",
+    "break it down", "break this down", "action plan", "game plan",
+    "study plan", "where do i start", "where should i start",
+)
+
+
+def _auto_mode(low: str) -> dict | None:
+    """Detect what the user WANTS from how they said it — no slash needed."""
+    if any(c in low for c in _RESEARCH_CUES):
+        return WORKSPACE["research"]
+    if any(c in low for c in _DISCUSS_CUES):
+        return WORKSPACE["discussion"]
+    if any(c in low for c in _PLAN_CUES):
+        return WORKSPACE["plan"]
+    return None
+
+
+# ── V3.1: Donna-style clarification ──────────────────────────────────────────
+# When the message is an ask but the requirement is genuinely unreadable
+# ("fix it", "do your thing", "help"), AURA doesn't guess and doesn't dump a
+# menu — she asks ONE sharp question, with confidence.
+_VAGUE_RE = _re.compile(
+    r"^(?:hey |ok |okay |so |aura |please |pls |can you |could you |will you |just )*"
+    r"(?:help(?: me)?(?: out)?|fix (?:it|this|that)|do (?:it|this|that|something)|"
+    r"make (?:it|this|that)(?: better| work| good| nice)?|improve (?:it|this|that)|"
+    r"sort (?:it|this|that)(?: out)?|handle (?:it|this|that)|change (?:it|this|that)|"
+    r"update (?:it|this|that)|work your magic|do your thing|you know what to do)"
+    r"[\s!.?]*$"
+)
+
+DONNA_CLARIFIERS = (
+    "I could guess, but I'd rather be right the first time. What exactly are we doing — explaining, planning, or building?",
+    "I'm good. I'm not psychic. Give me one specific: what needs doing, and to what?",
+    "Careful — I make vague ideas look brilliant, but I still need the idea. What's the actual goal?",
+    "Say it like a headline: verb, then target. 'Fix the login bug.' 'Plan the rewrite.' Your turn.",
+    "I can do a lot with very little, but 'that' isn't a requirement — it's a pronoun. What are we pointing at?",
+)
+
+
 class ConversationDirector:
     def __init__(self, on_mode_changed=None):
         self.mode = Mode.NORMAL
@@ -435,6 +494,12 @@ class ConversationDirector:
         if any(m in low for m in PERSONAL_MARKERS):
             return Directive("chat", t, intent="PERSONAL")
 
+        # An ask with no readable requirement → Donna asks, once, sharply.
+        # (Checked BEFORE the interjection shortcut — "fix it" is two words
+        # but it's an ask, not an interjection.)
+        if _VAGUE_RE.match(low):
+            return Directive("reply", _random.choice(DONNA_CLARIFIERS))
+
         # Tiny interjections ("nono", "ugh", "bruh") aren't tasks — respond
         # like a person, don't demand "something that makes sense".
         # (Coding-topic words like a bare "code" still go to the gate/menu.)
@@ -442,6 +507,13 @@ class ConversationDirector:
                 and not any(ch.isdigit() for ch in low)
                 and not any(topic in low for topic in CODING_TOPICS)):
             return Directive("chat", t, intent="PERSONAL")
+
+        # Natural mode recognition: "should i build X" runs the discussion
+        # lane, "make a plan for Y" the planning lane, "research Z" the
+        # research lane — no slash command required, one message only.
+        spec = _auto_mode(low)
+        if spec is not None:
+            return self._mode_directive(spec, t)
 
         return self._coding_gate(t, low)
 

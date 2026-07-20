@@ -357,6 +357,50 @@ async def _run_streaming(ws: WebSocket, brain_call: Callable[..., str]) -> None:
     await _send(ws, {"type": "state", "payload": {"state": "idle"}})
 
 
+# How AURA read each message → what lane she picked and why. Terminal only.
+_REASON_LABEL = {
+    "reply":          ("💬 INSTANT REPLY", "answered locally — no model call"),
+    "chat":           ("🗣  CHAT",          "conversation"),
+    "plan":           ("🛠  PLAN → BUILD",  "compiled a task plan, executing it"),
+    "generate":       ("⌨  CODE",          "explicit code request → generating"),
+    "execute_prompt": ("⌨  CODE",          "running the built prompt as a coding task"),
+    "llm_once":       ("✍  PROMPT BUILD",  "one clean LLM call from /prompt"),
+}
+# how the intent tag maps to a human-readable "what she thought"
+_INTENT_THOUGHT = {
+    "PERSONAL":   "just talking — companion lane, no work pushed",
+    "CODING":     "this is a coding task",
+    "RESEARCH":   "wants a researched, structured report",
+    "DISCUSSION": "wants me to pressure-test the idea",
+    "PLAN":       "wants a step-by-step roadmap",
+    "EXPLAIN":    "wants it explained, not coded",
+    "SEARCH":     "wants information",
+    "CASUAL":     "small talk",
+}
+
+
+def _log_reasoning(text: str, directive, kind: str) -> None:
+    """Print how AURA interpreted the message: her current mode, the lane she
+    chose (research / code / discussion / plan / chat), and the intent behind
+    it. Backend visibility only — the user never sees this."""
+    try:
+        mode = getattr(DIRECTOR, "mode", "NORMAL")
+        intent = getattr(directive, "intent", "") or ""
+        label, why = _REASON_LABEL.get(kind, ("🗣  CHAT", "conversation"))
+        thought = _INTENT_THOUGHT.get(intent, "")
+        print("\n┌─ AURA reasoning ──────────────────────────────")
+        print(f"│  heard : {text[:70]}")
+        print(f"│  mode  : {mode}")
+        print(f"│  lane  : {label}   ({why})")
+        if intent:
+            print(f"│  intent: {intent}" + (f"  — {thought}" if thought else ""))
+        if kind == "reply":
+            print(f"│  said  : {getattr(directive, 'text', '')[:70]}")
+        print("└───────────────────────────────────────────────")
+    except Exception:
+        pass  # logging must never break dispatch
+
+
 async def _dispatch(ws: WebSocket, text: str) -> None:
     """Route one user message through the Director, then act on the directive."""
     if DIRECTOR is None:
@@ -372,6 +416,7 @@ async def _dispatch(ws: WebSocket, text: str) -> None:
         return
 
     kind = getattr(directive, "kind", "chat")
+    _log_reasoning(text, directive, kind)
 
     if kind == "reply":
         # Instant local answer (mode ack, /help, options menu) - no LLM.

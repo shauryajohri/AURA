@@ -290,7 +290,7 @@ def _facts_block() -> str:
     return f"What you know about them (use naturally, don't recite):\n{bullets}"
 
 
-def build_context_prompt(query: str, intent: str, thought_context: str) -> str:
+def build_context_prompt(query: str, intent: str, thought_context: str, comeback: str | None = None) -> str:
     history_text = _recent_turns(8)
     facts_text = _facts_block()
 
@@ -327,11 +327,48 @@ def build_context_prompt(query: str, intent: str, thought_context: str) -> str:
     thought_section = f"\nContext: {thought_context}" if thought_context else ""
     facts_section = f"\n{facts_text}" if facts_text else ""
 
+    # If the user is asking about AURA herself, surface her fuller self-knowledge
+    # so "who are you / who made you / what can you do" answers as her, not as a
+    # generic assistant or a third-party tool.
+    identity_section = ""
+    try:
+        from core.identity import identity_context
+        identity_section = identity_context(query)
+    except Exception:
+        pass
+
+    # Chat is chat. Code only exists when the user explicitly asks for code —
+    # a topic mention ("i'm stuck on the websocket part") gets talked through,
+    # not answered with an unsolicited code dump. If code seems needed, offer.
+    no_code_rule = ""
+    if intent != "CODING":
+        no_code_rule = (
+            "\n(Rule: do NOT write code or code blocks unless the user "
+            "explicitly asked for code. If code would genuinely help, ask "
+            "first — one line, e.g. \"Want me to write that?\")"
+        )
+
+    # Returning after AURA checked in on them → resume the thread in ONE reply,
+    # never a separate quip. "Since you're back — here's what you wanted..."
+    comeback_rule = ""
+    if comeback:
+        warmth = ("They'd been away a while" if comeback == "full"
+                  else "You'd just nudged them")
+        comeback_rule = (
+            f"\n({warmth} and now they're back. Open by acknowledging they're "
+            "back — warm, not passive-aggressive — and CONTINUE where you left "
+            "off: if they'd asked for something, deliver it now (\"Since you're "
+            "back — here's...\"). One natural message.)"
+        )
+
     return f"""Recent conversation:
 {history_text}
 {facts_section}
+{identity_section}
 {screen_info}
 {thought_section}
+{no_code_rule}
+{comeback_rule}
 
 {query}"""
 
@@ -545,6 +582,15 @@ def process(query: str) -> str:
 
 def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: str | None = None, model: str | None = None, intent_hint: str | None = None) -> str:
     mark_user_active(query)
+    # Did the user just return after a nudge / being away? If so, the reply
+    # should resume the thread ("since you're back...") instead of a separate
+    # comeback quip colliding with the answer. One-shot — consumed here.
+    comeback_hint = None
+    try:
+        from modules.attention_engine import get_engine as _get_ae
+        comeback_hint = _get_ae().consume_comeback_hint()
+    except Exception:
+        pass
     print(f"\n[AURA] Streaming: '{query}'")
     query_lower = query.lower()
     focus_response = handle_focus_command(query)
@@ -655,13 +701,13 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
         full_prompt = query
     elif _re.search(r'https?://', query):
         intent = "SEARCH"
-        full_prompt = build_context_prompt(query, intent, "")
+        full_prompt = build_context_prompt(query, intent, "", comeback=comeback_hint)
     else:
         # An explicit hint from the Conversation Director pins the intent —
         # the classifier alone could decide CODING for a mere statement of
         # intent and generate unsolicited code past the permission gate.
         intent = intent_hint or classify_intent(query)
-        full_prompt = build_context_prompt(query, intent, "")
+        full_prompt = build_context_prompt(query, intent, "", comeback=comeback_hint)
     if intent in {"RECALL", "SAVE"}:
         result = process(query)
         if on_chunk:

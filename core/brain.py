@@ -2,7 +2,8 @@ import datetime
 import re
 import time
 from modules.proactive import set_app_lock, clear_app_lock, get_app_lock
-from core.ai_router import call_claude, route, route_streaming, extract_code_block, call_classifier
+from core.ai_router import call_claude, route, route_streaming, extract_code_block, call_classifier, last_model_used
+from core.response_composer import compose_text
 from core.thinking import think, post_think
 from memory import store
 from modules.csv_handler import check_csv
@@ -560,7 +561,7 @@ def process(query: str) -> str:
     if answer == "RATE_LIMIT":
         return "Hit my rate limit — give me a moment."
 
-    final_answer = guard_output(answer, 4 if intent == "PERSONAL" else 2)
+    final_answer = compose_text(answer, intent, query, last_model_used())
     post_think(query, final_answer, intent)
 
     # Classify mode (still needed for UI to know how to speak, maybe pass back via tuple? We'll keep simple)
@@ -747,6 +748,8 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
 
         chat_part, lang, code = extract_code_block(raw)
         chat_msg = chat_part if chat_part else "Here's the code:"
+        # Persona layer: even the coding chat line sounds like AURA.
+        chat_msg = compose_text(chat_msg, "CODING", query, last_model_used())
 
         if on_chunk:
             on_chunk(chat_msg)
@@ -778,13 +781,14 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
     if answer.startswith("ERROR") or not answer:
         return "Connection trouble — one sec."
 
-    # Long-form workspace modes (research/discussion/plan) produce full
-    # structured reports — the 2-sentence guard would shred them. Let them
-    # through whole; only trim wrapping quotes.
-    if intent in LONGFORM_INTENTS:
-        final_answer = answer.strip().strip('"').strip()
-    else:
-        final_answer = guard_output(answer, 4 if intent == "PERSONAL" else 2)
+    # Response Composer + Persona Layer: every model's raw answer becomes
+    # AURA's answer here — disclaimers stripped, identity questions answered
+    # by AURA herself, style-shaped per intent (see core/response_composer).
+    # Long-form workspace modes pass through whole (scrub only, no trim).
+    final_answer = compose_text(
+        answer, intent, query, last_model_used(),
+        longform=intent in LONGFORM_INTENTS,
+    )
     post_think(query, final_answer, intent)
     _history.append({"role": "user", "text": query})
     _history.append({"role": "aura", "text": final_answer})

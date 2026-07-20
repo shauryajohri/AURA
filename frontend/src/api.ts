@@ -23,6 +23,27 @@ export interface Fact {
   created_at: string | null;
 }
 
+export interface SavedLink {
+  id: number;
+  name: string;
+  url: string;
+  created_at: string | null;
+}
+
+export interface DayStat {
+  date: string;
+  user_msgs: number;
+  aura_msgs: number;
+  facts_saved: number;
+}
+
+export interface UsageStats {
+  days: DayStat[];
+  totals: { user_messages: number; facts: number; knowledge: number; tasks: number };
+}
+
+export type Settings = Record<string, number | boolean | string>;
+
 async function j<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(BASE + path, {
     headers: { "Content-Type": "application/json" },
@@ -52,4 +73,30 @@ export const api = {
   updateFact: (id: number, fact: string) =>
     j(`/api/facts/${id}`, { method: "PUT", body: JSON.stringify({ fact }) }),
   deleteFact: (id: number) => j(`/api/facts/${id}`, { method: "DELETE" }),
+
+  // Task edit
+  updateTask: (id: number, patch: { title?: string; priority?: string }) =>
+    j(`/api/tasks/${id}`, { method: "PUT", body: JSON.stringify(patch) }),
+
+  // Saved links
+  getLinks: () => j<{ links: SavedLink[] }>("/api/links").then((r) => r.links),
+  addLink: (url: string, name?: string) =>
+    j<{ ok: boolean; id: number; name: string; url: string }>("/api/links", {
+      method: "POST",
+      body: JSON.stringify({ url, name }),
+    }),
+  updateLink: (id: number, patch: { name?: string; url?: string }) =>
+    j(`/api/links/${id}`, { method: "PUT", body: JSON.stringify(patch) }),
+  deleteLink: (id: number) => j(`/api/links/${id}`, { method: "DELETE" }),
+
+  // Usage stats (memory graph)
+  getStats: () => j<UsageStats>("/api/stats"),
+
+  // App settings
+  getSettings: () => j<{ settings: Settings }>("/api/settings").then((r) => r.settings),
+  saveSettings: (patch: Settings) =>
+    j<{ ok: boolean; settings: Settings }>("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify({ settings: patch }),
+    }),
 };

@@ -5,7 +5,7 @@ import { useActiveProject, useDomainStore } from "../../stores/domainStore";
 // Minimal top bar: project · breadcrumb · model selector · search · bells.
 
 const SECTION_LABEL: Record<string, string> = {
-  dashboard: "Dashboard", projects: "Planning", code: "Code", research: "Research",
+  dashboard: "Dashboard", projects: "Planning", tasks: "Tasks", code: "Code", research: "Research",
   documents: "Documents", images: "Images", notes: "Notes", agents: "AI Agents",
   terminal: "Terminal", history: "History",
 };

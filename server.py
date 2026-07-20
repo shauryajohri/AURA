@@ -33,14 +33,52 @@ from __future__ import annotations
 import asyncio
 import json
 import traceback
+import warnings
+from contextlib import asynccontextmanager
 from typing import Any, Callable
+
+# pygame (pulled in by voice output) still imports pkg_resources — not our
+# code, not actionable here. Hide the warning before anything imports pygame.
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
+
+# ----------------------------------------------------------------------------
+# Windows asyncio noise: when a browser tab closes, the proactor transport
+# raises ConnectionResetError (WinError 10054) INSIDE the event loop callback
+# — after our code already handled the disconnect cleanly. Harmless, loud,
+# unfixable from user code except here: swallow only that exact case.
+# ----------------------------------------------------------------------------
+try:  # pragma: no cover - Windows only
+    from asyncio.proactor_events import _ProactorBasePipeTransport
+
+    _orig_call_connection_lost = _ProactorBasePipeTransport._call_connection_lost
+
+    def _quiet_call_connection_lost(self, exc):  # noqa: ANN001
+        try:
+            _orig_call_connection_lost(self, exc)
+        except ConnectionResetError:
+            pass  # client vanished mid-shutdown — already disconnected
+
+    _ProactorBasePipeTransport._call_connection_lost = _quiet_call_connection_lost
+except ImportError:
+    pass
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.brain import process_streaming
 
-app = FastAPI(title="AURA Bridge")
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Modern replacement for the deprecated @app.on_event('startup')."""
+    global MAIN_LOOP
+    MAIN_LOOP = asyncio.get_running_loop()
+    _init_director()
+    _start_auto_chat()
+    yield
+
+
+app = FastAPI(title="AURA Bridge", lifespan=_lifespan)
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
@@ -130,12 +168,7 @@ def _init_director() -> None:
         traceback.print_exc()
 
 
-@app.on_event("startup")
-async def _on_startup() -> None:
-    global MAIN_LOOP
-    MAIN_LOOP = asyncio.get_running_loop()
-    _init_director()
-    _start_auto_chat()
+# (startup now handled by the _lifespan context manager above)
 
 
 @app.get("/health")
@@ -278,6 +311,84 @@ async def api_delete_fact(fact_id: int) -> dict[str, Any]:
     from memory import store
     store.delete_user_fact(fact_id)
     return {"ok": True}
+
+
+# ── Saved links: the Sanctuary link vault ───────────────────────────────────
+def _link_dict(r) -> dict[str, Any]:
+    return {"id": r[0], "name": r[1], "url": r[2], "created_at": r[3]}
+
+
+@app.get("/api/links")
+async def api_links() -> dict[str, Any]:
+    from memory import store
+    return {"links": [_link_dict(r) for r in store.get_links()]}
+
+
+@app.post("/api/links")
+async def api_add_link(req: Request) -> dict[str, Any]:
+    from memory import store
+    body = await req.json()
+    url = (body.get("url") or "").strip()
+    if not url:
+        return {"ok": False, "error": "url required"}
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    name = (body.get("name") or "").strip()
+    if not name:
+        # default name = the domain, cleaned up
+        from urllib.parse import urlparse
+        name = (urlparse(url).netloc or url).removeprefix("www.")
+    lid = store.add_link(name, url)
+    return {"ok": True, "id": lid, "name": name, "url": url}
+
+
+@app.put("/api/links/{link_id}")
+async def api_update_link(link_id: int, req: Request) -> dict[str, Any]:
+    from memory import store
+    body = await req.json()
+    store.update_link(link_id, body.get("name"), body.get("url"))
+    return {"ok": True}
+
+
+@app.delete("/api/links/{link_id}")
+async def api_delete_link(link_id: int) -> dict[str, Any]:
+    from memory import store
+    store.delete_link(link_id)
+    return {"ok": True}
+
+
+# ── Task edit (title/priority in place) ─────────────────────────────────────
+@app.put("/api/tasks/{task_id}")
+async def api_update_task(task_id: int, req: Request) -> dict[str, Any]:
+    from memory import store
+    body = await req.json()
+    store.update_task(task_id, body.get("title"), body.get("priority"))
+    return {"ok": True}
+
+
+# ── Usage stats: memory graph data ──────────────────────────────────────────
+@app.get("/api/stats")
+async def api_stats() -> dict[str, Any]:
+    from memory import store
+    return store.get_usage_stats(7)
+
+
+# ── App settings: blackhole / planets / voice / auto-chat ───────────────────
+@app.get("/api/settings")
+async def api_settings() -> dict[str, Any]:
+    from memory import store
+    return {"settings": store.get_settings()}
+
+
+@app.put("/api/settings")
+async def api_save_settings(req: Request) -> dict[str, Any]:
+    from memory import store
+    body = await req.json()
+    patch = body.get("settings") or body
+    if not isinstance(patch, dict):
+        return {"ok": False, "error": "settings object required"}
+    store.set_settings(patch)
+    return {"ok": True, "settings": store.get_settings()}
 
 
 @app.get("/api/status")

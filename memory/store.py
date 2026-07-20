@@ -608,5 +608,188 @@ def delete_snapshot(snap_id: int):
         conn.close()
 
 
+# ── Saved links: the Sanctuary link vault ────────────────────────────────────
+# name is user-editable; the UI derives the favicon from the url's domain.
+
+_LINKS_DDL = '''
+    CREATE TABLE IF NOT EXISTS saved_links (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        name       TEXT NOT NULL,
+        url        TEXT NOT NULL,
+        created_at TEXT
+    )
+'''
+
+
+def add_link(name: str, url: str) -> int:
+    conn = _connect()
+    try:
+        conn.execute(_LINKS_DDL)
+        cur = conn.execute(
+            'INSERT INTO saved_links (name, url, created_at) VALUES (?, ?, ?)',
+            (name.strip(), url.strip(), datetime.datetime.now().isoformat()),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def get_links(limit: int = 200) -> list:
+    """(id, name, url, created_at) rows, newest first."""
+    conn = _connect()
+    try:
+        conn.execute(_LINKS_DDL)
+        cur = conn.execute(
+            'SELECT id, name, url, created_at FROM saved_links ORDER BY id DESC LIMIT ?',
+            (limit,),
+        )
+        return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def update_link(link_id: int, name: str = None, url: str = None):
+    conn = _connect()
+    try:
+        conn.execute(_LINKS_DDL)
+        if name is not None:
+            conn.execute('UPDATE saved_links SET name=? WHERE id=?', (name.strip(), link_id))
+        if url is not None:
+            conn.execute('UPDATE saved_links SET url=? WHERE id=?', (url.strip(), link_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def delete_link(link_id: int):
+    conn = _connect()
+    try:
+        conn.execute(_LINKS_DDL)
+        conn.execute('DELETE FROM saved_links WHERE id=?', (link_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ── Task edit (the Sanctuary card edits titles in place) ─────────────────────
+
+def update_task(task_id: int, title: str = None, priority: str = None):
+    conn = _connect()
+    try:
+        if title is not None and title.strip():
+            conn.execute('UPDATE tasks SET title=? WHERE id=?', (title.strip(), task_id))
+        if priority is not None:
+            conn.execute('UPDATE tasks SET priority=? WHERE id=?', (priority, task_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ── Usage stats: the memory graph ────────────────────────────────────────────
+# "How much did the user use AURA, and how much did AURA remember?"
+
+def get_usage_stats(days: int = 7) -> dict:
+    """Per-day counts for the last N days + lifetime totals.
+    days: [{date, user_msgs, aura_msgs, facts_saved}] oldest→newest."""
+    conn = _connect()
+    try:
+        conn.execute(_USER_FACTS_DDL)
+        cur = conn.cursor()
+        today = datetime.date.today()
+        out = []
+        for i in range(days - 1, -1, -1):
+            day = today - datetime.timedelta(days=i)
+            start, end = day.isoformat(), (day + datetime.timedelta(days=1)).isoformat()
+            cur.execute("SELECT COUNT(*) FROM conversations WHERE role='user' AND created_at>=? AND created_at<?", (start, end))
+            user_msgs = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM conversations WHERE role='aura' AND created_at>=? AND created_at<?", (start, end))
+            aura_msgs = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM user_facts WHERE created_at>=? AND created_at<?", (start, end))
+            facts = cur.fetchone()[0]
+            out.append({"date": day.isoformat(), "user_msgs": user_msgs,
+                        "aura_msgs": aura_msgs, "facts_saved": facts})
+
+        cur.execute("SELECT COUNT(*) FROM conversations WHERE role='user'")
+        total_user = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM user_facts")
+        total_facts = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM knowledge")
+        total_knowledge = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM tasks")
+        total_tasks = cur.fetchone()[0]
+        return {"days": out, "totals": {
+            "user_messages": total_user, "facts": total_facts,
+            "knowledge": total_knowledge, "tasks": total_tasks,
+        }}
+    finally:
+        conn.close()
+
+
+# ── App settings: blackhole / planets / voice / auto-chat knobs ──────────────
+# Flat key→value store; the Sanctuary settings card reads & writes it, and any
+# part of the app (React face or PySide) can read the same source of truth.
+
+_SETTINGS_DDL = '''
+    CREATE TABLE IF NOT EXISTS app_settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT
+    )
+'''
+
+DEFAULT_SETTINGS = {
+    # Blackhole core
+    "blackhole.glow": 70,          # 0-100 bloom intensity
+    "blackhole.particles": 60,     # 0-100 particle density
+    "blackhole.rotation": 50,      # 0-100 disk rotation speed
+    # Planets (model constellation)
+    "planets.orbit_speed": 50,     # 0-100
+    "planets.rings": True,         # premium models wear rings
+    "planets.labels": True,        # show model names
+    # Voice
+    "voice.enabled": True,
+    "voice.rate": 55,              # 0-100 speaking speed
+    # Auto-chat (proactive / attention / curiosity pushes)
+    "autochat.enabled": True,
+    "autochat.frequency": 40,      # 0-100 how chatty AURA is on her own
+}
+
+
+def get_settings() -> dict:
+    """Defaults overlaid with whatever has been saved."""
+    import json as _json
+    conn = _connect()
+    try:
+        conn.execute(_SETTINGS_DDL)
+        cur = conn.execute('SELECT key, value FROM app_settings')
+        saved = {}
+        for k, v in cur.fetchall():
+            try:
+                saved[k] = _json.loads(v)
+            except Exception:
+                saved[k] = v
+        return {**DEFAULT_SETTINGS, **saved}
+    finally:
+        conn.close()
+
+
+def set_settings(patch: dict):
+    """Merge a partial {key: value} update. Unknown keys are allowed —
+    future panels can invent their own without a schema change."""
+    import json as _json
+    conn = _connect()
+    try:
+        conn.execute(_SETTINGS_DDL)
+        for k, v in patch.items():
+            conn.execute(
+                'INSERT INTO app_settings (key, value) VALUES (?, ?) '
+                'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                (str(k), _json.dumps(v)),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 init_db()
 init_tasks()

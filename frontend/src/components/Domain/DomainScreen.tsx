@@ -6,6 +6,7 @@ import DomainHeader from "./DomainHeader";
 import IntelligencePanel from "./IntelligencePanel";
 import DomainDashboard from "./views/DomainDashboard";
 import PlanningBoard from "./views/PlanningBoard";
+import TasksBoard from "./views/TasksBoard";
 import CodePane from "./views/CodePane";
 import MarkdownPane from "./views/MarkdownPane";
 import AgentsView from "./views/AgentsView";
@@ -32,6 +33,7 @@ export default function DomainScreen({ onExit }: Props) {
     switch (section) {
       case "dashboard": return <DomainDashboard />;
       case "projects": return <PlanningBoard />;
+      case "tasks": return <TasksBoard />;
       case "code": return <CodePane />;
       case "notes":
       case "documents": return <MarkdownPane />;

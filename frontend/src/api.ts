@@ -42,6 +42,12 @@ export interface UsageStats {
   totals: { user_messages: number; facts: number; knowledge: number; tasks: number };
 }
 
+export interface NatureInfo {
+  id: string;
+  label: string;
+  icon: string;
+}
+
 export type Settings = Record<string, number | boolean | string>;
 
 async function j<T>(path: string, init?: RequestInit): Promise<T> {
@@ -91,6 +97,14 @@ export const api = {
 
   // Usage stats (memory graph)
   getStats: () => j<UsageStats>("/api/stats"),
+
+  // Nature (personality lock)
+  getNature: () => j<{ current: string; natures: NatureInfo[] }>("/api/nature"),
+  setNature: (nature: string) =>
+    j<{ ok: boolean; current: string }>("/api/nature", {
+      method: "PUT",
+      body: JSON.stringify({ nature }),
+    }),
 
   // App settings
   getSettings: () => j<{ settings: Settings }>("/api/settings").then((r) => r.settings),

@@ -3,20 +3,25 @@ import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { useDomainStore } from "../../stores/domainStore";
 import DomainNav from "./DomainNav";
 import DomainHeader from "./DomainHeader";
-import IntelligencePanel from "./IntelligencePanel";
+import DomainChat from "./DomainChat";
+import DomainBoundary from "./DomainBoundary";
 import DomainDashboard from "./views/DomainDashboard";
 import PlanningBoard from "./views/PlanningBoard";
 import TasksBoard from "./views/TasksBoard";
 import CodePane from "./views/CodePane";
-import MarkdownPane from "./views/MarkdownPane";
+import DocumentationView from "./views/DocumentationView";
+import NotesView from "./views/NotesView";
+import TerminalView from "./views/TerminalView";
+import DomainSettings from "./views/DomainSettings";
+import HistoryView from "./views/HistoryView";
 import AgentsView from "./views/AgentsView";
 import DomainPlaceholder from "./views/DomainPlaceholder";
 import "./domain.css";
 
 // ============================================================================
 // AURA Domain — the workspace beyond the beam.
-// Left nav · adaptive center · right intelligence panel, all glass floating
-// over the (future) animated cosmic background.
+// Left nav · adaptive center · right AURA chat. Widths, density, rounding,
+// glass and background all come from the user's layout settings.
 // ============================================================================
 
 interface Props {
@@ -25,9 +30,12 @@ interface Props {
 
 export default function DomainScreen({ onExit }: Props) {
   const section = useDomainStore((s) => s.section);
+  const layout = useDomainStore((s) => s.layout);
   const [navMin, setNavMin] = useLocalStorage<boolean>("aura.domain.navMin", false);
-  const [intelOpen, setIntelOpen] = useLocalStorage<boolean>("aura.domain.intel", true);
+  const [chatOpen, setChatOpen] = useLocalStorage<boolean>("aura.domain.intel", true);
   const [videoOk, setVideoOk] = useState(true);
+
+  const showChat = layout.showChat && chatOpen;
 
   const center = () => {
     switch (section) {
@@ -35,26 +43,33 @@ export default function DomainScreen({ onExit }: Props) {
       case "projects": return <PlanningBoard />;
       case "tasks": return <TasksBoard />;
       case "code": return <CodePane />;
-      case "notes":
-      case "documents": return <MarkdownPane />;
+      case "documents": return <DocumentationView />;
+      case "notes": return <NotesView />;
+      case "terminal": return <TerminalView />;
+      case "settings": return <DomainSettings />;
       case "agents": return <AgentsView />;
       case "research":
         return <DomainPlaceholder icon="◎" title="Research Canvas" line="A thinking surface for sources, threads and discoveries — arriving soon." />;
-      case "images":
-        return <DomainPlaceholder icon="❖" title="Image Forge" line="Generation and galleries will materialize here." />;
-      case "terminal":
-        return <DomainPlaceholder icon="❯" title="Terminal" line="A direct line into the machine — being wired to the brain." />;
-      case "history":
-        return <DomainPlaceholder icon="↺" title="History" line="Every session, every decision, replayable. Soon." />;
+      case "history": return <HistoryView />;
       default: return <DomainDashboard />;
     }
   };
 
+  // layout knobs drive CSS custom properties on the root
+  const vars = {
+    ["--dnav-w" as string]: (navMin ? 64 : layout.navWidth) + "px",
+    ["--dchat-w" as string]: layout.chatWidth + "px",
+    ["--dradius" as string]: layout.radius + "px",
+    ["--dglass" as string]: `blur(${layout.glass}px)`,
+    ["--daccent" as string]: layout.accent,
+  };
+
   return (
-    <div className="domain">
-      {/* background: drop /domain.mp4 into frontend/public and it plays here.
-          Until then, the dark placeholder gradient stands in. */}
-      {videoOk ? (
+    <div
+      className={"domain domain--" + layout.density + " domain--bg-" + layout.background}
+      style={vars}
+    >
+      {layout.background === "video" && videoOk ? (
         <video
           className="domain__video"
           src="./domain.mp4"
@@ -66,15 +81,19 @@ export default function DomainScreen({ onExit }: Props) {
       )}
       <div className="domain__shade" />
 
-      <div className={"domain__grid" + (navMin ? " domain__grid--navmin" : "") + (!intelOpen ? " domain__grid--nointel" : "")}>
+      <div className={"domain__grid" + (!showChat ? " domain__grid--nochat" : "")}>
         <DomainNav collapsed={navMin} onToggle={() => setNavMin((v) => !v)} onExit={onExit} />
+
         <section className="domain__center">
-          <DomainHeader />
+          {layout.showHeader && <DomainHeader />}
           <div className="domain__body" key={section}>
-            {center()}
+            <DomainBoundary resetKey={section}>{center()}</DomainBoundary>
           </div>
         </section>
-        <IntelligencePanel collapsed={!intelOpen} onToggle={() => setIntelOpen((v) => !v)} />
+
+        {layout.showChat && (
+          <DomainChat collapsed={!chatOpen} onToggle={() => setChatOpen((v) => !v)} />
+        )}
       </div>
     </div>
   );

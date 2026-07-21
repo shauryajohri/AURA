@@ -83,6 +83,15 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 
+# Domain routes (filesystem, terminal, GitHub, OAuth connectors) live in their
+# own module — if one of them fails to import, the brain still comes up.
+try:
+    from domain_api import router as domain_router
+    app.include_router(domain_router)
+    print("[AURA bridge] Domain API mounted")
+except Exception:  # noqa: BLE001
+    traceback.print_exc()
+
 _DONE = object()
 
 CLIENTS: set[WebSocket] = set()
@@ -389,6 +398,27 @@ async def api_save_settings(req: Request) -> dict[str, Any]:
         return {"ok": False, "error": "settings object required"}
     store.set_settings(patch)
     return {"ok": True, "settings": store.get_settings()}
+
+
+# ── Nature: AURA's locked personality (auto / chill / focus / savage / …) ────
+@app.get("/api/nature")
+async def api_get_nature() -> dict[str, Any]:
+    from core.nature import NATURES, get_nature
+    return {
+        "current": get_nature(),
+        "natures": [
+            {"id": k, "label": v["label"], "icon": v["icon"]}
+            for k, v in NATURES.items()
+        ],
+    }
+
+
+@app.put("/api/nature")
+async def api_set_nature(req: Request) -> dict[str, Any]:
+    from core.nature import get_nature, set_nature
+    body = await req.json()
+    ok = set_nature(str(body.get("nature", "")))
+    return {"ok": ok, "current": get_nature()}
 
 
 @app.get("/api/status")

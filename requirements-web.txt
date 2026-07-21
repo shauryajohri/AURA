@@ -3,3 +3,9 @@
 fastapi
 uvicorn[standard]
 websockets
+
+# Office round-trip editing for the Domain's Documentation tab
+# (open a Word/Excel/PowerPoint file from OneDrive, edit it, write it back)
+python-docx
+openpyxl
+python-pptx

@@ -1,20 +1,12 @@
-import { DomainSection, useDomainStore } from "../../stores/domainStore";
+import {
+  ALL_SECTIONS,
+  SECTION_META,
+  useDomainStore,
+  type DomainSection,
+} from "../../stores/domainStore";
 
-// Left navigation — collapsible, minimal glyphs, elegant spacing.
-
-const ITEMS: { id: DomainSection; icon: string; label: string }[] = [
-  { id: "dashboard", icon: "◈", label: "Dashboard" },
-  { id: "projects", icon: "▣", label: "Projects" },
-  { id: "tasks", icon: "☑", label: "Tasks" },
-  { id: "code", icon: "⌥", label: "Code" },
-  { id: "research", icon: "◎", label: "Research" },
-  { id: "documents", icon: "≡", label: "Documents" },
-  { id: "images", icon: "❖", label: "Images" },
-  { id: "notes", icon: "✎", label: "Notes" },
-  { id: "agents", icon: "✦", label: "AI Agents" },
-  { id: "terminal", icon: "❯", label: "Terminal" },
-  { id: "history", icon: "↺", label: "History" },
-];
+// Left navigation — collapsible, minimal glyphs.
+// Order and visibility come from Domain → Settings → Layout.
 
 interface Props {
   collapsed: boolean;
@@ -25,6 +17,14 @@ interface Props {
 export default function DomainNav({ collapsed, onToggle, onExit }: Props) {
   const section = useDomainStore((s) => s.section);
   const setSection = useDomainStore((s) => s.setSection);
+  const layout = useDomainStore((s) => s.layout);
+
+  // any section added after the user saved a layout still shows up, at the end
+  const ordered: DomainSection[] = [
+    ...layout.navOrder.filter((s) => ALL_SECTIONS.includes(s)),
+    ...ALL_SECTIONS.filter((s) => !layout.navOrder.includes(s)),
+  ];
+  const items = ordered.filter((s) => !layout.hidden.includes(s));
 
   return (
     <nav className={"dnav" + (collapsed ? " dnav--min" : "")}>
@@ -33,16 +33,16 @@ export default function DomainNav({ collapsed, onToggle, onExit }: Props) {
       </button>
 
       <div className="dnav__items">
-        {ITEMS.map((it) => (
+        {items.map((id) => (
           <button
-            key={it.id}
-            className={"dnav__item" + (section === it.id ? " dnav__item--on" : "")}
-            onClick={() => setSection(it.id)}
-            title={collapsed ? it.label : undefined}
+            key={id}
+            className={"dnav__item" + (section === id ? " dnav__item--on" : "")}
+            onClick={() => setSection(id)}
+            title={collapsed ? SECTION_META[id].label : undefined}
           >
-            <span className="dnav__icon">{it.icon}</span>
-            {!collapsed && <span className="dnav__label">{it.label}</span>}
-            {section === it.id && <span className="dnav__glow" />}
+            <span className="dnav__icon">{SECTION_META[id].icon}</span>
+            {!collapsed && <span className="dnav__label">{SECTION_META[id].label}</span>}
+            {section === id && <span className="dnav__glow" />}
           </button>
         ))}
       </div>

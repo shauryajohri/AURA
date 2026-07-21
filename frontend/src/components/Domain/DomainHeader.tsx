@@ -1,14 +1,13 @@
 import { useState } from "react";
 import { MODELS } from "../../data/models";
-import { useActiveProject, useDomainStore } from "../../stores/domainStore";
+import { SECTION_META, useActiveProject, useDomainStore } from "../../stores/domainStore";
 
 // Minimal top bar: project · breadcrumb · model selector · search · bells.
 
-const SECTION_LABEL: Record<string, string> = {
-  dashboard: "Dashboard", projects: "Planning", tasks: "Tasks", code: "Code", research: "Research",
-  documents: "Documents", images: "Images", notes: "Notes", agents: "AI Agents",
-  terminal: "Terminal", history: "History",
-};
+// Labels come from the store so nav, header and settings can never disagree.
+const SECTION_LABEL: Record<string, string> = Object.fromEntries(
+  Object.entries(SECTION_META).map(([k, v]) => [k, v.label])
+);
 
 export default function DomainHeader() {
   const project = useActiveProject();

@@ -88,6 +88,9 @@ app.add_middleware(
 try:
     from domain_api import router as domain_router
     app.include_router(domain_router)
+    # Project Brain graph (Domain V2) shares the memory DB — create its tables.
+    from core.domain import brain_store as _brain_store
+    _brain_store.init_db()
     print("[AURA bridge] Domain API mounted")
 except Exception:  # noqa: BLE001
     traceback.print_exc()

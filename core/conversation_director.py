@@ -582,8 +582,14 @@ class ConversationDirector:
         if choice == "GENERATE":
             # The menu choice is the approval — skip the plan panel.
             return Directive("generate", original)
-        return Directive("chat", INTENT_INSTRUCTIONS[choice] + original,
-                         intent=self._CHOICE_INTENT.get(choice, ""))
+        pinned = self._CHOICE_INTENT.get(choice, "")
+        # When the choice pins an intent, ai_router already applies the matching
+        # SYSTEM addon (EXPLAIN/PLAN teaching/longform lanes). Prepending the
+        # instruction into the USER turn on top of that made reasoning models
+        # narrate it back ("The user says: 'Explain this clearly...'"). So only
+        # prepend for choices with no system addon (e.g. REVIEW).
+        text = original if pinned else (INTENT_INSTRUCTIONS[choice] + original)
+        return Directive("chat", text, intent=pinned)
 
     # ── hooks for the controller ──────────────────────────────────────────
     def note_prompt_result(self, text: str):

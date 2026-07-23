@@ -62,8 +62,7 @@ export default function TopBar({ mode = "CHAT" }: Props) {
           <button
             className={"corebtn " + (menuOpen ? "corebtn--open" : "")}
             onClick={() => setMenuOpen(!menuOpen)}
-            title="AURA core settings"
-          >
+            title="AURA core settings">
             <span className="corebtn__orb" />
             <span className="corebtn__label">Core</span>
             <span className="corebtn__caret">{menuOpen ? "▴" : "▾"}</span>

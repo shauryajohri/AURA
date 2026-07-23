@@ -295,3 +295,216 @@ async def figma_file(key: str) -> dict[str, Any]:
         return _err(str(e))
     except Exception as e:  # noqa: BLE001
         return _err(str(e))
+
+
+# ============================================================================
+# Project Brain — AURA Domain V2 (AI Project Operating System)
+#   /api/domain/projects            list / create
+#   /api/domain/projects/import     create from a local folder (analyze + git)
+#   /api/domain/project/{pid}       dashboard vitals
+#   /api/domain/project/{pid}/...   graph, timeline, progress, plan, nodes...
+# All routes delegate to core.domain.* — see that package for the real logic.
+# ============================================================================
+@router.get("/api/domain/projects")
+async def brain_projects() -> dict[str, Any]:
+    from core.domain import brain_store
+    return {"ok": True, "projects": brain_store.list_projects()}
+
+
+@router.post("/api/domain/projects")
+async def brain_create_project(req: Request) -> dict[str, Any]:
+    from core.domain import project_brain
+    body = await req.json()
+    name = (body.get("name") or "").strip()
+    if not name:
+        return _err("name required")
+    return {"ok": True, "project": project_brain.create_project(
+        name, root=body.get("root", ""), repo_url=body.get("repo_url", ""))}
+
+
+@router.post("/api/domain/projects/import")
+async def brain_import_project(req: Request) -> dict[str, Any]:
+    """Phase-1+2: create a project from a local folder — static analysis plus
+    local-git history folded into the graph."""
+    from core.domain import project_brain
+    body = await req.json()
+    root = (body.get("root") or "").strip()
+    if not root:
+        return _err("root (folder path) required")
+    name = (body.get("name") or "").strip()
+    if not name:
+        import os as _os
+        name = _os.path.basename(root.rstrip("/\\")) or "Project"
+    try:
+        return {"ok": True, **project_brain.import_from_folder(name, root)}
+    except Exception as e:  # noqa: BLE001
+        return _err(f"import failed: {e}")
+
+
+@router.get("/api/domain/project/{pid}")
+async def brain_dashboard(pid: str) -> dict[str, Any]:
+    from core.domain import project_brain
+    return project_brain.dashboard(pid)
+
+
+@router.delete("/api/domain/project/{pid}")
+async def brain_delete_project(pid: str) -> dict[str, Any]:
+    from core.domain import brain_store
+    brain_store.wipe_project(pid)
+    return {"ok": True}
+
+
+@router.get("/api/domain/project/{pid}/nodes")
+async def brain_nodes(pid: str, type: str = "", status: str = "") -> dict[str, Any]:
+    from core.domain import brain_store
+    return {"ok": True, "nodes": brain_store.nodes(pid, type or None, status or None)}
+
+
+@router.get("/api/domain/project/{pid}/graph")
+async def brain_graph(pid: str) -> dict[str, Any]:
+    """Whole graph — nodes + edges — for a knowledge-graph view."""
+    from core.domain import brain_store
+    return {"ok": True, "nodes": brain_store.nodes(pid),
+            "edges": brain_store.edges(pid), "counts": brain_store.counts(pid)}
+
+
+@router.get("/api/domain/project/{pid}/timeline")
+async def brain_timeline(pid: str, limit: int = 100) -> dict[str, Any]:
+    from core.domain import project_brain
+    return {"ok": True, "events": project_brain.timeline(pid, limit)}
+
+
+@router.get("/api/domain/project/{pid}/progress")
+async def brain_progress(pid: str) -> dict[str, Any]:
+    from core.domain import progress
+    return {"ok": True, **progress.overall(pid)}
+
+
+@router.get("/api/domain/node/{nid}/why")
+async def brain_why(nid: str, pid: str = "") -> dict[str, Any]:
+    from core.domain import project_brain
+    return project_brain.why(pid, nid)
+
+
+@router.get("/api/domain/node/{nid}/related")
+async def brain_related(nid: str, pid: str = "") -> dict[str, Any]:
+    from core.domain import project_brain
+    return project_brain.related(pid, nid)
+
+
+@router.post("/api/domain/project/{pid}/rescan")
+async def brain_rescan(pid: str) -> dict[str, Any]:
+    """Re-read local git and fold any new commits into the graph (Phase-6)."""
+    from core.domain import brain_store, git_scan, project_brain
+    p = brain_store.get_project(pid)
+    if not p:
+        return _err("project not found", 404)
+    if not p.get("root"):
+        return _err("project has no local root to scan")
+    gs = git_scan.scan(p["root"])
+    if not gs.get("is_repo"):
+        return _err("root is not a git repo")
+    return {"ok": True, "imported": project_brain.import_git_scan(pid, gs),
+            "head": gs.get("head", {})}
+
+
+@router.post("/api/domain/project/{pid}/plan")
+async def brain_plan(pid: str, req: Request) -> dict[str, Any]:
+    """Phase-3+4: turn a note into a feature + tasks, recorded into the graph.
+    Pass {"preview": true} to plan without writing."""
+    from core.domain import planning
+    body = await req.json()
+    text = (body.get("text") or "").strip()
+    if not text:
+        return _err("text required")
+    use_llm = bool(body.get("use_llm", True))
+    if body.get("preview"):
+        return {"ok": True, **planning.plan(text, use_llm=use_llm)}
+    return planning.plan_and_record(pid, text, from_node=body.get("from_node"),
+                                    use_llm=use_llm)
+
+
+@router.post("/api/domain/task/{tid}/status")
+async def brain_task_status(tid: str, req: Request) -> dict[str, Any]:
+    from core.domain import project_brain, brain_store
+    body = await req.json()
+    status = (body.get("status") or "").strip()
+    if status not in brain_store.TASK_STATES:
+        return _err(f"status must be one of {sorted(brain_store.TASK_STATES)}")
+    node = project_brain.set_task_status(
+        body.get("pid", ""), tid, status, reason=body.get("reason", ""))
+    return {"ok": bool(node), "task": node}
+
+
+# ============================================================================
+# Idea Capture — natural conversation -> structured project knowledge
+#   /api/domain/project/{pid}/capture   classify + fold one utterance in
+#   /api/domain/task/{tid}/expand       generate subtasks
+#   /api/domain/node/{nid}/ask          ask anything about a feature/task
+# ============================================================================
+@router.post("/api/domain/project/{pid}/capture")
+async def brain_capture(pid: str, req: Request) -> dict[str, Any]:
+    """Talk naturally; AURA decides if it's a feature, decision, edit, or note
+    and records it. Returns what was created (UI confirms 'Add these tasks?')."""
+    from core.domain import idea_capture
+    body = await req.json()
+    text = (body.get("text") or "").strip()
+    if not text:
+        return _err("text required")
+    return idea_capture.capture(
+        pid, text, feature_id=body.get("feature_id"),
+        use_llm=bool(body.get("use_llm", True)))
+
+
+@router.post("/api/domain/task/{tid}/expand")
+async def brain_expand_task(tid: str, req: Request) -> dict[str, Any]:
+    from core.domain import idea_capture
+    body = await req.json() if await req.body() else {}
+    return idea_capture.expand_task(
+        body.get("pid", ""), tid, use_llm=bool(body.get("use_llm", True)))
+
+
+@router.post("/api/domain/node/{nid}/ask")
+async def brain_ask(nid: str, req: Request) -> dict[str, Any]:
+    from core.domain import idea_capture
+    body = await req.json()
+    question = (body.get("question") or "").strip()
+    if not question:
+        return _err("question required")
+    return idea_capture.ask(body.get("pid", ""), nid, question,
+                            use_llm=bool(body.get("use_llm", True)))
+
+
+# ============================================================================
+# GitHub projects — log in, list repos, import one into a project
+#   /api/domain/github/status    is GitHub connected + which account
+#   /api/domain/github/repos     the user's repos (needs login)
+#   /api/domain/github/import    clone a repo locally + build its project graph
+# The GitHub token is used ONLY here, for project repo access.
+# ============================================================================
+@router.get("/api/domain/github/status")
+async def gh_status() -> dict[str, Any]:
+    from core.domain import github_import
+    return {"ok": True, "connected": github_import.is_connected(),
+            "account": github_import.account()}
+
+
+@router.get("/api/domain/github/repos")
+async def gh_repos(limit: int = 100) -> dict[str, Any]:
+    from core.domain import github_import
+    return github_import.list_repos(limit)
+
+
+@router.post("/api/domain/github/import")
+async def gh_import(req: Request) -> dict[str, Any]:
+    """Clone the chosen repo locally and build its project graph. Body:
+    {full_name, clone_url?, name?, branch?, force?}."""
+    from core.domain import github_import
+    body = await req.json()
+    full_name = (body.get("full_name") or "").strip()
+    if not full_name:
+        return _err("full_name required (e.g. 'octocat/Hello-World')")
+    return github_import.import_repo(
+        full_name, clone_url=body.get("clone_url", ""),
+        name=body.get("name", ""), branch=body.get("branch", ""),
+        force=bool(body.get("force")))

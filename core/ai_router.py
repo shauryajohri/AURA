@@ -311,20 +311,26 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
     # Reasoning models (Nemotron etc.) love narrating their process — block it
     # at the source for EVERY lane, on top of the strict addons above.
     strict_system += _NO_THINK_ALOUD
+    body = {
+        "model": model_id,
+        "messages": [
+            {"role": "system", "content": strict_system},
+            {"role": "user",   "content": prompt}
+        ],
+        "max_tokens": 2048 if (is_coding or is_longform) else (1024 if is_explain else (300 if is_personal else 150)),
+        "temperature": 0.6 if is_longform else (0.5 if is_explain else (0.3 if is_coding else 0.7)),
+        "stream": True
+    }
+    # Reasoning models (Nemotron etc.) return their private chain-of-thought.
+    # On OpenRouter we tell the provider to DROP it server-side so it never
+    # arrives as content — the real root fix, not the regex band-aid below.
+    if provider == "openrouter":
+        body["reasoning"] = {"exclude": True}
     try:
         response = requests.post(
             url,
             headers=_headers(provider, api_key),
-            json={
-                "model": model_id,
-                "messages": [
-                    {"role": "system", "content": strict_system},
-                    {"role": "user",   "content": prompt}
-                ],
-                "max_tokens": 2048 if (is_coding or is_longform) else (1024 if is_explain else (300 if is_personal else 150)),
-                "temperature": 0.6 if is_longform else (0.5 if is_explain else (0.3 if is_coding else 0.7)),
-                "stream": True
-            },
+            json=body,
             timeout=60 if (is_longform or is_explain) else 30,
             stream=True
         )
@@ -343,7 +349,10 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
                 if line.startswith("data: ") and line != "data: [DONE]":
                     import json
                     chunk = json.loads(line[6:])
-                    content = chunk["choices"][0]["delta"].get("content", "")
+                    delta = chunk["choices"][0]["delta"]
+                    # Some reasoning models stream thinking in a separate
+                    # `reasoning`/`reasoning_content` field — never yield it.
+                    content = delta.get("content", "")
                     if content:
                         if is_coding:
                             _debug_buffer.append(content)

@@ -3,6 +3,7 @@ import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { useClock } from "../../hooks/useClock";
 import { api, Task, SavedLink, UsageStats, Settings } from "../../api";
 import { useDomainStore, DomainSection } from "../../stores/domainStore";
+import { useSettingsStore } from "../../stores/settingsStore";
 import { Layout, ColId, DEFAULT_LAYOUT, CARD_TITLES } from "./layoutTypes";
 import SettingsOverlay, { SettingsCategory, CATEGORY_META } from "./SettingsOverlay";
 import FloatingParticles from "./FloatingParticles";
@@ -83,6 +84,7 @@ export default function SanctuarySection({ entered, onEnterDomain }: Props) {
   // Which settings area is open (null = none). The sanctuary stays mounted
   // underneath, so closing the editor puts you exactly where you were.
   const [settingsFocus, setSettingsFocus] = useState<SettingsCategory | null>(null);
+  const applySettings = useSettingsStore((s) => s.apply);
 
   const refreshTasks = () => api.getTasks().then(setTasks).catch(() => setOffline(true));
   const refreshLinks = () => api.getLinks().then(setLinks).catch(() => setOffline(true));
@@ -651,7 +653,9 @@ you: ${d.user_msgs} messages · saved: ${d.facts_saved} memories`}>
           layout={layout}
           onSaveSettings={(patch) => {
             setSettings((s) => (s ? { ...s, ...patch } : s));
-            api.saveSettings(patch).catch(() => setOffline(true));
+            // Store handles persistence AND pushes the values into the live
+            // black hole / planet visuals.
+            applySettings(patch).catch(() => setOffline(true));
           }}
           onSaveLayout={(l) => setLayout(l)}
           onClose={() => setSettingsFocus(null)}

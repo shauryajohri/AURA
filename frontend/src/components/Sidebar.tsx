@@ -1,10 +1,13 @@
 const NAV = [
   { id: "home", label: "Home", icon: "⌂" },
+  { id: "tasks", label: "Tasks", icon: "✓" },
   { id: "quests", label: "Quests", icon: "❖" },
   { id: "skills", label: "Skills", icon: "⚚" },
   { id: "models", label: "Models", icon: "◈" },
   { id: "memory", label: "Memory", icon: "❋" },
-  { id: "analytics", label: "Analytics", icon: "♪" },
+  // id stays "analytics" for backwards-compatible localStorage; the view
+  // behind it is the V3 Intelligence panel.
+  { id: "analytics", label: "Intelligence", icon: "◎" },
   { id: "settings", label: "Settings", icon: "⚙" },
 ];
 

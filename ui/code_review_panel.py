@@ -7,9 +7,12 @@ workspace access indicators along the bottom.
 
 Lives as a second tab inside WorkspacePanel ("Files & Git" | "Code Review").
 Real filesystem I/O, real `python` execution via QProcess, and a real
-call to core.ai_router for the "optimize" suggestion. The "Push to Main
-Codebase" button is a placeholder — it does NOT run git push. Wire that
-up deliberately later if you actually want AURA pushing commits.
+call to core.ai_router for the "optimize" suggestion.
+
+"Push to Main Codebase" is now wired to core.git_ops — but never silently:
+it shows the exact file list first, asks for a commit message, and requires a
+second confirmation before anything is committed or pushed. Protected branches
+(main/master) need one more explicit yes on top of that.
 """
 
 import os
@@ -17,8 +20,8 @@ import threading
 
 from PySide6.QtCore import Qt, QObject, QProcess, Signal
 from PySide6.QtWidgets import (
-    QFileDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
-    QPushButton, QTextEdit, QVBoxLayout, QWidget,
+    QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMessageBox,
+    QPlainTextEdit, QPushButton, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from ui import theme
@@ -362,7 +365,8 @@ class CodeReviewPanel(QWidget):
 
         push_col = QVBoxLayout()
         push_col.addWidget(_label("PUSH PERMISSION", 8, theme.TEXT_DIM, mono=True))
-        push_col.addWidget(_label("🔒 Off — placeholder", 10, theme.ALERT_ORANGE, bold=True))
+        self._push_state = _label("🔓 On — always asks first", 10, theme.FOCUS_GREEN, bold=True)
+        push_col.addWidget(self._push_state)
         lay.addLayout(push_col, 1)
 
         push_btn = QPushButton("☁ Push to Main Codebase")
@@ -373,11 +377,90 @@ class CodeReviewPanel(QWidget):
         return panel
 
     def _push_clicked(self):
-        QMessageBox.information(
-            self, "Push disabled",
-            "Real git push isn't wired up yet — this button is a placeholder "
-            "until you decide you want AURA running `git push` for you."
+        """Commit + push the workspace, with the user in the loop at each step.
+
+        Deliberately staged: show what changed → ask for a message → confirm →
+        (if the branch is protected) confirm again. core.git_ops enforces the
+        same rules independently, so a UI slip can't bypass them.
+        """
+        from core import git_ops
+
+        pre = git_ops.preview(self._root)
+        if not pre.get("ok"):
+            QMessageBox.warning(self, "Can't push", pre.get("error", "unknown git error"))
+            return
+        if pre["clean"] and pre["ahead"] == 0:
+            QMessageBox.information(self, "Nothing to push", "The working tree is clean.")
+            return
+        if not pre["can_push"]:
+            QMessageBox.warning(
+                self, "No remote",
+                "This repo has no git remote configured, so there's nowhere to push."
+            )
+            return
+
+        # 1. Show exactly what's going out.
+        shown = pre["files"][:25]
+        listing = "\n".join(f"  {f['state']:<10} {f['path']}" for f in shown)
+        if pre["file_count"] > len(shown):
+            listing += f"\n  ... and {pre['file_count'] - len(shown)} more"
+        summary = (
+            f"Branch: {pre['branch']}"
+            + ("  (protected)" if pre["protected"] else "")
+            + f"\nRemote: {', '.join(pre['remotes']) or 'none'}"
+            + f"\nUnpushed commits: {pre['ahead']}\n\n"
+            + (f"{pre['file_count']} changed file(s):\n{listing}"
+               if pre["files"] else "No uncommitted changes.")
         )
+
+        # 2. Commit message (only when there's something to commit).
+        message = ""
+        if pre["files"]:
+            message, ok = QInputDialog.getText(
+                self, "Commit message", summary + "\n\nMessage:"
+            )
+            if not ok or not message.strip():
+                return
+        else:
+            if QMessageBox.question(
+                self, "Push existing commits?", summary,
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            ) != QMessageBox.Yes:
+                return
+
+        # 3. Final confirmation — protected branches say so out loud.
+        warn = ("\n\nThis pushes to a PROTECTED branch."
+                if pre["protected"] else "")
+        if QMessageBox.question(
+            self, "Push to remote?",
+            f"Commit and push {pre['file_count']} file(s) to "
+            f"{pre['branch']}?{warn}",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        ) != QMessageBox.Yes:
+            return
+
+        self._console.append(f"$ git commit + push  ({pre['branch']})")
+        if message.strip():
+            result = git_ops.commit_and_push(
+                self._root, message.strip(), confirm=True,
+                allow_protected=pre["protected"],
+            )
+        else:
+            result = git_ops.push(
+                self._root, confirm=True, allow_protected=pre["protected"]
+            )
+
+        if result.get("ok"):
+            sha = (result.get("commit") or {}).get("sha", "")
+            self._console.append(f"pushed to {pre['branch']} {sha}".rstrip())
+            QMessageBox.information(
+                self, "Pushed",
+                f"Pushed to {pre['branch']}." + (f"\nCommit {sha}" if sha else "")
+            )
+        else:
+            err = result.get("error") or "push failed"
+            self._console.append(f"! {err}")
+            QMessageBox.warning(self, "Push failed", err)
 
     # ── shared style ─────────────────────────────────────────────────────
     @staticmethod

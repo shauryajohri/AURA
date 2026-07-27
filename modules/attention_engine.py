@@ -609,6 +609,20 @@ class AttentionEngine:
                 except Exception:
                     pass
 
+                # ── The important gate ────────────────────────────────────
+                # Everything below measures silence TOWARD AURA, which says
+                # nothing about whether the user is busy. Thirty minutes deep
+                # in code produced "you've been quiet, what's going on over
+                # there?" — the single worst thing to say to someone focused.
+                # If they're working, they are not ignoring her; stay out.
+                try:
+                    from core.engagement import is_working
+                    if is_working():
+                        continue
+                except Exception:
+                    pass
+                # ──────────────────────────────────────────────────────────
+
                 if self._sulking:
                     continue
                 if not can_speak_now():

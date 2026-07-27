@@ -69,6 +69,49 @@ def clean_text(text: str) -> str:
         text += '.'
     return text.strip()
 
+# ── User voice settings (Sanctuary → Voice) ───────────────────────────────────
+# These live in the app_settings table and were previously saved but never
+# read, so the sliders did nothing. Cached briefly because speak() can be
+# called several times in quick succession and each read hits sqlite.
+_settings_cache: tuple[float, dict] = (0.0, {})
+_SETTINGS_TTL = 10.0  # seconds
+
+
+def _voice_settings() -> dict:
+    """{'enabled': bool, 'rate_pct': int}. Falls back to on/neutral."""
+    import time as _t
+    global _settings_cache
+    now = _t.time()
+    ts, cached = _settings_cache
+    if cached and (now - ts) < _SETTINGS_TTL:
+        return cached
+    out = {"enabled": True, "rate_pct": 55}
+    try:
+        from memory import store
+        s = store.get_settings()
+        out["enabled"] = bool(s.get("voice.enabled", True))
+        out["rate_pct"] = int(s.get("voice.rate", 55))
+    except Exception:  # noqa: BLE001
+        pass  # settings unavailable → speak normally rather than going silent
+    _settings_cache = (now, out)
+    return out
+
+
+def _rate_offset(rate_pct: int, tone_rate: str) -> str:
+    """Fold the user's 0–100 speed preference into the tone's own rate shift.
+
+    55 is the stored default and means "leave the tone alone"; the ends of the
+    slider map to roughly -40%..+40% on top of it.
+    """
+    try:
+        base = int(tone_rate.rstrip("%"))
+    except ValueError:
+        base = 0
+    user = round((max(0, min(100, rate_pct)) - 55) * 0.8)
+    total = max(-50, min(50, base + user))
+    return f"{total:+d}%"
+
+
 # ── TTS generation ────────────────────────────────────────────────────────────
 async def _generate(text: str, tone: str, path: str):
     if edge_tts is None:
@@ -79,7 +122,7 @@ async def _generate(text: str, tone: str, path: str):
     communicate = edge_tts.Communicate(
         text,
         voice=voice,
-        rate=settings["rate"],
+        rate=_rate_offset(_voice_settings()["rate_pct"], settings["rate"]),
         pitch=settings["pitch"]
     )
     await communicate.save(path)
@@ -88,6 +131,12 @@ async def _generate(text: str, tone: str, path: str):
 def speak(text: str):
     clean = clean_text(text)
     if not clean:
+        return
+
+    # Voice off (Sanctuary → Voice) means don't synthesise — but still print,
+    # so the console transcript and the chat window stay complete.
+    if not _voice_settings()["enabled"]:
+        print(f"[AURA] {clean}  (voice off)")
         return
 
     print(f"[AURA] {clean}")

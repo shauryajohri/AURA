@@ -249,6 +249,76 @@ def _get_screen_context() -> dict:
     return _screen_reader.get_screen_context()
 
 
+# ── V3 bridge (lazy) ───────────────────────────────────────────────────────
+# Imported on first use rather than at module load: core.v3_bridge pulls in
+# core.nature, and proactive is itself imported by core.brain — deferring the
+# import keeps that triangle from becoming a cycle.
+_v3_mod = None
+
+
+def _v3():
+    global _v3_mod
+    if _v3_mod is None:
+        from core import v3_bridge
+        _v3_mod = v3_bridge
+    return _v3_mod
+
+
+_quests_mod = None
+
+
+def _quests():
+    global _quests_mod
+    if _quests_mod is None:
+        from core import quests
+        _quests_mod = quests
+    return _quests_mod
+
+
+# ── Auto-chat settings (Sanctuary → Auto-chat) ─────────────────────────────
+# `autochat.enabled` and `autochat.frequency` were persisted from day one but
+# nothing read them, so turning auto-chat off changed nothing. Cached because
+# this is consulted on every loop iteration.
+_autochat_cache: tuple[float, dict] = (0.0, {})
+_AUTOCHAT_TTL = 20.0  # seconds
+
+
+def _autochat_settings() -> dict:
+    """{'enabled': bool, 'frequency': int 0-100}. Defaults to on/40."""
+    global _autochat_cache
+    now = time.time()
+    ts, cached = _autochat_cache
+    if cached and (now - ts) < _AUTOCHAT_TTL:
+        return cached
+    out = {"enabled": True, "frequency": 40}
+    try:
+        from memory import store
+        s = store.get_settings()
+        out["enabled"] = bool(s.get("autochat.enabled", True))
+        out["frequency"] = int(s.get("autochat.frequency", 40))
+    except Exception:  # noqa: BLE001
+        pass
+    _autochat_cache = (now, out)
+    return out
+
+
+def _frequency_allows() -> bool:
+    """Probabilistic throttle from the frequency slider.
+
+    A hard interval would make AURA feel mechanical (always exactly N minutes);
+    sampling instead keeps her unpredictable while still respecting the dial.
+    40 is the stored default and maps to the loop's original behaviour.
+    """
+    freq = max(0, min(100, _autochat_settings()["frequency"]))
+    if freq >= 95:
+        return True
+    if freq <= 0:
+        return False
+    # 40 → ~1.0 (unchanged), 100 → 1.0, 10 → ~0.25, so lowering the slider
+    # thins out interruptions rather than stopping them dead.
+    return random.random() < min(1.0, freq / 40.0)
+
+
 def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text.lower()).strip()[:500]
 
@@ -654,11 +724,29 @@ def _loop(speak_fn, on_suggestion_fn=None, on_presence_fn=None):
                     print(f"[AURA Proactive] User AFK ({idle_mins}m) — suppressing suggestions")
                     _afk_logged = True
                 _emit_presence("afk")
+                # Still tick the quest tracker, with afk=True. It credits
+                # nothing, but it has to see the gap — otherwise the next
+                # active tick would back-date the whole AFK stretch onto
+                # whatever quest happened to be on screen before you left.
+                try:
+                    _quests().get_tracker().tick({}, afk=True)
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    from core.engagement import get_tracker as _eng
+                    _eng().observe({}, afk=True)
+                except Exception:  # noqa: BLE001
+                    pass
                 continue
 
             # User is back — reset log flag and mark active
             _afk_logged = False
             # ─────────────────────────────────────────────────────────────
+
+            # Auto-chat off = AURA observes but never initiates. The loop keeps
+            # running so presence, mood and the V3 session state stay accurate;
+            # only the speaking is suppressed.
+            _autochat_on = _autochat_settings()["enabled"]
 
             ctx = _get_screen_context()
             engine = get_engine()
@@ -670,6 +758,56 @@ def _loop(speak_fn, on_suggestion_fn=None, on_presence_fn=None):
                     continue
             except Exception:
                 pass
+
+            # ── Engagement: are they actually working right now? ──────────
+            # Sampled before anything else decides to speak, because almost
+            # every social nudge below should be suppressed during real work.
+            try:
+                from core.engagement import get_tracker as _eng
+                _engagement = _eng().observe(ctx)
+                _busy = _eng().is_working()
+            except Exception as e:  # noqa: BLE001
+                print(f"[AURA Proactive] Engagement skipped: {e}")
+                _engagement, _busy = {"working": False}, False
+
+            # ── Quests ────────────────────────────────────────────────────
+            # Credit verified time against today's board. This runs every
+            # cycle and is silent almost always — it only returns a line when
+            # a quest completes or the day genuinely stops fitting.
+            try:
+                quest_line = _quests().get_tracker().tick(ctx)
+            except Exception as e:  # noqa: BLE001
+                print(f"[AURA Proactive] Quest tick skipped: {e}")
+                quest_line = None
+            if quest_line and _autochat_on:
+                if request_to_speak("quest", quest_line):
+                    print(f"[AURA Proactive] (quest) {quest_line}")
+                    if on_suggestion_fn:
+                        on_suggestion_fn(quest_line)
+                    speak_fn(quest_line)
+                    continue
+            # ──────────────────────────────────────────────────────────────
+
+            # ── V3 intelligence ───────────────────────────────────────────
+            # Feed the session/error engines every cycle. They are built to
+            # stay quiet: `observe_screen` classifies only NEW error episodes
+            # and `tick` is gated by once-per-session flags and cooldowns, so
+            # this returns None the overwhelming majority of the time. When it
+            # does produce a line it still has to clear the same voice gate as
+            # everything else — V3 gets no special speaking privileges.
+            try:
+                v3_line = _v3().observe_screen(ctx) or _v3().tick()
+            except Exception as e:  # noqa: BLE001
+                print(f"[AURA Proactive] V3 skipped: {e}")
+                v3_line = None
+            if v3_line and _autochat_on:
+                if request_to_speak("v3", v3_line):
+                    print(f"[AURA Proactive] (v3) {v3_line}")
+                    if on_suggestion_fn:
+                        on_suggestion_fn(v3_line)
+                    speak_fn(v3_line)
+                    continue
+            # ──────────────────────────────────────────────────────────────
 
             if _locked_app:
                 if _locked_app not in ctx.get("app", "").lower():
@@ -686,7 +824,20 @@ def _loop(speak_fn, on_suggestion_fn=None, on_presence_fn=None):
                     continue
             # ─────────────────────────────────────────────────────────────
 
+            # ── Engagement gate ───────────────────────────────────────────
+            # While they're working, only genuinely useful interruptions get
+            # through. "interaction" and "stuck" are social check-ins ("still
+            # on Claude?") and are exactly what made AURA annoying mid-session.
+            # Errors and code insights stay — those earn the interruption.
+            if _busy and action in {"interaction", "stuck"}:
+                continue
+            # ─────────────────────────────────────────────────────────────
+
             if action == "silent" or not engine.should_interrupt(observation):
+                continue
+            # User's own dials, checked last so all the observation bookkeeping
+            # above still happens even when AURA has been told to stay quiet.
+            if not _autochat_on or not _frequency_allows():
                 continue
             msg = generate_message(action, task, ctx)
             if not msg:

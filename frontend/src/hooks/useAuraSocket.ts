@@ -5,8 +5,14 @@ import type {
   ClientMessage,
   ConnStatus,
   Presence,
+  QuestEvent,
   ServerMessage,
+  V3Event,
 } from "../types";
+
+// How many live V3 events to keep in memory. The panel also fetches history
+// from /api/v3/snapshot on mount, so this is only the live tail.
+const V3_BUFFER = 40;
 
 const DEFAULT_URL = "ws://127.0.0.1:8760/ws";
 
@@ -50,6 +56,10 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
   const [mode, setMode] = useState<string>("CHAT");
   const [activeModelId, setActiveModelId] = useState<string | null>(null);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [v3Events, setV3Events] = useState<V3Event[]>([]);
+  // Only the latest quest event is kept — the Quests tab re-fetches the board
+  // when it changes, so a full history here would just be duplicate state.
+  const [questEvent, setQuestEvent] = useState<QuestEvent | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -125,6 +135,15 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
         case "mode":
           setMode(msg.payload.mode);
           break;
+        case "v3":
+          // Intelligence events feed the Intelligence panel only. They are
+          // NOT pushed into chat: the proactive loop already decides whether
+          // a V3 line is worth speaking and sends that as a normal "push".
+          setV3Events((prev) => [...prev, msg.payload].slice(-V3_BUFFER));
+          break;
+        case "quest":
+          setQuestEvent(msg.payload);
+          break;
         case "error":
           pushMessage("[error] " + msg.payload.message, "error");
           finishStream();
@@ -163,5 +182,5 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
     ws.send(JSON.stringify(msg));
   }, []);
 
-  return { status, auraState, presence, mode, activeModelId, turns, send };
+  return { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, send };
 }

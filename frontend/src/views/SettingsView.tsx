@@ -3,6 +3,7 @@ import { api, Settings } from "../api";
 import SettingsOverlay, { SettingsCategory, CATEGORY_META } from "../components/Home/SettingsOverlay";
 import { Layout, DEFAULT_LAYOUT } from "../components/Home/layoutTypes";
 import { useLocalStorage } from "../hooks/useLocalStorage";
+import { useSettingsStore } from "../stores/settingsStore";
 
 // Screen-1 settings — the same menu → focused editor flow as the Sanctuary.
 // Pick a category, edit it with a live preview, save, and you're back here.
@@ -11,6 +12,7 @@ export default function SettingsView() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [offline, setOffline] = useState(false);
   const [focus, setFocus] = useState<SettingsCategory | null>(null);
+  const applySettings = useSettingsStore((s) => s.apply);
   // Sanctuary layout is edited here too — same store the sanctuary reads.
   const [layout, setLayout] = useLocalStorage<Layout>("aura.sanctuary", DEFAULT_LAYOUT);
 
@@ -58,7 +60,10 @@ export default function SettingsView() {
           layout={layout}
           onSaveSettings={(patch) => {
             setSettings((s) => (s ? { ...s, ...patch } : s));
-            api.saveSettings(patch).catch(() => setOffline(true));
+            // Route through the store, not straight to the API — it persists
+            // AND pushes the new values into the black hole / planet visuals,
+            // which is what makes these sliders actually do something.
+            applySettings(patch).catch(() => setOffline(true));
           }}
           onSaveLayout={(l) => setLayout(l)}
           onClose={() => setFocus(null)}

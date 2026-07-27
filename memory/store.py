@@ -285,31 +285,68 @@ def init_tasks():
     ''')
 
     conn.commit()
+    _ensure_task_columns(conn)
     conn.close()
 
-def add_task(title: str, priority: str = "medium") -> int:
+
+def _ensure_task_columns(conn):
+    """Add the `bucket` column to existing installs.
+
+    Tasks are the backlog — things to do now or later — so they need a place
+    on that axis. Priority already existed but answers a different question
+    (how important), not (when).
+    """
+    try:
+        have = {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}
+        if have and "bucket" not in have:
+            conn.execute("ALTER TABLE tasks ADD COLUMN bucket TEXT DEFAULT 'now'")
+            conn.commit()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def add_task(title: str, priority: str = "medium", bucket: str = "now") -> int:
     import time
     conn = _connect()
+    _ensure_task_columns(conn)
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO tasks (title, priority, status, created_at)
-        VALUES (?, ?, 'pending', ?)
-    ''', (title, priority, time.strftime("%Y-%m-%dT%H:%M:%S")))
+        INSERT INTO tasks (title, priority, status, created_at, bucket)
+        VALUES (?, ?, 'pending', ?, ?)
+    ''', (title, priority, time.strftime("%Y-%m-%dT%H:%M:%S"),
+          bucket if bucket in ("now", "later") else "now"))
     task_id = cursor.lastrowid
     conn.commit()
     conn.close()
     return task_id
 
 def get_tasks(status: str = None) -> list:
+    """(id, title, priority, status, created_at, done_at, bucket)."""
     conn = _connect()
+    _ensure_task_columns(conn)
     cursor = conn.cursor()
+    cols = ("id, title, priority, status, created_at, done_at, "
+            "COALESCE(bucket, 'now')")
     if status:
-        cursor.execute('SELECT * FROM tasks WHERE status=? ORDER BY created_at', (status,))
+        cursor.execute(f'SELECT {cols} FROM tasks WHERE status=? ORDER BY created_at', (status,))
     else:
-        cursor.execute('SELECT * FROM tasks ORDER BY status DESC, created_at')
+        cursor.execute(f'SELECT {cols} FROM tasks ORDER BY status DESC, created_at')
     results = cursor.fetchall()
     conn.close()
     return results
+
+
+def set_task_bucket(task_id: int, bucket: str):
+    """Move a task between 'now' and 'later'."""
+    if bucket not in ("now", "later"):
+        return
+    conn = _connect()
+    try:
+        _ensure_task_columns(conn)
+        conn.execute('UPDATE tasks SET bucket=? WHERE id=?', (bucket, task_id))
+        conn.commit()
+    finally:
+        conn.close()
 
 def complete_task(task_id: int):
     conn = _connect()
@@ -791,5 +828,357 @@ def set_settings(patch: dict):
         conn.close()
 
 
+# ── Quests: the daily board AURA actually watches ────────────────────────────
+# A quest is a commitment that repeats every day ("2h Japanese", "2h DSA").
+# Unlike a task it isn't ticked off by hand — core/quests.py accumulates real
+# seconds from the screen watcher, and the quest completes itself when the
+# target is met.
+#
+# Two tables, and the split matters: `quests` holds the definition (stable,
+# edited rarely) while `quest_days` holds one row per quest per day. Keeping
+# progress in its own table is what makes streaks, history and the 7-day chart
+# a plain query instead of a migration every time the concept grows.
+
+# Work past midnight still belongs to the day you started. Without this a 1am
+# DSA session would land on tomorrow's board and yesterday would look skipped —
+# which is exactly backwards for how a late-night dev actually works.
+DAY_ROLLOVER_HOUR = 4
+
+_QUESTS_DDL = '''
+    CREATE TABLE IF NOT EXISTS quests (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        title          TEXT NOT NULL,
+        target_minutes INTEGER NOT NULL DEFAULT 60,
+        keywords       TEXT DEFAULT '',
+        preset         TEXT DEFAULT 'custom',
+        color          TEXT DEFAULT '#8b5cff',
+        active         INTEGER DEFAULT 1,
+        sort_order     INTEGER DEFAULT 0,
+        created_at     TEXT,
+        project_path   TEXT DEFAULT ''
+    )
+'''
+
+
+def _ensure_quest_columns(conn):
+    """Add columns introduced after the first release, in place.
+
+    project_path arrived with topic/codebase quests. Existing installs already
+    have a quests table, so CREATE TABLE IF NOT EXISTS won't add it — this
+    does, and it's a no-op on a fresh DB.
+    """
+    try:
+        have = {r[1] for r in conn.execute("PRAGMA table_info(quests)")}
+        if have and "project_path" not in have:
+            conn.execute("ALTER TABLE quests ADD COLUMN project_path TEXT DEFAULT ''")
+            conn.commit()
+    except Exception:  # noqa: BLE001
+        pass
+
+_QUEST_DAYS_DDL = '''
+    CREATE TABLE IF NOT EXISTS quest_days (
+        quest_id     INTEGER NOT NULL,
+        day          TEXT NOT NULL,
+        seconds      INTEGER DEFAULT 0,
+        completed_at TEXT,
+        PRIMARY KEY (quest_id, day)
+    )
+'''
+
+# Time that was tracked but matched no quest. Stored per day so the board can
+# honestly show where the hours went without labelling anything a "distraction".
+_QUEST_OTHER_DDL = '''
+    CREATE TABLE IF NOT EXISTS quest_unallocated (
+        day     TEXT PRIMARY KEY,
+        seconds INTEGER DEFAULT 0
+    )
+'''
+
+
+def quest_day(when: datetime.datetime = None) -> str:
+    """The quest-day (YYYY-MM-DD) a moment belongs to, honouring the 4am roll."""
+    now = when or datetime.datetime.now()
+    if now.hour < DAY_ROLLOVER_HOUR:
+        now = now - datetime.timedelta(days=1)
+    return now.strftime("%Y-%m-%d")
+
+
+def init_quests():
+    conn = _connect()
+    try:
+        conn.execute(_QUESTS_DDL)
+        conn.execute(_QUEST_DAYS_DDL)
+        conn.execute(_QUEST_OTHER_DDL)
+        _ensure_quest_columns(conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def add_quest(title: str, target_minutes: int = 0, keywords: str = "",
+              preset: str = "custom", color: str = "#8b5cff",
+              project_path: str = "") -> int:
+    """target_minutes=0 creates an UNTIMED quest: AURA still watches for it and
+    accumulates the time, there's just no goal to hit and nothing to complete."""
+    conn = _connect()
+    try:
+        conn.execute(_QUESTS_DDL)
+        _ensure_quest_columns(conn)
+        row = conn.execute("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM quests").fetchone()
+        cur = conn.execute(
+            'INSERT INTO quests (title, target_minutes, keywords, preset, color, '
+            'active, sort_order, created_at, project_path) '
+            'VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)',
+            (title.strip(), max(0, int(target_minutes)), keywords.strip(),
+             preset, color, row[0], datetime.datetime.now().isoformat(),
+             (project_path or "").strip()),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def get_quests(active_only: bool = True) -> list:
+    """(id, title, target_minutes, keywords, preset, color, active, sort_order,
+    project_path)."""
+    conn = _connect()
+    try:
+        conn.execute(_QUESTS_DDL)
+        _ensure_quest_columns(conn)
+        sql = ('SELECT id, title, target_minutes, keywords, preset, color, active, '
+               'sort_order, COALESCE(project_path, \'\') FROM quests')
+        if active_only:
+            sql += ' WHERE active = 1'
+        sql += ' ORDER BY sort_order, id'
+        return conn.execute(sql).fetchall()
+    finally:
+        conn.close()
+
+
+def update_quest(quest_id: int, **patch):
+    allowed = {"title", "target_minutes", "keywords", "preset", "color",
+               "active", "sort_order", "project_path"}
+    fields = {k: v for k, v in patch.items() if k in allowed and v is not None}
+    if not fields:
+        return
+    conn = _connect()
+    try:
+        conn.execute(_QUESTS_DDL)
+        _ensure_quest_columns(conn)
+        sets = ", ".join(f"{k} = ?" for k in fields)
+        conn.execute(f"UPDATE quests SET {sets} WHERE id = ?",
+                     (*fields.values(), quest_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def delete_quest(quest_id: int):
+    """Removes the quest AND its history — the UI confirms before calling."""
+    conn = _connect()
+    try:
+        conn.execute(_QUESTS_DDL)
+        conn.execute(_QUEST_DAYS_DDL)
+        conn.execute('DELETE FROM quests WHERE id = ?', (quest_id,))
+        conn.execute('DELETE FROM quest_days WHERE quest_id = ?', (quest_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def add_quest_seconds(quest_id: int, seconds: int, day: str = None) -> int:
+    """Credit real, verified seconds to a quest. Returns the new day total."""
+    if seconds <= 0:
+        return get_quest_seconds(quest_id, day)
+    day = day or quest_day()
+    conn = _connect()
+    try:
+        conn.execute(_QUEST_DAYS_DDL)
+        conn.execute(
+            'INSERT INTO quest_days (quest_id, day, seconds) VALUES (?, ?, ?) '
+            'ON CONFLICT(quest_id, day) DO UPDATE SET seconds = seconds + excluded.seconds',
+            (quest_id, day, int(seconds)),
+        )
+        conn.commit()
+        row = conn.execute(
+            'SELECT seconds FROM quest_days WHERE quest_id = ? AND day = ?',
+            (quest_id, day),
+        ).fetchone()
+        return row[0] if row else 0
+    finally:
+        conn.close()
+
+
+def get_quest_seconds(quest_id: int, day: str = None) -> int:
+    day = day or quest_day()
+    conn = _connect()
+    try:
+        conn.execute(_QUEST_DAYS_DDL)
+        row = conn.execute(
+            'SELECT seconds FROM quest_days WHERE quest_id = ? AND day = ?',
+            (quest_id, day),
+        ).fetchone()
+        return row[0] if row else 0
+    finally:
+        conn.close()
+
+
+def complete_quest(quest_id: int, day: str = None, undo: bool = False):
+    day = day or quest_day()
+    stamp = None if undo else datetime.datetime.now().isoformat()
+    conn = _connect()
+    try:
+        conn.execute(_QUEST_DAYS_DDL)
+        conn.execute(
+            'INSERT INTO quest_days (quest_id, day, seconds, completed_at) '
+            'VALUES (?, ?, 0, ?) '
+            'ON CONFLICT(quest_id, day) DO UPDATE SET completed_at = excluded.completed_at',
+            (quest_id, day, stamp),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def add_unallocated_seconds(seconds: int, day: str = None) -> int:
+    """Screen time that matched no quest. Recorded, never judged."""
+    if seconds <= 0:
+        return 0
+    day = day or quest_day()
+    conn = _connect()
+    try:
+        conn.execute(_QUEST_OTHER_DDL)
+        conn.execute(
+            'INSERT INTO quest_unallocated (day, seconds) VALUES (?, ?) '
+            'ON CONFLICT(day) DO UPDATE SET seconds = seconds + excluded.seconds',
+            (day, int(seconds)),
+        )
+        conn.commit()
+        row = conn.execute(
+            'SELECT seconds FROM quest_unallocated WHERE day = ?', (day,)
+        ).fetchone()
+        return row[0] if row else 0
+    finally:
+        conn.close()
+
+
+def get_quest_board(day: str = None) -> dict:
+    """Everything the Quests tab needs for one day, in a single round-trip."""
+    day = day or quest_day()
+    conn = _connect()
+    try:
+        conn.execute(_QUESTS_DDL)
+        conn.execute(_QUEST_DAYS_DDL)
+        conn.execute(_QUEST_OTHER_DDL)
+        _ensure_quest_columns(conn)
+        rows = conn.execute(
+            'SELECT q.id, q.title, q.target_minutes, q.keywords, q.preset, q.color, '
+            '       q.sort_order, COALESCE(d.seconds, 0), d.completed_at, '
+            '       COALESCE(q.project_path, \'\') '
+            '  FROM quests q '
+            '  LEFT JOIN quest_days d ON d.quest_id = q.id AND d.day = ? '
+            ' WHERE q.active = 1 '
+            ' ORDER BY q.sort_order, q.id',
+            (day,),
+        ).fetchall()
+        other = conn.execute(
+            'SELECT seconds FROM quest_unallocated WHERE day = ?', (day,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    quests = []
+    for r in rows:
+        target_s = int(r[2]) * 60
+        done_s = int(r[7])
+        untimed = target_s <= 0
+        # An untimed quest is monitored, not measured: it accumulates time and
+        # is never "behind" or "complete" — there's no goal to be either of.
+        # A timed one keeps counting past its target, so overtime is real and
+        # visible rather than the bar just parking at 100%.
+        quests.append({
+            "id": r[0], "title": r[1], "target_minutes": r[2],
+            "keywords": r[3] or "", "preset": r[4], "color": r[5],
+            "sort_order": r[6], "project_path": r[9] or "",
+            "seconds": done_s,
+            "target_seconds": target_s,
+            "untimed": untimed,
+            "percent": 0 if untimed else min(100, round(done_s / target_s * 100)),
+            "remaining_seconds": 0 if untimed else max(0, target_s - done_s),
+            "overtime_seconds": 0 if untimed else max(0, done_s - target_s),
+            "completed": False if untimed else (bool(r[8]) or done_s >= target_s),
+            "completed_at": r[8],
+        })
+    return {
+        "day": day,
+        "quests": quests,
+        "unallocated_seconds": other[0] if other else 0,
+    }
+
+
+def get_quest_history(days: int = 30) -> list:
+    """[{day, quest_id, seconds, completed}] for the last N quest-days."""
+    start = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+    conn = _connect()
+    try:
+        conn.execute(_QUEST_DAYS_DDL)
+        rows = conn.execute(
+            'SELECT day, quest_id, seconds, completed_at FROM quest_days '
+            ' WHERE day >= ? ORDER BY day',
+            (start,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [{"day": r[0], "quest_id": r[1], "seconds": r[2],
+             "completed": bool(r[3])} for r in rows]
+
+
+def get_quest_streak(quest_id: int, target_minutes: int = None) -> int:
+    """Consecutive quest-days (ending yesterday or today) that hit the target.
+
+    Today counts only if it's already done — an unfinished today shouldn't
+    break a streak you might still complete this evening.
+
+    For an untimed quest there's no target, so "showing up at all" is the bar:
+    any day with time on it counts.
+    """
+    conn = _connect()
+    try:
+        conn.execute(_QUESTS_DDL)
+        conn.execute(_QUEST_DAYS_DDL)
+        if target_minutes is None:
+            row = conn.execute(
+                'SELECT target_minutes FROM quests WHERE id = ?', (quest_id,)
+            ).fetchone()
+            target_minutes = row[0] if row else 60
+        rows = conn.execute(
+            'SELECT day, seconds, completed_at FROM quest_days '
+            ' WHERE quest_id = ? ORDER BY day DESC LIMIT 400',
+            (quest_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    target_s = max(0, int(target_minutes or 0)) * 60
+    if target_s <= 0:
+        done = {r[0] for r in rows if int(r[1]) > 0 or bool(r[2])}
+    else:
+        done = {r[0] for r in rows if bool(r[2]) or int(r[1]) >= target_s}
+    if not done:
+        return 0
+
+    today = quest_day()
+    cursor = datetime.datetime.strptime(today, "%Y-%m-%d")
+    if today not in done:
+        cursor -= datetime.timedelta(days=1)   # today's still open — start at yesterday
+    streak = 0
+    while cursor.strftime("%Y-%m-%d") in done:
+        streak += 1
+        cursor -= datetime.timedelta(days=1)
+    return streak
+
+
 init_db()
 init_tasks()
+init_quests()

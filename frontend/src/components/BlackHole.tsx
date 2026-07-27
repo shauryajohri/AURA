@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AuraState } from "../types";
 import { useCoreStore } from "../stores/coreStore";
 import { usePlanetStore } from "../stores/planetStore";
+import { useSettingsStore } from "../stores/settingsStore";
 import { journey } from "./Home/ScrollController";
 import { MODELS } from "../data/models";
 
@@ -88,6 +89,18 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
   metaRef.current = metaMap;
   const setSlotsRef = useRef(setSlots);
   setSlotsRef.current = setSlots;
+
+  // Sanctuary settings (backend app_settings, synced by settingsStore).
+  // `density` sizes the particle arrays, so it has to be a real dependency of
+  // the setup effect — changing it rebuilds the scene. Rotation and labels are
+  // read per-frame through refs, so those apply instantly without a rebuild.
+  const density = useSettingsStore((st) => st.density);
+  const rotationMul = useSettingsStore((st) => st.rotationMul);
+  const showLabels = useSettingsStore((st) => st.showLabels);
+  const rotationMulRef = useRef(rotationMul);
+  rotationMulRef.current = rotationMul;
+  const showLabelsRef = useRef(showLabels);
+  showLabelsRef.current = showLabels;
   // live geometry + planet objects, for hit-testing and drag
   const planetsRef = useRef<Array<{ id: string; a: number; x: number; y: number; curR: number; def: number }>>([]);
   const geomRef = useRef({ cx: 0, cy: 0, rMax: 1, maxR: 1, minR: 0, mul: 1 });
@@ -156,8 +169,14 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
       for (const [c, w] of palette) { acc += w; if (x <= acc) return c; }
       return MAIN;
     };
+    // Particle counts scale with the Sanctuary "particles" setting — this is
+    // also the performance dial on a weaker GPU, so it's clamped rather than
+    // trusted blindly.
+    const dens = Math.max(0.1, Math.min(1.8, density));
+    const N = (base: number) => Math.max(4, Math.round(base * dens));
+
     const disk: DiskP[] = [];
-    for (let i = 0; i < 680; i++) {
+    for (let i = 0; i < N(680); i++) {
       const rn = 1.08 + Math.pow(Math.random(), 1.6) * 1.7; // cluster near the core, reach further out
       disk.push({
         a: Math.random() * Math.PI * 2,
@@ -171,7 +190,7 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
 
     // ---- Layer 04: flowing accretion strands (dense, like the reference) ---
     const strands: Strand[] = [];
-    for (let i = 0; i < 72; i++) {
+    for (let i = 0; i < N(72); i++) {
       const rn = 1.05 + Math.pow(Math.random(), 1.3) * 1.75;
       const roll = Math.random();
       const c =
@@ -195,14 +214,14 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
 
     // Information particles spiralling into the core
     const infall: Infall[] = [];
-    for (let i = 0; i < 36; i++) {
+    for (let i = 0; i < N(36); i++) {
       infall.push({ a: Math.random() * Math.PI * 2, r: 1.1 + Math.random() * 2.1, sp: 0.3 + Math.random() * 0.5 });
     }
 
     // ---- Nebula inflow clouds — matter being pulled in, stretched, absorbed
     interface Cloud { a: number; r: number; sz: number; c: string; al: number; wsp: number; }
     const cloudCols = [MAIN, INNER, BLUE, PINK, DEEP];
-    const clouds: Cloud[] = Array.from({ length: 14 }, (_, i) => ({
+    const clouds: Cloud[] = Array.from({ length: N(14) }, (_, i) => ({
       a: Math.random() * Math.PI * 2,
       r: 1.8 + Math.random() * 2.6,
       sz: 55 + Math.random() * 85,
@@ -213,7 +232,7 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
 
     // ---- Vortex streaks — the whole universe swirling around her ----------
     interface Vort { a: number; r: number; sp: number; sz: number; c: string; al: number; }
-    const vortex: Vort[] = Array.from({ length: 260 }, () => ({
+    const vortex: Vort[] = Array.from({ length: N(260) }, () => ({
       a: Math.random() * Math.PI * 2,
       r: 1.6 + Math.random() * 2.8,
       sp: 0.1 + Math.random() * 0.25,
@@ -435,7 +454,7 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
       last = now;
       const os: OrbState = (stateRef.current as OrbState) in SPIN ? (stateRef.current as OrbState) : "idle";
       const baseW = (Math.PI * 2) / 90; // spec: 90 s per revolution
-      const w = baseW * SPIN[os];
+      const w = baseW * SPIN[os] * rotationMulRef.current;
       rot = (rot + w * dt) % (Math.PI * 2);
       glow += (GLOW[os] * glowMulRef.current - glow) * Math.min(1, dt * 4);
       pulse += dt * (os === "speaking" ? 2.6 : 0.9);
@@ -819,6 +838,17 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
 
         // label — NAME in the planet's color, archetype under it (card style).
         // User-edited names/roles (Planets menu) take precedence.
+        // Hidden entirely when the Sanctuary "planet labels" setting is off,
+        // except for the ACTIVE marker, which is status rather than decoration.
+        if (!showLabelsRef.current) {
+          if (isAct) {
+            ctx.textAlign = "center";
+            ctx.font = `700 ${Math.max(7, 8 * s)}px "Exo 2", sans-serif`;
+            ctx.fillStyle = "rgba(70,232,138,0.95)";
+            ctx.fillText("● ACTIVE", x, y + pr + 13 * s);
+          }
+          continue;
+        }
         const meta = metaRef.current[pl.id] || {};
         const shownName = meta.name || pl.name;
         const shownRole = meta.role || pl.role;
@@ -841,7 +871,9 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
 
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [size]);
+    // `density` is a real dependency: particle arrays are sized once at setup,
+    // so changing it has to rebuild the scene rather than just re-render.
+  }, [size, density]);
 
   // Dragging the core is only possible in edit mode (Core menu → Edit).
   // Position persists on Save, so AURA is exactly where you left her on relaunch.

@@ -221,6 +221,13 @@ def extract_code_block(text: str) -> tuple[str, str, str]:
 
 
 def clean_response(text: str) -> str:
+    """Short-lane cleaner: strip leaks, THEN clamp to 2 sentences.
+
+    The clamp is why the long lanes (personal/explain/longform) used to skip
+    this entirely — and skipping it meant they got no leak filtering at all.
+    The leak-stripping now lives in sanitize_text() so both halves are usable
+    independently; this function is just "sanitize + clamp".
+    """
     text = re.sub(r"```[\s\S]*?```", "", text)
     text = re.sub(r"\*\*.*?\*\*", "", text)
     leak_patterns = [
@@ -230,6 +237,7 @@ def clean_response(text: str) -> str:
     for pattern in leak_patterns:
         text = re.sub(pattern, "", text, flags=re.IGNORECASE | re.MULTILINE)
     text = re.sub(r"^(User|Assistant|AURA|Bot)\s*:\s*", "", text, flags=re.IGNORECASE)
+    text = sanitize_text(text)
     text = text.strip().strip('"').strip("'").strip()
     text = re.sub(r"\s+", " ", text).strip()
     sentences = [s.strip() for s in text.split('.') if s.strip()]
@@ -509,32 +517,174 @@ _NO_THINK_ALOUD = (
 # "We need to obey the rules: 1-2 sentences, no emoji...". None of that should
 # ever reach the user. We buffer only the HEAD of the stream, peel the leak,
 # then stream the real answer live.
-_META_RE = __import__("re").compile(
+# Two tiers, and the split matters.
+#
+# STRONG markers are things a reply addressed TO the user can essentially never
+# contain — third-person talk about "the user", echoes of the system prompt's
+# own mode names and rules, explicit self-instruction. These are stripped
+# ANYWHERE in the response.
+#
+# WEAK markers ("we need to", "let me think") do show up in legitimate
+# explanations and code discussion, so they only strip a LEADING preamble.
+# Mixing the two is what let a full page of deliberation through: the leak
+# opened with "The user says:" — which the old pattern didn't cover, because it
+# listed `said`/`asks` but not `says` — so peeling stopped at sentence one and
+# every later "We need to respond in 1-2 sentences" streamed out untouched.
+_re_mod = __import__("re")
+
+_META_STRONG_RE = _re_mod.compile(
     r"(?i)("
-    # obeying-the-rules leaks
-    r"we need to|we must|we should|obey the rules|follow the rules|the rules?:|"
-    r"per the (?:rule|instruction)|according to the (?:rule|instruction)|"
-    r"max(?:imum)? \d+ sentence|\d+\s*-\s*\d+ sentences|two sentences|no emoji|"
-    r"no fluff|answer the question|sentence [12]\b|as an ai|"
-    # talking ABOUT the user in third person (a dead giveaway of leaked thinking)
-    r"the user (?:asks|wants|is asking|said|wrote|mentioned|means|typed|is trying|has)|"
-    r"the user'?s (?:message|question|query|request|input|typo|last)|"
+    # third-person narration about the person being spoken to
+    r"\bthe user\b|\buser'?s (?:message|question|query|request|input|typo|last)\b|"
+    r"\bthey (?:want|said|asked|mean|are asking|likely)\b|\blikely they\b|"
+    # echoing the system prompt back
+    r"teaching mode|personal mode|workspace mode|coding mode|override all|"
+    r"\brule \d+\b|according to (?:the )?rule|per the (?:rule|instruction)|"
+    r"banned words?|obey the rules|follow the rules|\bthe rules?:|"
+    r"max(?:imum)? \d+ sentence|\d+\s*-\s*\d+ sentences|two sentences|"
+    # any sentence that talks about its own sentence budget is self-instruction
+    r"(?:need|keep it to|limit|within|use|only)\s+\d+\s+sentences?\b|"
+    r"\d+\s+sentences?\s+(?:max|only|or less|at most)\b|"
+    r"no emoji|no (?:extra |added )?fluff|brevity rules?|"
+    # explicit planning / self-instruction about the answer
+    r"we (?:must|should|need to|can|have to|are) not\b|"
+    r"we need to (?:respond|answer|produce|give|write|say|follow|avoid|infer)|"
+    r"we (?:must|should) (?:not |avoid |produce |respond |answer |follow )|"
+    r"thus we (?:need|must|should)|so we (?:need|must) to|"
+    r"our (?:response|reply|answer) (?:should|must|needs)|"
+    # deliberating about HOW to answer — "Should we ask clarifying?",
+    # "We have enough info to give suggestions.", "Provide concise answer:"
+    r"should we (?:ask|say|give|provide|mention|clarify|include|add|offer|answer)|"
+    r"we have enough (?:info|context|information|detail)|"
+    r"ask (?:a )?clarifying|clarifying question|"
+    r"(?:provide|give|write|produce|output|keep|make) (?:a |the )?"
+    r"(?:concise|short|brief|clear|direct|final|good) (?:answer|response|reply|version|explanation)|"
+    r"as an ai|chain[- ]of[- ]thought"
+    r")"
+)
+
+_META_WEAK_RE = _re_mod.compile(
+    r"(?i)("
+    r"we need to|we must|we should|answer the question|sentence [12]\b|"
     r"they(?:'ve| have| are|'re| were) (?:been )?(?:discussing|talking about|asking|working on|building|mentioned)|"
-    # narrating the meta-task / reading the transcript
     r"looking at (?:the |our )?(?:conversation|chat|history|context|previous message|screen)|"
     r"(?:the |our )?conversation history|based on (?:the |our )?(?:context|conversation|history|chat|prior|previous|above|earlier)|"
     r"(?:starts?|starting) with a typo|^\W*with a typo\b|there'?s a typo in (?:the|their|your) (?:message|question|query|input|last|text)|"
     r"let me (?:think|see|check|refine|look|start)\b|the question is\b|to answer (?:this|the|their)|"
-    # first-person planning of the answer
     r"i (?:need|should|must|'ll|will) (?:to )?(?:obey|answer|give|respond|follow|refine|provide|note that)|"
     r"let'?s (?:obey|answer|start)\b|first,? i (?:need|should|must)"
     r")"
 )
-_SENT_SPLIT = __import__("re").compile(r"([.!?\n]+)")
+
+# Kept for backwards compatibility — anything that used _META_RE gets both.
+_META_RE = _re_mod.compile(
+    "(?i)(" + _META_STRONG_RE.pattern[5:-1] + "|" + _META_WEAK_RE.pattern[5:-1] + ")"
+)
+_SENT_SPLIT = _re_mod.compile(r"([.!?\n]+)")
 
 
 def _is_meta_sentence(s: str) -> bool:
-    return bool(_META_RE.search(s))
+    """Leading-preamble test: strong OR weak markers both count here."""
+    return bool(_META_STRONG_RE.search(s) or _META_WEAK_RE.search(s))
+
+
+def _is_strong_meta(s: str) -> bool:
+    """Anywhere-in-the-text test: only unambiguous leaks."""
+    return bool(_META_STRONG_RE.search(s))
+
+
+def _split_sentences(text: str) -> list[str]:
+    parts = _SENT_SPLIT.split(text)
+    out, cur = [], ""
+    for p in parts:
+        cur += p
+        if _SENT_SPLIT.fullmatch(p):
+            out.append(cur)
+            cur = ""
+    if cur.strip():
+        out.append(cur)
+    return out
+
+
+def _echoes_query(sentence: str, query: str, min_run: int = 34) -> bool:
+    """True if `sentence` contains a long verbatim run from the user's message.
+
+    Restating the prompt back is a reliable tell of leaked thinking — the real
+    leak opened with the tail of the user's own question plus a stray closing
+    quote. The run has to be long (34+ chars) so that normally echoing a short
+    phrase back ("your N3 target") is never mistaken for it.
+    """
+    if not query or len(query) < min_run:
+        return False
+    import re
+    norm = lambda s: re.sub(r"\s+", " ", s.lower()).strip()
+    s, q = norm(sentence), norm(query)
+    if len(s) < min_run:
+        return False
+    # Slide a window of min_run chars from the query across the sentence.
+    for i in range(0, len(q) - min_run + 1):
+        if q[i:i + min_run] in s:
+            return True
+    return False
+
+
+def sanitize_text(text: str, query: str = "") -> str:
+    """Full-response reasoning-leak filter.
+
+    Unlike _peel_head (which only trims a preamble so streaming can start),
+    this walks the WHOLE response: it drops a leading run of any meta
+    sentences, then continues removing strongly-meta sentences wherever they
+    appear. That second half is the part that was missing — a leak whose first
+    sentence looked innocent used to pass through entirely.
+
+    Pass `query` (the user's own message) when you have it — sentences that
+    quote it back verbatim are deliberation, not answer.
+
+    Returns "" when everything was deliberation, which is a real case: when the
+    model spends its whole token budget thinking, there is no answer to show
+    and the caller should fall back rather than print the monologue.
+    """
+    if not text:
+        return ""
+    import re
+    text = re.sub(r"(?is)<think>.*?</think>", "", text)
+    text = re.sub(r"(?is)<(thinking|reasoning|scratchpad)>.*?</\1>", "", text)
+    # An unterminated opener means the model was cut off mid-thought.
+    ti = text.lower().find("<think>")
+    if ti != -1:
+        text = text[:ti]
+
+    sentences = [s for s in _split_sentences(text) if s.strip()]
+    if not sentences:
+        return ""
+
+    # A sentence that quotes the user's message back counts as strongly meta
+    # for the rest of this pass.
+    def _strong(s: str) -> bool:
+        return _is_strong_meta(s) or _echoes_query(s, query)
+
+    # 1. Peel the leading run of deliberation.
+    idx = 0
+    while idx < len(sentences) and (_is_meta_sentence(sentences[idx]) or _strong(sentences[idx])):
+        idx += 1
+    rest = sentences[idx:]
+    if not rest:
+        return ""
+
+    # 2. Density check on WHAT'S LEFT — deliberately after the peel, not
+    #    before it. Keyword matching alone can't win this: a monologue also
+    #    contains ordinary-looking sentences ("That's a statement about what
+    #    they're doing") that match nothing, and chasing each new phrasing is a
+    #    losing game. But a real reply is never MOSTLY meta. Running this on
+    #    the raw text would punish the common good case — a short preamble
+    #    followed by a genuine answer — so it only judges the remainder.
+    strong = sum(1 for s in rest if _strong(s))
+    if len(rest) >= 2 and strong / len(rest) >= 0.5:
+        return ""
+
+    # 3. Drop any remaining strongly-meta sentences wherever they sit.
+    kept = [s for s in rest if not _strong(s)]
+    return re.sub(r"\s+", " ", "".join(kept)).strip()
 
 
 def _peel_head(head: str, final: bool = False):
@@ -734,11 +884,19 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
         raw = data["choices"][0]["message"]["content"]
         if is_coding:
             print(f"[AURA CODE RAW]\n{raw}\n[END RAW]")
-        if is_personal:
-            return raw.strip()   # personal talk keeps its length (guard caps at 4)
-        if is_explain or is_longform:
-            return raw.strip()   # full-length lanes — never clamp to 2 sentences
-        return raw if is_coding else clean_response(raw)
+            return raw           # code is returned verbatim — never filtered
+        # Every non-code lane gets the reasoning filter. These three used to
+        # return raw.strip() because clean_response fused leak-stripping with
+        # the 2-sentence clamp, so keeping the filter meant losing the length.
+        # sanitize_text separates those concerns, so the long lanes can be
+        # filtered without being truncated.
+        if is_personal or is_explain or is_longform:
+            cleaned = sanitize_text(raw)
+            if not cleaned:
+                print("[AURA] response was entirely reasoning — discarded")
+                return "THINKING_LEAK"
+            return cleaned
+        return clean_response(raw)
     except Exception as e:
         print(f"[AURA] {provider} error: {e}")
         return "CONNECTION_ERROR"

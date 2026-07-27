@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuraSocket } from "./hooks/useAuraSocket";
 import { useLocalStorage } from "./hooks/useLocalStorage";
+import { useSettingsStore } from "./stores/settingsStore";
 import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
 import Stage from "./components/Stage";
@@ -18,17 +19,18 @@ import ModelsView from "./views/ModelsView";
 import MemoryView from "./views/MemoryView";
 import SkillsView from "./views/SkillsView";
 import SettingsView from "./views/SettingsView";
+import IntelligenceView from "./views/IntelligenceView";
+import QuestsView from "./views/QuestsView";
+import TasksView from "./views/TasksView";
 import PlaceholderView from "./views/PlaceholderView";
 
 const SIDEBAR_W = 244;
 
-const TITLES: Record<string, string> = {
-  quests: "Quests",
-  analytics: "Analytics",
-};
+const TITLES: Record<string, string> = {};
 
 export default function App() {
-  const { status, auraState, presence, mode, activeModelId, turns, send } = useAuraSocket();
+  const { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, send } =
+    useAuraSocket();
   const [sidebarOpen, setSidebarOpen] = useLocalStorage<boolean>("aura.sidebarOpen", true);
   const [chatOpen, setChatOpen] = useLocalStorage<boolean>("aura.chatOpen", true);
   const [chatWidth, setChatWidth] = useLocalStorage<number>("aura.chatWidth", 460);
@@ -37,6 +39,12 @@ export default function App() {
   const handleVideoFail = useCallback(() => setVideoOk(false), []);
   const [ambientOk, setAmbientOk] = useState(true);
   const [transOk, setTransOk] = useState(true);
+
+  // Pull the saved appearance/voice settings from the brain once at startup
+  // and push them into the visual stores. Without this the Sanctuary sliders
+  // persist to the backend but never reach the black hole or the planets.
+  const loadSettings = useSettingsStore((s) => s.load);
+  useEffect(() => { loadSettings(); }, [loadSettings]);
 
   // React state only flips at the very end of the journey (card reveal).
   const [entered, setEntered] = useState(false);
@@ -238,12 +246,16 @@ export default function App() {
   const renderCenterBody = () => {
     // Views that no longer exist (tasks/inventory/workspace) could still be
     // sitting in localStorage from an earlier run — send those home.
-    if (!["home", "quests", "skills", "models", "memory", "analytics", "settings"].includes(view)) {
+    if (!["home", "tasks", "quests", "skills", "models", "memory", "analytics", "settings"].includes(view)) {
       return <Stage state={auraState} activeModelId={activeModelId} />;
     }
     switch (view) {
       case "home":
         return <Stage state={auraState} activeModelId={activeModelId} />;
+      case "tasks":
+        return <TasksView />;
+      case "quests":
+        return <QuestsView event={questEvent} />;
       case "skills":
         return <SkillsView />;
       case "models":
@@ -252,6 +264,10 @@ export default function App() {
         return <MemoryView />;
       case "settings":
         return <SettingsView />;
+      case "analytics":
+        // "analytics" is the historical id (it's what's already sitting in
+        // localStorage); the panel behind it is now V3 Intelligence.
+        return <IntelligenceView events={v3Events} />;
       default:
         return <PlaceholderView title={TITLES[view] || view} />;
     }

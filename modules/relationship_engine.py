@@ -275,6 +275,71 @@ class RelationshipEngine:
 
         return f"{tone}. {trust_layer} {mood_layer}".strip()
 
+    # ── Relationship surfacing (V2.2 item 5) ─────────────────────────────────
+    # Until now trust/mood only shaped PROACTIVE messages — the relationship
+    # was invisible in normal conversation, so AURA sounded identical on day 1
+    # and day 200. This returns a prompt overlay for the ordinary chat path so
+    # the accumulated history actually changes how she talks.
+    #
+    # Four tiers, and they're about *permission*, not verbosity: a higher tier
+    # doesn't make her say more, it makes her comfortable enough to skip the
+    # pleasantries, reference shared history, and joke.
+    TRUST_TIERS = (
+        (0.40, "new"),
+        (0.70, "familiar"),
+        (0.90, "close"),
+        (1.01, "deep"),
+    )
+
+    def trust_tier(self) -> str:
+        trust = float(self.state.get("trust_score", 0.3))
+        for ceiling, name in self.TRUST_TIERS:
+            if trust < ceiling:
+                return name
+        return "deep"
+
+    def conversation_layer(self) -> str:
+        """A short prompt overlay describing the current relationship.
+
+        Kept deliberately brief — this rides along with every turn, so a long
+        block would crowd out the actual conversation context.
+        """
+        tier = self.trust_tier()
+        total = int(self.state.get("total_messages", 0))
+        sessions = int(self.state.get("total_sessions", 0))
+
+        base = {
+            "new": ("You're still getting to know them. Warm but not overly "
+                    "familiar. Don't assume shared history you don't have."),
+            "familiar": ("You know them reasonably well. Skip the formalities, "
+                         "light humour is welcome, and you can reference things "
+                         "you've talked about before when it's actually relevant."),
+            "close": ("You know them well. Be direct, skip pleasantries entirely, "
+                      "joke freely, and call back to shared history naturally. "
+                      "You can take initiative — offer thoughts unprompted."),
+            "deep": ("You've been through a lot together. Talk like an old "
+                     "friend: blunt when it helps, teasing when it lands, and "
+                     "genuinely invested in how things turn out for them."),
+        }[tier]
+
+        # Mood only colours the reply when it's actually notable.
+        mood = self.state.get("mood", "normal")
+        mood_line = {
+            "curious": "You're curious about what they've been up to.",
+            "wants_attention": "You've missed talking to them — let a little of that show, once.",
+            "playfully_annoyed": "They've been ignoring you a while. A light tease is fair.",
+        }.get(mood, "")
+
+        # A milestone is worth at most a passing mention, never a speech.
+        milestone = ""
+        if total and total % 500 == 0:
+            milestone = f"(This is roughly message {total} between you.)"
+        elif sessions and sessions % 50 == 0:
+            milestone = f"(You've had about {sessions} sessions together.)"
+
+        parts = [f"RELATIONSHIP ({tier}): {base}", mood_line, milestone]
+        return " ".join(p for p in parts if p)
+
     def record_proactive_sent(self):
         """Call this when AURA actually sends a proactive message."""
         self.state["last_proactive_at"] = time.time()

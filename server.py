@@ -74,6 +74,7 @@ async def _lifespan(app: FastAPI):
     global MAIN_LOOP
     MAIN_LOOP = asyncio.get_running_loop()
     _init_director()
+    _init_v3()
     _start_auto_chat()
     yield
 
@@ -166,6 +167,30 @@ def _start_auto_chat() -> None:
     print("[AURA bridge] auto-chat loops started")
 
 
+def _init_v3() -> None:
+    """Point the V3 engines' announcement sink at the websocket.
+
+    The bridge is deliberately transport-agnostic — it just calls whatever
+    sink it's given — so this is the only place that knows V3 output reaches
+    the UI as a websocket frame.
+    """
+    try:
+        from core import v3_bridge
+        v3_bridge.set_sink(lambda payload: broadcast({"type": "v3", "payload": payload}))
+        # Boot = the start of this coding session, so flow/fatigue clocks and
+        # the session summary measure from now rather than from the epoch.
+        v3_bridge.start_session()
+        print("[AURA bridge] V3 intelligence sink attached")
+    except Exception:  # noqa: BLE001
+        traceback.print_exc()
+    try:
+        from core import quests
+        quests.set_sink(lambda payload: broadcast({"type": "quest", "payload": payload}))
+        print("[AURA bridge] Quest sink attached")
+    except Exception:  # noqa: BLE001
+        traceback.print_exc()
+
+
 def _init_director() -> None:
     global DIRECTOR
     if DIRECTOR is not None:
@@ -192,12 +217,13 @@ async def health() -> dict[str, str]:
 # REST API (sidebar views)
 # ============================================================================
 def _task_dict(row: Any) -> dict[str, Any]:
-    # tasks columns: id, title, priority, status, created_at, done_at
+    # tasks columns: id, title, priority, status, created_at, done_at, bucket
     r = list(row)
     return {
         "id": r[0], "title": r[1], "priority": r[2],
         "status": r[3], "created_at": r[4],
         "done_at": r[5] if len(r) > 5 else None,
+        "bucket": (r[6] if len(r) > 6 else "now") or "now",
     }
 
 
@@ -222,8 +248,50 @@ async def api_add_task(req: Request) -> dict[str, Any]:
     title = (body.get("title") or "").strip()
     if not title:
         return {"ok": False, "error": "title required"}
-    tid = store.add_task(title, body.get("priority", "medium"))
+    tid = store.add_task(title, body.get("priority", "medium"),
+                         body.get("bucket", "now"))
     return {"ok": True, "id": tid}
+
+
+@app.post("/api/tasks/{task_id}/bucket")
+async def api_task_bucket(task_id: int, req: Request) -> dict[str, Any]:
+    """Move a task between Now and Later."""
+    from memory import store
+    body = await req.json()
+    store.set_task_bucket(task_id, str(body.get("bucket", "now")))
+    return {"ok": True}
+
+
+@app.post("/api/tasks/{task_id}/promote")
+async def api_promote_task(task_id: int, req: Request) -> dict[str, Any]:
+    """Turn a task into a quest for today.
+
+    Tasks are the backlog; quests are what you've committed to actually doing
+    today with AURA watching. Promoting is the bridge between the two — the
+    task is marked done because it has become the quest.
+    """
+    from core import quests
+    from memory import store
+    body = await req.json() if await req.body() else {}
+    row = next((t for t in store.get_tasks() if t[0] == task_id), None)
+    if row is None:
+        return {"ok": False, "error": "no such task"}
+
+    # The task title is already an explicit, deliberate name — use it VERBATIM.
+    # Running it through parse_quest would strip filler words and turn
+    # "Finish the quest matcher" into "Finish Matcher". The parser is for
+    # free-typed input; here we only borrow its preset guess.
+    from core.quest_presets import PRESETS, guess_preset
+    title = row[1].strip()
+    minutes = max(0, int(body.get("target_minutes") or 0))
+    preset = guess_preset(title)
+    qid = store.add_quest(
+        title, minutes, "", preset,
+        PRESETS.get(preset, PRESETS["custom"])["color"],
+    )
+    store.complete_task(task_id)
+    return {"ok": True, "quest_id": qid, "title": title,
+            "target_minutes": minutes}
 
 
 @app.post("/api/tasks/{task_id}/complete")
@@ -422,6 +490,168 @@ async def api_set_nature(req: Request) -> dict[str, Any]:
     body = await req.json()
     ok = set_nature(str(body.get("nature", "")))
     return {"ok": ok, "current": get_nature()}
+
+
+# ============================================================================
+# Quests — daily commitments AURA verifies from the screen
+# ============================================================================
+@app.get("/api/quests")
+async def api_quests() -> dict[str, Any]:
+    """Today's board: progress, completion, pressure, unallocated time."""
+    from core import quests
+    return quests.board()
+
+
+@app.post("/api/quests")
+async def api_add_quest(req: Request) -> dict[str, Any]:
+    """Create a quest. Accepts either structured fields or plain language
+    ("japanese 2 hrs"), because that's how shaurya actually phrases them."""
+    from core import quests
+    from core.quest_presets import PRESETS
+    from memory import store
+    body = await req.json()
+
+    text = (body.get("text") or "").strip()
+    if text and not body.get("title"):
+        return {"ok": True, "quest": quests.create_from_text(text)}
+
+    title = (body.get("title") or "").strip()
+    if not title:
+        return {"ok": False, "error": "title required"}
+    preset = body.get("preset") or "custom"
+    qid = store.add_quest(
+        title,
+        # 0 / omitted = untimed: monitored, with no goal to hit.
+        int(body.get("target_minutes") or 0),
+        (body.get("keywords") or "").strip(),
+        preset,
+        body.get("color") or PRESETS.get(preset, PRESETS["custom"])["color"],
+        (body.get("project_path") or "").strip(),
+    )
+    return {"ok": True, "id": qid}
+
+
+@app.get("/api/quests/{quest_id}/terms")
+async def api_quest_terms(quest_id: int) -> dict[str, Any]:
+    """Exactly what AURA watches for on this quest.
+
+    The honest diagnostic: when a quest isn't filling up, this shows whether
+    the problem is a missing keyword or something else, instead of leaving the
+    matcher a black box.
+    """
+    from core import quests
+    from memory import store
+    q = next((x for x in store.get_quest_board()["quests"] if x["id"] == quest_id), None)
+    if q is None:
+        return {"ok": False, "error": "no such quest"}
+    terms, anchors = quests.quest_terms(q)
+    return {
+        "ok": True,
+        "anchors": sorted(anchors),
+        "supporting": sorted(set(terms) - anchors),
+        "project_path": q.get("project_path", ""),
+        "harvested": quests.project_terms(q.get("project_path", "")),
+    }
+
+
+@app.put("/api/quests/{quest_id}")
+async def api_update_quest(quest_id: int, req: Request) -> dict[str, Any]:
+    from memory import store
+    body = await req.json()
+    store.update_quest(quest_id, **body)
+    return {"ok": True}
+
+
+@app.delete("/api/quests/{quest_id}")
+async def api_delete_quest(quest_id: int) -> dict[str, Any]:
+    from memory import store
+    store.delete_quest(quest_id)
+    return {"ok": True}
+
+
+@app.post("/api/quests/{quest_id}/complete")
+async def api_complete_quest(quest_id: int, req: Request) -> dict[str, Any]:
+    """Manual override — for the days the watcher couldn't see the work
+    (a textbook, a whiteboard, time away from the machine)."""
+    from memory import store
+    body = await req.json() if await req.body() else {}
+    store.complete_quest(quest_id, undo=bool(body.get("undo", False)))
+    return {"ok": True}
+
+
+@app.post("/api/quests/{quest_id}/adjust")
+async def api_adjust_quest(quest_id: int, req: Request) -> dict[str, Any]:
+    """Add or remove minutes by hand, same reason as manual completion."""
+    from memory import store
+    body = await req.json()
+    store.add_quest_seconds(quest_id, int(body.get("minutes", 0)) * 60)
+    return {"ok": True, "seconds": store.get_quest_seconds(quest_id)}
+
+
+@app.get("/api/quests/history")
+async def api_quest_history(days: int = 30) -> dict[str, Any]:
+    from memory import store
+    rows = store.get_quest_history(days)
+    streaks = {
+        q[0]: store.get_quest_streak(q[0], q[2]) for q in store.get_quests()
+    }
+    return {"history": rows, "streaks": streaks}
+
+
+@app.get("/api/quests/presets")
+async def api_quest_presets() -> dict[str, Any]:
+    from core.quest_presets import preset_list
+    return {"presets": preset_list()}
+
+
+# ============================================================================
+# V3 intelligence — error knowledge base + developer session state
+# ============================================================================
+# Both engines live in modules/ and know nothing about HTTP; core/v3_bridge
+# owns the glue. These routes are thin on purpose.
+@app.get("/api/v3/snapshot")
+async def api_v3_snapshot() -> dict[str, Any]:
+    """Everything the Intelligence panel needs in one round-trip."""
+    from core import v3_bridge
+    return v3_bridge.snapshot()
+
+
+@app.get("/api/v3/session")
+async def api_v3_session() -> dict[str, Any]:
+    from core import v3_bridge
+    return {"session": v3_bridge.session()}
+
+
+@app.get("/api/v3/mistakes")
+async def api_v3_mistakes() -> dict[str, Any]:
+    from core import v3_bridge
+    return {"mistakes": v3_bridge.mistakes_today(), "trends": v3_bridge.trends()}
+
+
+@app.post("/api/v3/explain")
+async def api_v3_explain(req: Request) -> dict[str, Any]:
+    """Classify an arbitrary error blob.
+
+    `record` defaults to False so the Domain code panel can preview a
+    classification without inflating today's mistake count.
+    """
+    from core import v3_bridge
+    body = await req.json()
+    return v3_bridge.explain_error(
+        str(body.get("text", "")),
+        language=body.get("language"),
+        record=bool(body.get("record", False)),
+    )
+
+
+@app.post("/api/v3/build")
+async def api_v3_build(req: Request) -> dict[str, Any]:
+    """Report a build/test result — the Domain terminal calls this so runs
+    outside the screen watcher still feed momentum and confidence."""
+    from core import v3_bridge
+    body = await req.json()
+    line = v3_bridge.report_build(bool(body.get("success", False)))
+    return {"ok": True, "spoken": line, "session": v3_bridge.session()}
 
 
 @app.get("/api/status")

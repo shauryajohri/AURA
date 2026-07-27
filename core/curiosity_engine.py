@@ -320,6 +320,16 @@ def _should_think() -> bool:
     if last_msg_time and (now - last_msg_time) < USER_SILENCE_REQUIRED:
         return False
 
+    # Silence toward AURA is not idleness. Curiosity is by definition an
+    # unprompted interruption, so it waits until the work stretch is over —
+    # the thought keeps just as well until then.
+    try:
+        from core.engagement import is_working
+        if is_working():
+            return False
+    except Exception:
+        pass
+
     if (now - _last_curiosity_time) < CURIOSITY_COOLDOWN:
         return False
 

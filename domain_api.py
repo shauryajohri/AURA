@@ -154,6 +154,58 @@ async def github_status(url: str, force: bool = False) -> dict[str, Any]:
 
 
 # ============================================================================
+# Local git write operations (commit / push)
+# ============================================================================
+# The safety rules live in core.git_ops, not here — these routes just pass
+# the caller's explicit flags through, so the HTTP surface can't be used to
+# sidestep a guard the Qt panel respects.
+@router.get("/api/domain/git/preview")
+async def git_preview(root: str) -> dict[str, Any]:
+    """Read-only: what would be committed and pushed. Always call this first."""
+    from core import git_ops
+    return git_ops.preview(root)
+
+
+@router.post("/api/domain/git/commit")
+async def git_commit(req: Request) -> dict[str, Any]:
+    from core import git_ops
+    b = await req.json()
+    return git_ops.commit(
+        str(b.get("root", "")),
+        str(b.get("message", "")),
+        confirm=bool(b.get("confirm", False)),
+        paths=b.get("paths") or None,
+        allow_oversized=bool(b.get("allow_oversized", False)),
+    )
+
+
+@router.post("/api/domain/git/push")
+async def git_push(req: Request) -> dict[str, Any]:
+    from core import git_ops
+    b = await req.json()
+    return git_ops.push(
+        str(b.get("root", "")),
+        confirm=bool(b.get("confirm", False)),
+        allow_protected=bool(b.get("allow_protected", False)),
+        remote=str(b.get("remote", "origin")),
+    )
+
+
+@router.post("/api/domain/git/publish")
+async def git_publish(req: Request) -> dict[str, Any]:
+    """Commit and push in one call — the Code Review panel's button."""
+    from core import git_ops
+    b = await req.json()
+    return git_ops.commit_and_push(
+        str(b.get("root", "")),
+        str(b.get("message", "")),
+        confirm=bool(b.get("confirm", False)),
+        allow_protected=bool(b.get("allow_protected", False)),
+        allow_oversized=bool(b.get("allow_oversized", False)),
+    )
+
+
+# ============================================================================
 # Connectors (OAuth)
 # ============================================================================
 @router.get("/api/connectors")

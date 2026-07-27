@@ -68,6 +68,16 @@ def mark_user_active(text: str = ""):
             capture_facts(text)
     except Exception:
         pass
+    # V3 developer state: a message is a heartbeat. It keeps the session's
+    # activity clock alive so the flow/idle detection reflects real presence
+    # rather than only screen-watcher samples.
+    try:
+        from core import v3_bridge
+        v3_bridge.note_activity()
+    except Exception:
+        pass
+
+
 def update_context(ctx: dict):
     global _last_context
     _last_context = ctx
@@ -98,6 +108,19 @@ def speak_response(text: str, mode: str = "CHAT"):
 
 def guard_output(response: str, max_sentences: int = 2) -> str:
     response = response.strip().strip('"').strip("'").strip()
+    # Last line of defence before anything is shown or spoken: strip any
+    # chain-of-thought that survived the router. If nothing survives, the whole
+    # response was deliberation — say so plainly rather than falling back to
+    # the raw text, which would print the exact monologue this guards against.
+    try:
+        from core.ai_router import sanitize_text
+        _deleaked = sanitize_text(response)
+        if not _deleaked:
+            print("[AURA] guard_output: response was all reasoning — discarded")
+            return "Lost my train of thought there — say that again?"
+        response = _deleaked
+    except Exception:
+        pass
     # Additional pattern catches for stubborn leftovers
     if any(x in response for x in ["User is", "User asks", "AURA:", "Current app"]):
         print("[AURA] guard_output: stripping leaked context")
@@ -291,6 +314,95 @@ def _facts_block() -> str:
     return f"What you know about them (use naturally, don't recite):\n{bullets}"
 
 
+# ── V3 error intelligence hand-off ─────────────────────────────────────────
+# scan_user_text() runs at the top of a turn (it needs the raw query); the
+# prompt is assembled later. This one-shot slot carries the classification
+# between the two without threading a new argument through every call site.
+_v3_hint: dict | None = None
+
+
+def _set_v3_hint(hint: dict | None) -> None:
+    global _v3_hint
+    _v3_hint = hint
+
+
+def _consume_v3_hint() -> dict | None:
+    """Read and clear — a stale hint must never leak into the next turn."""
+    global _v3_hint
+    hint, _v3_hint = _v3_hint, None
+    return hint
+
+
+_QUEST_STATUS_CUES = (
+    "quest", "quests", "my board", "daily board",
+)
+_QUEST_ADD_CUES = ("add quest", "new quest", "make a quest", "create quest",
+                   "set a quest", "add a quest")
+
+
+def handle_quest_command(query: str) -> str | None:
+    """Plain-language quest control from chat.
+
+    Two shapes, because these are the two things worth doing without opening
+    the tab: "add quest japanese 2 hrs" and "how are my quests".
+    Returns None when the message isn't about quests, so the normal LLM path
+    continues untouched.
+    """
+    q = (query or "").strip()
+    low = q.lower()
+    if not any(cue in low for cue in _QUEST_STATUS_CUES):
+        return None
+    try:
+        from core import quests
+        # Creation: strip the command words, hand the rest to the parser.
+        for cue in _QUEST_ADD_CUES:
+            if cue in low:
+                spec_text = q[low.index(cue) + len(cue):].strip(" :-–—")
+                if not spec_text:
+                    return "What's the quest, and how long? Something like \"japanese 2 hrs\"."
+                created = quests.create_from_text(spec_text)
+                mins = created["target_minutes"]
+                if not mins:
+                    return (f"{created['title']} added — no target, I'll just "
+                            "track how long you spend on it.")
+                pretty = f"{mins // 60}h" if mins % 60 == 0 else f"{mins}m"
+                return (f"{created['title']} added — {pretty} a day. "
+                        "I'll count it when I see you doing it.")
+        # Otherwise it's a status question — but only if it's about THEIR
+        # board. "what is a quest in gaming" mentions quests and is not a
+        # status check; it should reach the model like any other question.
+        owned = any(p in low for p in (
+            "my quest", "my board", "daily board", "quest board",
+            "quests today", "today's quests", "todays quests",
+            "quests left", "quests done", "quests remaining",
+            "on my quests", "quest progress", "quest status",
+        ))
+        if owned:
+            return quests.summary_line()
+    except Exception as e:  # noqa: BLE001
+        print(f"[AURA] quest command failed: {e}")
+    return None
+
+
+def scan_for_errors(query: str) -> dict | None:
+    """Run the user's message past the V3 knowledge base.
+
+    Returns the classification (and arms the prompt hint) when it recognised
+    an error, else None. Deliberately silent on failure: the intelligence
+    layer must never be able to break the chat path.
+    """
+    try:
+        from core import v3_bridge
+        hint = v3_bridge.scan_user_text(query)
+    except Exception as e:  # noqa: BLE001
+        print(f"[AURA] V3 scan skipped: {e}")
+        return None
+    if hint:
+        print(f"[AURA] V3 recognised: {hint.get('label')} ({hint.get('level')})")
+        _set_v3_hint(hint)
+    return hint
+
+
 def build_context_prompt(query: str, intent: str, thought_context: str, comeback: str | None = None) -> str:
     history_text = _recent_turns(8)
     facts_text = _facts_block()
@@ -349,6 +461,53 @@ def build_context_prompt(query: str, intent: str, thought_context: str, comeback
             "first — one line, e.g. \"Want me to write that?\")"
         )
 
+    # Work-session debrief: they just came back from a real stretch of work.
+    # AURA watched it happen, so she should say what she saw rather than open
+    # with "you've been quiet". One-shot — consumed when the stretch is taken.
+    work_section = ""
+    if intent in {"PERSONAL", "CASUAL", "RECALL"}:
+        try:
+            from core.engagement import debrief_hint
+            hint = debrief_hint()
+            if hint:
+                work_section = f"\n{hint}"
+        except Exception:
+            pass
+
+    # Relationship surfacing (V2.2 item 5): trust and mood have been tracked
+    # since the beginning but only ever reached PROACTIVE messages, so normal
+    # conversation sounded the same on day 1 and day 200. Personal/casual talk
+    # is where the relationship should show; task intents stay task-shaped.
+    relationship_section = ""
+    if intent in {"PERSONAL", "CASUAL", "RECALL"}:
+        try:
+            from modules.relationship_engine import get_engine as _get_re
+            layer = _get_re().conversation_layer()
+            if layer:
+                relationship_section = f"\n({layer})"
+        except Exception:
+            pass
+
+    # V3 error intelligence: if the user pasted something the knowledge base
+    # recognised, the classifier already knows what it is and how serious it
+    # is. Hand that to the model as CONTEXT rather than as the answer — the
+    # KB line is a fast local read, not a replacement for actually helping.
+    v3_section = ""
+    hint = _consume_v3_hint()
+    if hint:
+        seriousness = ("This is serious — explain it properly, no jokes."
+                       if hint.get("serious")
+                       else "This is a small one — keep it light and quick.")
+        repeat = ""
+        if hint.get("repeat_count", 0) > 1:
+            repeat = (f" They've hit this same error {hint['repeat_count']} times "
+                      "today; you may acknowledge the pattern once, briefly.")
+        v3_section = (
+            f"\n(Error recognised locally: {hint.get('label')} "
+            f"[{hint.get('category')}/{hint.get('level')}]. "
+            f"{hint.get('explanation')} {seriousness}{repeat})"
+        )
+
     # Returning after AURA checked in on them → resume the thread in ONE reply,
     # never a separate quip. "Since you're back — here's what you wanted..."
     comeback_rule = ""
@@ -368,6 +527,9 @@ def build_context_prompt(query: str, intent: str, thought_context: str, comeback
 {identity_section}
 {screen_info}
 {thought_section}
+{work_section}
+{relationship_section}
+{v3_section}
 {no_code_rule}
 {comeback_rule}
 
@@ -460,7 +622,7 @@ def handle_observation_followup(query: str) -> str | None:
         "Do not write a full code file. Ask before making changes."
     )
     answer = route("CASUAL", prompt)
-    if answer in {"CONNECTION_ERROR", "RATE_LIMIT"} or answer.startswith("ERROR"):
+    if answer in {"CONNECTION_ERROR", "RATE_LIMIT", "THINKING_LEAK"} or answer.startswith("ERROR"):
         return "I saw the error, but the model connection stumbled. Paste the terminal text and I’ll reason from it."
     return guard_output(answer)
 
@@ -561,6 +723,11 @@ def process(query: str) -> str:
     if answer == "RATE_LIMIT":
         return "Hit my rate limit — give me a moment."
 
+    # The model produced nothing but chain-of-thought (ai_router filtered it
+    # all out). Better to ask again than to print the deliberation.
+    if answer == "THINKING_LEAK":
+        return "Lost my train of thought there — say that again?"
+
     final_answer = compose_text(answer, intent, query, last_model_used())
     post_think(query, final_answer, intent)
 
@@ -643,6 +810,17 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
         if on_chunk:
             on_chunk(result)
         return result
+    # Quests: status and creation, both in plain language. Placed above the
+    # generic task handlers because "add quest japanese 2 hrs" contains "add",
+    # which the task matcher would otherwise claim.
+    quest_reply = handle_quest_command(query)
+    if quest_reply:
+        store.save_conversation("user", query)
+        store.save_conversation("aura", quest_reply)
+        if on_chunk:
+            on_chunk(quest_reply)
+        return quest_reply
+
     if any(w in query_lower for w in ["check for error", "any error", "is there an error", "errors?", "any errors"]):
         from modules.error_detector import handle_error_check
         result = handle_error_check(query)
@@ -651,6 +829,12 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
         if on_chunk:
             on_chunk(result)
         return result
+
+    # If they pasted a traceback, log it and arm the prompt hint. This does
+    # NOT short-circuit the turn — the model still writes the reply; it just
+    # writes it knowing what the error is. Placed after the canned handlers
+    # above so an explicit command still wins.
+    scan_for_errors(query)
 
     # Canned/command handlers fire ONLY when the Director hasn't already
     # ruled this a conversation. Without this, "i will ... start with work"
@@ -780,6 +964,28 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
         return "Hit my rate limit — give me a moment."
     if answer.startswith("ERROR") or not answer:
         return "Connection trouble — one sec."
+
+    # Final reasoning-leak pass over the ASSEMBLED answer.
+    #
+    # The streaming sanitizer can only peel a preamble — once it sees one
+    # innocent-looking sentence it has to start emitting, and anything the
+    # model thinks out loud after that point is already gone down the wire.
+    # This second pass catches those, and it's the version the UI actually
+    # displays: the client replaces the streamed text with this final string
+    # when the "done" frame arrives.
+    if intent != "CODING":
+        from core.ai_router import sanitize_text
+        # Pass the query: sentences that quote it back verbatim are the model
+        # restating the prompt to itself, not answering it.
+        deleaked = sanitize_text(answer, query=query)
+        if not deleaked:
+            # The model spent its whole budget deliberating and never wrote an
+            # answer. Showing the monologue is strictly worse than admitting it.
+            print("[AURA] streamed response was all reasoning — discarded")
+            return "Lost my train of thought there — say that again?"
+        if deleaked != answer:
+            print("[AURA] stripped reasoning leak from streamed answer")
+        answer = deleaked
 
     # Response Composer + Persona Layer: every model's raw answer becomes
     # AURA's answer here — disclaimers stripped, identity questions answered

@@ -44,6 +44,15 @@ COLLECT_WINDOW = 0.35  # seconds — how long bids are collected before judging
 
 PRIORITY = {
     "code_error":  100,
+    # V3 (error intelligence + developer state). Ranked above attention and
+    # ambient observation because the V3 engines are already heavily
+    # self-gated — once-per-session flags, per-signal cooldowns and an 8-minute
+    # global gap — so anything that reaches this point is rare and earned.
+    "v3":           25,
+    # Quest lines are rarer still — a completion happens once per quest per
+    # day, and pressure warnings are on a 90-minute cooldown — and they're
+    # time-sensitive ("you're running out of day"), so they outrank V3.
+    "quest":        30,
     "attention":    20,
     "curiosity":    15,
     "observation":  10,

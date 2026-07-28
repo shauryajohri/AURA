@@ -11,6 +11,12 @@ memory/aura_memory.db
 memory/*.json
 .aura_index.pkl
 
+# FUSE leftovers. When a file is deleted while still open, the mount renames
+# it to .fuse_hidden* instead of unlinking. sqlite opens/closes aura_memory.db
+# constantly, so these accumulate — 548 of them (17 MB of empty db pages) once
+# got committed because they have no extension and dodged memory/*.json above.
+.fuse_hidden*
+
 # Tool caches
 .ruff_cache/
 .codex_pycache/

@@ -51,15 +51,6 @@ Actively evolving — most core systems (routing, memory, voice, error intellige
 
 ---
 
-## 🚀 Getting Started
-
-> *Add setup instructions here — clone steps, environment variables (API keys for Groq/OpenRouter), and how to launch both the backend and the frontend.*
-
-```bash
-git clone https://github.com/shauryajohri/AURA.git
-cd AURA
-# setup steps go here
-```
 
 ## 🗺️ Why "AURA"
 

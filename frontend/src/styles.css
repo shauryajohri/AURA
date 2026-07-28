@@ -709,7 +709,12 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
 .chat__log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 .chat__empty { color: var(--muted); text-align: center; margin-top: 40px; font-size: 13px; }
 
-.bubble { max-width: 86%; padding: 10px 14px; border-radius: 14px; }
+/* min-width:0 lets a long code line scroll INSIDE the bubble instead of
+   forcing the bubble (and the chat column) wider than the panel. */
+.bubble { max-width: 86%; min-width: 0; padding: 10px 14px; border-radius: 14px; }
+/* Code needs the room; a reply that's mostly source shouldn't sit in a
+   narrow column with everything clipped. */
+.bubble--aura:has(.codeblock) { max-width: 97%; }
 .bubble--user { align-self: flex-end; background: rgba(139, 92, 255, 0.2); border: 1px solid rgba(139, 92, 255, 0.4); }
 .bubble--aura { align-self: flex-start; background: rgba(56, 225, 255, 0.07); border: 1px solid rgba(56, 225, 255, 0.18); }
 .bubble__who { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
@@ -719,17 +724,42 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
 .bubble__src--curiosity { background: rgba(56, 225, 255, 0.16); color: var(--cyan); }
 .bubble__src--reply { background: rgba(139, 92, 255, 0.16); color: var(--violet-bright); }
 .bubble__src--error { background: rgba(232, 90, 90, 0.18); color: #e85a5a; }
-.bubble__text { margin: 4px 0 0; white-space: pre-wrap; line-height: 1.5; font-size: 14px; }
-.bubble__code {
-  display: block; margin: 8px 0; padding: 10px 12px;
-  background: rgba(6, 4, 16, 0.85); border: 1px solid rgba(140, 100, 255, 0.25);
-  border-radius: 8px; overflow-x: auto;
-  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
-  font-size: 12.5px; line-height: 1.55; white-space: pre;
+.bubble__text { margin: 4px 0 0; white-space: pre-wrap; line-height: 1.5; font-size: 14px; min-width: 0; }
+/* The prose spans keep pre-wrap; the code block opts out via its own rule. */
+.bubble__text > span { white-space: pre-wrap; }
+/* Code block: header bar with language + copy, then the source itself.
+   `min-width: 0` on the bubble is what actually lets it scroll instead of
+   stretching the chat column — a flex/grid child defaults to min-content
+   width, so a long line pushed the whole panel wide instead of overflowing. */
+.codeblock {
+  margin: 9px 0; border-radius: 9px; overflow: hidden; min-width: 0;
+  background: rgba(6, 4, 16, 0.9); border: 1px solid rgba(140, 100, 255, 0.25);
 }
-.bubble__lang {
-  display: block; margin-bottom: 6px; font-size: 10px; letter-spacing: 1px;
-  text-transform: uppercase; opacity: 0.55;
+.codeblock__bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 10px; background: rgba(139, 92, 255, 0.1);
+  border-bottom: 1px solid rgba(140, 100, 255, 0.18);
+}
+.codeblock__lang {
+  font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--violet-bright);
+}
+.codeblock__copy {
+  margin-left: auto; background: none; border: 1px solid var(--border);
+  border-radius: 6px; color: var(--muted); font-size: 10px;
+  letter-spacing: .6px; padding: 2px 9px; cursor: var(--cursor-point);
+}
+.codeblock__copy:hover { color: var(--text); border-color: var(--border-bright); }
+.codeblock__pre {
+  margin: 0; padding: 11px 12px; overflow-x: auto; max-height: 420px;
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-size: 12.5px; line-height: 1.55; white-space: pre; tab-size: 4;
+  color: #d8d2ff;
+}
+.codeblock__pre code { font: inherit; background: none; padding: 0; }
+.codeblock__pre::-webkit-scrollbar { height: 7px; }
+.codeblock__pre::-webkit-scrollbar-thumb {
+  background: rgba(139, 92, 255, 0.4); border-radius: 4px;
 }
 .caret { display: inline-block; width: 7px; height: 15px; margin-left: 3px; background: var(--cyan); vertical-align: text-bottom; animation: blink 1s step-end infinite; }
 @keyframes blink { 50% { opacity: 0; } }

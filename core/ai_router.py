@@ -537,6 +537,16 @@ _META_STRONG_RE = _re_mod.compile(
     # third-person narration about the person being spoken to
     r"\bthe user\b|\buser'?s (?:message|question|query|request|input|typo|last)\b|"
     r"\bthey (?:want|said|asked|mean|are asking|likely)\b|\blikely they\b|"
+    # Narrating the person as a subject under observation. Deliberately narrow:
+    # "they should be joined" (about threads) must stay legal, while
+    # "they're on the Two Sum II problem" and "they should be thinking about"
+    # — both real leaks from the proactive path — must not.
+    r"\bthey(?:'re| are| were)\s+(?:on|in|at|viewing|watching|looking at|"
+    r"working on|doing|using|tackling|trying|solving|reading|browsing|"
+    r"currently|probably|likely|apparently)\b|"
+    r"\bthey\s+(?:should be thinking|seem to be|seems to be|appear to be|"
+    r"appears to be|have been working|has been working|are probably|"
+    r"might be trying|may be trying)\b|"
     # echoing the system prompt back
     r"teaching mode|personal mode|workspace mode|coding mode|override all|"
     r"\brule \d+\b|according to (?:the )?rule|per the (?:rule|instruction)|"
@@ -647,6 +657,30 @@ def sanitize_text(text: str, query: str = "") -> str:
     if not text:
         return ""
     import re
+
+    # Fenced code is lifted out BEFORE any filtering and put back untouched.
+    # This function whitespace-normalises prose, which flattened a C++ answer
+    # into "```cpp class Solution { public: vector<int> twoSum(..." — one long
+    # line in the chat bubble. Code must survive byte-for-byte; only the prose
+    # around it is ever rewritten.
+    blocks: list[str] = []
+
+    def _stash(m: "re.Match[str]") -> str:
+        blocks.append(m.group(0))
+        return f"\x00CODE{len(blocks) - 1}\x00"
+
+    text = re.sub(r"```[\s\S]*?```", _stash, text)
+    # An unterminated fence — a stream cut off mid-block — counts as code too.
+    if "```" in text:
+        idx = text.index("```")
+        blocks.append(text[idx:])
+        text = text[:idx] + f"\x00CODE{len(blocks) - 1}\x00"
+
+    def _restore(s: str) -> str:
+        for i, b in enumerate(blocks):
+            s = s.replace(f"\x00CODE{i}\x00", b)
+        return s
+
     text = re.sub(r"(?is)<think>.*?</think>", "", text)
     text = re.sub(r"(?is)<(thinking|reasoning|scratchpad)>.*?</\1>", "", text)
     # An unterminated opener means the model was cut off mid-thought.
@@ -654,9 +688,15 @@ def sanitize_text(text: str, query: str = "") -> str:
     if ti != -1:
         text = text[:ti]
 
+    # Code alone is a complete answer. If the prose is empty (or turns out to
+    # be pure deliberation below), the code block must still be returned —
+    # dropping it would throw away the thing actually being asked for.
+    def _code_only() -> str:
+        return "\n\n".join(blocks).strip()
+
     sentences = [s for s in _split_sentences(text) if s.strip()]
     if not sentences:
-        return ""
+        return _code_only()
 
     # A sentence that quotes the user's message back counts as strongly meta
     # for the rest of this pass.
@@ -669,7 +709,7 @@ def sanitize_text(text: str, query: str = "") -> str:
         idx += 1
     rest = sentences[idx:]
     if not rest:
-        return ""
+        return _code_only()
 
     # 2. Density check on WHAT'S LEFT — deliberately after the peel, not
     #    before it. Keyword matching alone can't win this: a monologue also
@@ -680,11 +720,14 @@ def sanitize_text(text: str, query: str = "") -> str:
     #    followed by a genuine answer — so it only judges the remainder.
     strong = sum(1 for s in rest if _strong(s))
     if len(rest) >= 2 and strong / len(rest) >= 0.5:
-        return ""
+        return _code_only()
 
     # 3. Drop any remaining strongly-meta sentences wherever they sit.
     kept = [s for s in rest if not _strong(s)]
-    return re.sub(r"\s+", " ", "".join(kept)).strip()
+    # Whitespace-normalise the PROSE only, then put the code back verbatim.
+    prose = re.sub(r"[ \t]*\n[ \t]*", "\n", "".join(kept))
+    prose = re.sub(r"[ \t]{2,}", " ", prose).strip()
+    return _restore(prose).strip()
 
 
 def _peel_head(head: str, final: bool = False):
@@ -741,6 +784,103 @@ def _sanitize_reasoning_stream(chunks):
         emit, _, _ = _peel_head(head, final=True)
         if emit:
             yield emit
+
+
+# ── Second-person enforcement (proactive / attention / curiosity) ───────────
+# These lines are ALWAYS spoken directly to shaurya, so any third-person
+# reference to him is a leak by definition — the model slipped from "talking
+# to him" into "reporting about him". Chat can't use a rule this blunt (a
+# reply may legitimately discuss other people), which is why it lives here and
+# not in sanitize_text.
+# Phrases that are ALWAYS a leak, whatever else the line says.
+_THIRD_PERSON_RE = _re_mod.compile(
+    r"(?i)(\bthe user\b|\bthe person\b|\bthis user\b|"
+    r"\b(?:his|her|their)\s+screen\b|\bthe human\b)"
+)
+
+# Third-person pronouns referring to a person.
+_PERSON_PRONOUN_RE = _re_mod.compile(r"(?i)\b(they|them|their|theirs)\b|\bthey['’]")
+
+# Words ending in -s that are verbs or mass nouns, not plural antecedents.
+_NOT_PLURAL = {
+    "is", "was", "has", "does", "goes", "says", "looks", "seems", "gets",
+    "needs", "keeps", "runs", "works", "means", "makes", "takes", "gives",
+    "this", "its", "less", "mess", "class", "pass", "across", "unless",
+    "plus", "guess", "yes", "us", "as", "his", "hers", "always", "perhaps",
+    "status", "focus", "progress", "process", "success", "business",
+}
+_PLURAL_RE = _re_mod.compile(r"\b([a-z]{3,}s)\b", _re_mod.IGNORECASE)
+
+
+def _has_antecedent(text: str) -> bool:
+    """Is there a plural noun BEFORE the first 'they' for it to refer to?
+
+    This is what separates "Those imports? They're unused." (fine — "they" is
+    the imports) from "…looks like they've got a mix of notes scattered
+    around" (a leak — the only nouns are singular, so "they" is shaurya).
+    """
+    m = _PERSON_PRONOUN_RE.search(text)
+    if not m:
+        return True
+    before = text[:m.start()]
+    return any(w.lower() not in _NOT_PLURAL for w in _PLURAL_RE.findall(before))
+
+# Direct address. If the line talks to him, a "they" in it is about something
+# else ("your tests — they've been red a while") and is perfectly fine.
+_SECOND_PERSON_RE = _re_mod.compile(r"(?i)\b(you|your|yours|you['’](?:re|ve|ll|d))\b")
+
+# "I notice you're…" / "I can see that…" — narrating the act of observing
+# instead of just saying the thing.
+_OBSERVER_RE = _re_mod.compile(
+    r"(?i)^(i (?:notice|see|can see|observe|noticed)\b|it (?:seems|appears|looks like) "
+    r"(?:that )?the\b|looks like the user\b)"
+)
+
+
+def is_addressed_to_user(line: str) -> bool:
+    """True if this line talks TO shaurya rather than ABOUT him.
+
+    Two rules, because listing pronoun spellings kept losing. An earlier
+    version enumerated "they're / they are / they've"… and the alternation had
+    leading spaces on some branches, so `they've` sailed through and produced
+    "looks like they've got a mix of notes scattered around" live.
+
+    Rule 1: a few phrases are always a leak ("the user", "their screen").
+    Rule 2: a third-person pronoun is a leak UNLESS the line either addresses
+            him directly ("your tests — they've been red a while") or gives
+            the pronoun a plural antecedent ("those imports? they're unused").
+            With neither, "they" can only be him.
+    """
+    if not line or not line.strip():
+        return False
+    text = line.strip()
+    if _THIRD_PERSON_RE.search(text):
+        return False
+    if _OBSERVER_RE.search(text):
+        return False
+    if _PERSON_PRONOUN_RE.search(text):
+        if not _SECOND_PERSON_RE.search(text) and not _has_antecedent(text):
+            return False
+    return True
+
+
+def clean_proactive_line(line: str) -> str | None:
+    """Final gate for every unprompted line AURA says.
+
+    Returns None when the line should be thrown away — the caller then falls
+    back to a canned line, which is always better than narrating the user to
+    himself in the third person.
+    """
+    if not line:
+        return None
+    text = sanitize_text(line)
+    if not text:
+        return None
+    text = text.strip().strip('"').strip("'").strip()
+    if not is_addressed_to_user(text):
+        print(f"[AURA] discarded third-person proactive line: {text[:70]}")
+        return None
+    return text
 
 
 def route_streaming(intent: str, prompt: str, system_prompt: str | None = None, model: str | None = None):

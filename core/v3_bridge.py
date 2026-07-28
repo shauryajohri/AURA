@@ -167,6 +167,21 @@ def explain_error(raw_text: str, language: str | None = None, record: bool = Tru
     return out
 
 
+def _screen_language() -> str | None:
+    """The language currently on screen, for the classifier's `language` arg.
+
+    The knowledge base has been language-aware since it was built, but nothing
+    ever passed this — so a C++ error could be matched against a Python
+    pattern. The screen knows; ask it.
+    """
+    try:
+        from core.brain import get_context
+        from core.code_language import detect_language
+        return detect_language(get_context())
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def scan_user_text(text: str) -> dict | None:
     """Called from the chat path when the user pastes something.
 
@@ -176,7 +191,8 @@ def scan_user_text(text: str) -> dict | None:
     """
     if not _looks_like_error(text):
         return None
-    result = explain_error(text, record=True)
+    # Prefer the language visible in the paste itself; fall back to the screen.
+    result = explain_error(text, language=_screen_language(), record=True)
     if not result.get("matched"):
         return None
     try:
@@ -332,7 +348,13 @@ def observe_screen(ctx: dict[str, Any]) -> str | None:
             if sig != _last_error_sig:
                 _last_error_sig = sig
                 blob = terminal or visible
-                info = explain_error(blob, record=True)
+                lang = None
+                try:
+                    from core.code_language import detect_language
+                    lang = detect_language(ctx)
+                except Exception:  # noqa: BLE001
+                    pass
+                info = explain_error(blob, language=lang, record=True)
                 if info.get("matched") and info.get("text"):
                     return info["text"]
             return spoken

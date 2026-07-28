@@ -68,6 +68,9 @@ export default function UniverseBackground({ state, onFail }: Props) {
     let fading = false;
     let failed = false;
     let fadeTimer = 0;
+    let watchdog = 0;
+    let lastTime = -1;
+    let stalls = 0;
 
     va.style.opacity = "1";
     vb.style.opacity = "0";
@@ -98,6 +101,25 @@ export default function UniverseBackground({ state, onFail }: Props) {
       }
     };
 
+    /* Safety net. Neither element has `loop` — the crossfade is supposed to
+       hand over before the end. If that window is ever MISSED (throttled
+       timeupdate while minimized, a decoder hiccup, a seek), the video simply
+       ends and the background freezes on its last frame or goes black. That's
+       the "background collapses sometimes". Restart immediately instead. */
+    const onEnded = (e: Event) => {
+      if (failed) return;
+      const v = e.target as HTMLVideoElement;
+      v.currentTime = 0;
+      play(v);
+      // Whichever element ended is the one that should be visible now.
+      if (v === active) {
+        v.style.opacity = "1";
+        standby.style.opacity = "0";
+        fading = false;
+        window.clearTimeout(fadeTimer);
+      }
+    };
+
     const onError = () => {
       if (failed) return;
       failed = true;
@@ -114,17 +136,51 @@ export default function UniverseBackground({ state, onFail }: Props) {
       }
     };
 
+    /* Watchdog: the visible video must actually be advancing. Covers the
+       cases no event fires for — a dropped decoder under memory pressure
+       (this app also holds ambient.mp4 and transition.mp4 in flight), or a
+       play() that silently never started. Nudge first, hard-reset if it
+       keeps sitting still, and only give up to the CSS fallback after that. */
+    const onWatchdog = () => {
+      if (failed || document.hidden) return;
+      const v = active;
+      const t = v.currentTime;
+      const advancing = Math.abs(t - lastTime) > 0.01;
+      lastTime = t;
+      if (advancing || fading) { stalls = 0; return; }
+      stalls += 1;
+      if (stalls === 1 || stalls === 2) {
+        play(v);                       // gentle nudge
+      } else if (stalls === 3) {
+        v.currentTime = 0;             // hard reset
+        v.style.opacity = "1";
+        play(v);
+      } else if (stalls >= 5) {
+        onError();                     // genuinely dead — let App fall back
+      }
+    };
+
     va.addEventListener("timeupdate", onTime);
     vb.addEventListener("timeupdate", onTime);
+    va.addEventListener("ended", onEnded);
+    vb.addEventListener("ended", onEnded);
+    // Both elements need this. Only `va` was watched, so a failure on the
+    // standby copy went unnoticed and surfaced later as a blank crossfade.
     va.addEventListener("error", onError);
+    vb.addEventListener("error", onError);
     document.addEventListener("visibilitychange", onVis);
+    watchdog = window.setInterval(onWatchdog, 2000);
     play(va);
 
     return () => {
       window.clearTimeout(fadeTimer);
+      window.clearInterval(watchdog);
       va.removeEventListener("timeupdate", onTime);
       vb.removeEventListener("timeupdate", onTime);
+      va.removeEventListener("ended", onEnded);
+      vb.removeEventListener("ended", onEnded);
       va.removeEventListener("error", onError);
+      vb.removeEventListener("error", onError);
       document.removeEventListener("visibilitychange", onVis);
       va.pause(); vb.pause();
     };

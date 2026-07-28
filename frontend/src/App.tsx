@@ -35,8 +35,19 @@ export default function App() {
   const [chatOpen, setChatOpen] = useLocalStorage<boolean>("aura.chatOpen", true);
   const [chatWidth, setChatWidth] = useLocalStorage<number>("aura.chatWidth", 460);
   const [view, setView] = useLocalStorage<string>("aura.view", "home");
+  // Background video health. A failure swaps in the CSS starfield, but it used
+  // to be permanent — one transient decoder hiccup meant no universe until the
+  // app was restarted. Retry a couple of times, backing off, before accepting
+  // that the file is genuinely unplayable.
   const [videoOk, setVideoOk] = useState(true);
-  const handleVideoFail = useCallback(() => setVideoOk(false), []);
+  const videoRetriesRef = useRef(0);
+  const handleVideoFail = useCallback(() => {
+    setVideoOk(false);
+    if (videoRetriesRef.current >= 2) return;
+    const delay = 15000 * (videoRetriesRef.current + 1);
+    videoRetriesRef.current += 1;
+    setTimeout(() => setVideoOk(true), delay);
+  }, []);
   const [ambientOk, setAmbientOk] = useState(true);
   const [transOk, setTransOk] = useState(true);
 

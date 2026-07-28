@@ -207,6 +207,52 @@ check(
     sanitize_text("Your N3 target is realistic.", query=Q_JP) == "Your N3 target is realistic.",
 )
 
+print("\n[code blocks survive the filter byte-for-byte]")
+# Regression: the filter whitespace-normalised everything, which flattened a
+# C++ answer into "```cpp class Solution { public: vector<int> twoSum(..." —
+# one unreadable line in the chat bubble.
+CPP_ANSWER = """Here's a clean C++ solution using two pointers.
+
+```cpp
+class Solution {
+public:
+    vector<int> twoSum(vector<int>& numbers, int target) {
+        int left = 0, right = numbers.size() - 1;
+        while (left < right) {
+            int sum = numbers[left] + numbers[right];
+            if (sum == target) return {left + 1, right + 1};
+            if (sum < target) ++left; else --right;
+        }
+        return {};
+    }
+};
+```
+
+That's O(n) time and O(1) space."""
+
+out = sanitize_text(CPP_ANSWER)
+check("line breaks preserved", out.count("\n") == CPP_ANSWER.count("\n"))
+check("indentation preserved", "        int left = 0" in out)
+check("both fences intact", out.count("```") == 2)
+check("language tag intact", "```cpp" in out)
+check("prose before the block kept", out.startswith("Here's a clean C++"))
+check("prose after the block kept", out.rstrip().endswith("O(1) space."))
+
+print("\n[code survives even when the prose around it is a leak]")
+out = sanitize_text("The user wants C++. We need to respond concisely.\n\n"
+                    "```cpp\nint x = 1;\n```")
+check("deliberation removed", "the user wants" not in out.lower())
+check("code still returned", "int x = 1;" in out)
+check("fences still intact", out.count("```") == 2)
+
+print("\n[an unterminated block — a cut-off stream — is still code]")
+out = sanitize_text("Here you go.\n\n```python\ndef f():\n    return 1")
+check("partial block keeps its newlines", "\n    return 1" in out)
+
+print("\n[prose-only answers are still normalised]")
+check("runs of spaces collapse",
+      sanitize_text("Two   pointers    work here.") == "Two pointers work here.")
+
 print("\n[guard_output refuses to print a monologue]")
 from core.brain import guard_output  # noqa: E402
 

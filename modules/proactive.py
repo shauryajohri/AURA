@@ -537,6 +537,12 @@ Moment type guide:
 - interaction: casual check-in during active work. Curious, not intrusive.
 
 Stay in character: sharp, casual, dry humor, like a smart friend texting. No "I notice you..." or "I see that...". Just talk like you already know.
+
+ADDRESS THEM DIRECTLY. You are TALKING TO them, not reporting about them to
+someone else. Say "you", never "they" or "the user". Write the message itself —
+not a description of the situation.
+  WRONG: "They're on the Two Sum II problem, they should be thinking about the sorted constraint."
+  RIGHT: "Two Sum II — the array being sorted is the whole trick, you know."
 """
 
 CODE_INSIGHT_PROMPT = """You are AURA. You have noticed something genuinely interesting about what the user is doing.
@@ -556,6 +562,7 @@ Rules:
 - No quotes around the line
 - Never say "I notice" or "I see"
 - Only speak to the facts listed above — never invent details
+- Address them as "you". Never "they" or "the user" — you're talking TO them.
 """
 
 LOCKED_IDLE_PROMPT = """You are AURA, locked onto watching {app} because the user asked you to focus only on it. Nothing substantial is happening there right now — blank, idle, or unreadable.
@@ -613,16 +620,20 @@ LOCKED_DISTRACTED_LINES = [
 
 
 def _screen_text_is_usable(text: str) -> bool:
-    if not text or len(text.strip()) < 25:
-        return False
-    words = re.findall(r"[a-zA-Z]{3,}", text)
-    if len(words) < 6:
-        return False
-    tokens = text.split()
-    junk_ratio = sum(1 for t in tokens if len(t) <= 2) / max(len(tokens), 1)
-    if junk_ratio > 0.5:
-        return False
-    return True
+    """Delegates to core.screen_text.
+
+    The old implementation here only required 6 alphabetic words and a low
+    ratio of very short tokens — OCR mush like
+    "© choy | Undetectabie © & 3 taateodecom / Two Sum Int ray le Sorted"
+    clears both easily, so garbage was handed to the model and quoted back at
+    the user. The replacement scores symbol noise, which is what actually
+    separates shredded UI text from real content.
+    """
+    try:
+        from core.screen_text import is_readable
+        return is_readable(text)
+    except Exception:  # noqa: BLE001
+        return bool(text and len(text.strip()) >= 25)
 
 
 def _ai_generate_message(action: str, task: str, ctx: dict, prompt_template: str) -> str | None:
@@ -640,9 +651,14 @@ def _ai_generate_message(action: str, task: str, ctx: dict, prompt_template: str
     facts=", ".join(ctx.get("facts", [])) or "none"
 )
         result = call_groq(prompt, intent="CASUAL").strip()
-        result = result.strip('"').strip("'").strip()
-        if result and result.upper() not in {"CONNECTION_ERROR", "RATE_LIMIT", ""}:
-            return result
+        if result.upper() in {"CONNECTION_ERROR", "RATE_LIMIT", ""}:
+            return None
+        # Every unprompted line goes through the second-person gate. Without
+        # it the model narrated shaurya to himself — "They're on the Two Sum II
+        # problem, they should be thinking about..." — which is a report, not
+        # a companion talking. Discarded lines fall back to a canned one.
+        from core.ai_router import clean_proactive_line
+        return clean_proactive_line(result)
     except Exception as e:
         print(f"[AURA Proactive] AI message error: {e}")
     return None
@@ -677,9 +693,11 @@ def generate_message(action: str, task: str, ctx: dict) -> str | None:
                 current_app=current_app
             )
             result = call_groq(prompt, intent="CASUAL").strip()
-            result = result.strip('"').strip("'").strip()
-            if result and result.upper() not in {"CONNECTION_ERROR", "RATE_LIMIT", ""}:
-                return result
+            if result.upper() not in {"CONNECTION_ERROR", "RATE_LIMIT", ""}:
+                from core.ai_router import clean_proactive_line
+                cleaned = clean_proactive_line(result)
+                if cleaned:
+                    return cleaned
         except Exception as e:
             print(f"[AURA Proactive] AI message error: {e}")
         line = random.choice(LOCKED_DISTRACTED_LINES)

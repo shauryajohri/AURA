@@ -450,6 +450,23 @@ def build_context_prompt(query: str, intent: str, thought_context: str, comeback
     except Exception:
         pass
 
+    # Which language is on screen. This was the "give me it in c++" problem:
+    # AURA answered a LeetCode question in Python because nothing ever looked
+    # at the language selector sitting right above the editor.
+    language_rule = ""
+    if intent == "CODING":
+        try:
+            from core.code_language import detect_label
+            lang = detect_label(_last_context)
+            if lang:
+                language_rule = (
+                    f"\n(They are working in {lang} — the screen shows it. "
+                    f"Answer in {lang} unless they explicitly ask for another "
+                    "language. Do not ask which language to use.)"
+                )
+        except Exception:
+            pass
+
     # Chat is chat. Code only exists when the user explicitly asks for code —
     # a topic mention ("i'm stuck on the websocket part") gets talked through,
     # not answered with an unsolicited code dump. If code seems needed, offer.
@@ -530,6 +547,7 @@ def build_context_prompt(query: str, intent: str, thought_context: str, comeback
 {work_section}
 {relationship_section}
 {v3_section}
+{language_rule}
 {no_code_rule}
 {comeback_rule}
 

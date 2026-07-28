@@ -8,20 +8,69 @@ interface Props {
   onCollapse?: () => void;
 }
 
-/** Split a message into plain-text and fenced ```code``` segments. */
-function renderMessage(text: string) {
-  const parts = text.split(/```(\w*)\n?([\s\S]*?)```/g);
+/** One fenced block, with its language label and a copy button. */
+function CodeBlock({ lang, code }: { lang: string; code: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard?.writeText(code).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1600);
+      },
+      () => {},
+    );
+  };
+  return (
+    <div className="codeblock">
+      <div className="codeblock__bar">
+        <span className="codeblock__lang">{lang || "code"}</span>
+        <button className="codeblock__copy" onClick={copy} title="Copy code">
+          {copied ? "copied" : "copy"}
+        </button>
+      </div>
+      <pre className="codeblock__pre">
+        <code>{code}</code>
+      </pre>
+    </div>
+  );
+}
+
+/**
+ * Split a message into prose and fenced ```code``` segments.
+ *
+ * Handles an UNTERMINATED fence, which the previous version didn't: while a
+ * reply is still streaming the closing ``` hasn't arrived yet, so the regex
+ * failed to match and the half-written code rendered as flat prose — the
+ * fence, the language tag and all the source on one running line.
+ */
+function renderMessage(text: string): React.ReactNode[] {
   const out: React.ReactNode[] = [];
-  for (let i = 0; i < parts.length; i += 3) {
-    if (parts[i]) out.push(<span key={i}>{parts[i]}</span>);
-    if (i + 2 < parts.length) {
-      out.push(
-        <pre className="bubble__code" key={i + 2}>
-          {parts[i + 1] && <span className="bubble__lang">{parts[i + 1]}</span>}
-          <code>{parts[i + 2]}</code>
-        </pre>
-      );
+  const fence = /```([\w+#-]*)[ \t]*\n?([\s\S]*?)```/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let key = 0;
+
+  while ((m = fence.exec(text)) !== null) {
+    if (m.index > last) {
+      out.push(<span key={key++}>{text.slice(last, m.index)}</span>);
     }
+    out.push(<CodeBlock key={key++} lang={m[1]} code={m[2].replace(/\n$/, "")} />);
+    last = m.index + m[0].length;
+  }
+
+  const tail = text.slice(last);
+  const open = tail.indexOf("```");
+  if (open !== -1) {
+    // Still streaming: render what's arrived as code so it never flashes as
+    // a wall of unformatted text mid-answer.
+    if (open > 0) out.push(<span key={key++}>{tail.slice(0, open)}</span>);
+    const rest = tail.slice(open + 3);
+    const nl = rest.indexOf("\n");
+    const lang = nl === -1 ? rest.trim() : rest.slice(0, nl).trim();
+    const body = nl === -1 ? "" : rest.slice(nl + 1);
+    out.push(<CodeBlock key={key++} lang={lang} code={body} />);
+  } else if (tail) {
+    out.push(<span key={key++}>{tail}</span>);
   }
   return out;
 }
@@ -67,10 +116,13 @@ export default function ChatPanel({ status, turns, onSend, onCollapse }: Props) 
               )}
               {t.ts && <span className="bubble__time">{t.ts}</span>}
             </span>
-            <p className="bubble__text">
+            {/* A div, not a <p>: a <pre> inside a <p> is invalid HTML, so the
+                browser silently closed the paragraph early and the code block
+                escaped the bubble's layout. */}
+            <div className="bubble__text">
               {renderMessage(t.text)}
               {t.streaming && <span className="caret" />}
-            </p>
+            </div>
           </div>
         ))}
       </div>

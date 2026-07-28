@@ -179,6 +179,19 @@ def detect_error_state(visible_text: str = "", terminal_text: str = "") -> Error
     defaulting to "no errors", since silently asserting a clean state
     AURA didn't actually verify is worse than saying nothing.
     """
+    # Refuse to read unreadable OCR. Matching error patterns against shredded
+    # screen text produces confident nonsense — the live failure was AURA
+    # answering "how do I fix this error?" by quoting the mush back. Terminal
+    # capture is exempt: it's read directly, not OCR'd, and code legitimately
+    # looks nothing like prose.
+    try:
+        from core.screen_text import is_readable
+        if visible_text and not is_readable(visible_text):
+            print("[ErrorDetector] screen text unreadable — ignoring it")
+            visible_text = ""
+    except Exception:  # noqa: BLE001
+        pass
+
     vscode_result = _check_vscode_signal(visible_text)
     terminal_result = _check_terminal_signal(terminal_text)
 

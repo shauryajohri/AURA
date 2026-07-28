@@ -61,14 +61,6 @@ cd AURA
 # setup steps go here
 ```
 
----
-
-## 📸 Screenshots / Demo
-
-> *Add screenshots or a short demo video/GIF here — this is the single highest-impact addition you can make to this README. A 30–60 second walkthrough of the voice interaction, memory recall, and the cosmic UI does more to convey what AURA is than any amount of text.*
-
----
-
 ## 🗺️ Why "AURA"
 
 Built as a real, daily-use tool — not a class assignment — around the idea that an AI companion should feel like a teammate sitting next to you, not a tool you have to open and address every time.

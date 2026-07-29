@@ -300,9 +300,12 @@ check("so it never matches anything",
       Q.match({"app": "Chrome", "title": "work stuff project", "visible_text": "work"}, board)[0] is None)
 
 # ── 11. untimed quests: monitored, never owed, never complete ───────────────
-print("\n[11] untimed quests — no target, just tracked")
+print("\n[11] a TIME quest with no target — monitored, never 'behind'")
+# Since quest kinds landed, "no duration written" defaults to `manual` (you
+# tick it off). Monitor-with-no-goal is still available, but it's now an
+# explicit choice: kind="time" with target 0.
 reset()
-u = store.add_quest("Aura Code Base", 0, "", "custom")
+u = store.add_quest("Aura Code Base", 0, "", "custom", kind="time")
 CODE = {"app": "VS Code", "title": "brain.py - AURA Code Base", "visible_text": ""}
 
 b = store.get_quest_board()["quests"][0]
@@ -343,7 +346,7 @@ check("doesn't repeat the same mark", len(lines) == before)
 
 print("\n[11c] streaks work without a target")
 reset()
-u = store.add_quest("Aura Code Base", 0, "", "custom")
+u = store.add_quest("Aura Code Base", 0, "", "custom", kind="time")
 for d in range(1, 4):
     day = (datetime.datetime.now() - datetime.timedelta(days=d)).strftime("%Y-%m-%d")
     store.add_quest_seconds(u, 900, day=day)
@@ -384,13 +387,265 @@ check("no duplicate overtime lines", len(marks) == len(set(marks)))
 print("\n[13] a mixed board reads correctly")
 reset()
 a = store.add_quest("Japanese", 60, "", "japanese")
-store.add_quest("Aura Code Base", 0, "", "custom")
+store.add_quest("Aura Code Base", 0, "", "custom", kind="time")
 store.add_quest_seconds(a, 3600)                      # done
 store.add_quest_seconds(store.get_quests()[1][0], 5400)  # 90m untimed
 line = Q.summary_line()
 check("counts only the timed quest as done", "Quest done today" in line)
 check("mentions the untimed time", "Aura Code Base" in line and "1h30" in line)
 check("pressure still clear", Q.pressure()["status"] == "clear")
+
+# ── 14. quest kinds: time / proof / manual ──────────────────────────────────
+print("\n[14] a quest only gets a clock if you asked for one")
+kind_cases = [
+    ("japanese 2 hrs", "time", 120, 0),
+    ("2h dsa", "time", 120, 0),
+    ("read 45 min", "time", 45, 0),
+    ("leetcode 2 questions", "proof", 0, 2),
+    ("3 problems on codeforces", "proof", 0, 3),
+    ("5 kanji reviews", "proof", 0, 5),
+    ("2 leetcode", "proof", 0, 2),
+    ("exercise", "manual", 0, 0),
+    ("gym", "manual", 0, 0),
+    ("call mom", "manual", 0, 0),
+]
+for text, kind, mins, count in kind_cases:
+    got = Q.parse_quest(text)
+    check(f"{text!r} → {kind}",
+          got["kind"] == kind and got["target_minutes"] == mins
+          and got["target_count"] == count)
+
+print("\n[14b] '2 hrs' is a duration, not a count")
+got = Q.parse_quest("japanese 2 hrs")
+check("hours never read as a count", got["target_count"] == 0)
+
+print("\n[14c] only time quests accrue tracked minutes")
+reset()
+t_id = store.add_quest("Japanese", 60, "", "japanese", kind="time")
+p_id = store.add_quest("Leetcode 2 Questions", 0, "", "dsa", kind="proof", target_count=2)
+m_id = store.add_quest("Exercise", 0, "", "custom", kind="manual")
+board = store.get_quest_board()["quests"]
+by = {q["id"]: q for q in board}
+check("time quest is timed", not by[t_id]["untimed"])
+check("proof quest has no clock", by[p_id]["untimed"] and by[p_id]["percent"] == 0)
+check("manual quest has no clock", by[m_id]["untimed"])
+
+# The matcher must not attribute screen time to a non-time quest.
+ANKI3 = {"app": "Anki", "title": "Japanese Core 2k", "visible_text": ""}
+LC = {"app": "Chrome", "title": "LeetCode - Two Sum", "visible_text": ""}
+check("time quest still matches", Q.match(ANKI3, board)[0] == t_id)
+check("proof quest never matches for time", Q.match(LC, board)[0] is None)
+
+tr = Q.QuestTracker()
+n = 7_000_000
+tr.tick(LC, now=n)
+for _ in range(10):
+    n += 30
+    tr.tick(LC, now=n)
+check("no seconds credited to a proof quest", store.get_quest_seconds(p_id) == 0)
+check("that time went to unallocated instead",
+      store.get_quest_board()["unallocated_seconds"] > 0)
+
+print("\n[14d] non-time quests never auto-complete")
+for _ in range(200):
+    n += 30
+    tr.tick({"app": "Chrome", "title": "Exercise routine"}, now=n)
+b = store.get_quest_board()["quests"]
+check("proof quest still open", not next(q for q in b if q["id"] == p_id)["completed"])
+check("manual quest still open", not next(q for q in b if q["id"] == m_id)["completed"])
+
+print("\n[14e] pressure counts only time quests")
+check("only the 60m time quest is owed",
+      Q.pressure(now=at(9))["required_minutes"] == 60)
+
+print("\n[14f] manual completion works for all kinds")
+store.complete_quest(m_id)
+b = {q["id"]: q for q in store.get_quest_board()["quests"]}
+check("manual marks done", b[m_id]["completed"])
+store.complete_quest(m_id, undo=True)
+check("and reopens", not store.get_quest_board()["quests"][2]["completed"])
+
+# ── 15. the migration that nearly broke an existing board ───────────────────
+print("\n[15] upgrading an OLD database keeps quests behaving")
+import sqlite3  # noqa: E402
+
+old_path = os.path.join(_TMP, "old_schema.db")
+c = sqlite3.connect(old_path)
+c.execute("""CREATE TABLE quests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL,
+    target_minutes INTEGER DEFAULT 60, keywords TEXT DEFAULT '',
+    preset TEXT DEFAULT 'custom', color TEXT DEFAULT '#8b5cff',
+    active INTEGER DEFAULT 1, sort_order INTEGER DEFAULT 0, created_at TEXT)""")
+c.execute("INSERT INTO quests (title, target_minutes) VALUES ('Old Timed', 120)")
+c.execute("INSERT INTO quests (title, target_minutes) VALUES ('Old Untracked', 0)")
+c.commit()
+c.close()
+
+_real_db = store.DB_PATH
+store.DB_PATH = old_path
+store.init_quests()
+migrated = {q["title"]: q for q in store.get_quest_board()["quests"]}
+# The first cut of this migration declared the column DEFAULT 'manual', so
+# every pre-existing TIMED quest silently became manual and stopped tracking.
+check("an old timed quest stays 'time'", migrated["Old Timed"]["kind"] == "time")
+check("...and keeps its target", migrated["Old Timed"]["target_minutes"] == 120)
+check("...and still has a clock", not migrated["Old Timed"]["untimed"])
+check("an old untracked quest becomes manual",
+      migrated["Old Untracked"]["kind"] == "manual")
+store.DB_PATH = _real_db
+
+# ── 16. screenshot verdict parsing ──────────────────────────────────────────
+print("\n[16] reading the vision model's verdict")
+from core.quest_verify import parse_verdict  # noqa: E402
+
+check("clean PASS", parse_verdict(
+    "VERDICT: PASS\nEVIDENCE: Two problems show Accepted.")["passed"])
+check("clean FAIL", not parse_verdict(
+    "VERDICT: FAIL\nEVIDENCE: Only one is Accepted.")["passed"])
+check("lowercase still parses", parse_verdict(
+    "verdict: pass\nevidence: both accepted")["passed"])
+check("evidence is captured", parse_verdict(
+    "VERDICT: FAIL\nEVIDENCE: Only one is Accepted.")["evidence"]
+    == "Only one is Accepted.")
+
+print("\n[16b] a model that ignores the format is NOT a pass")
+# Rambling instead of answering is not evidence the work is done.
+for junk in ["I think it looks done maybe?", "", "Hmm, hard to say.",
+             "The screenshot is too blurry to tell."]:
+    r = parse_verdict(junk)
+    check(f"not passed: {junk[:34]!r}", not r["passed"])
+    check("  flagged unparsed", not r["parsed"])
+
+print("\n[16c] a verdict with no evidence line still works")
+r = parse_verdict("VERDICT: FAIL")
+check("parsed", r["parsed"] and not r["passed"])
+
+print("\n[17] verify() refuses the wrong quest kinds")
+from core.quest_verify import verify_quest  # noqa: E402
+
+reset()
+tq = store.add_quest("Japanese", 60, "", "japanese", kind="time")
+mq = store.add_quest("Exercise", 0, "", "custom", kind="manual")
+r = verify_quest(tq)
+check("a timed quest can't be screenshot-verified", not r["ok"])
+check("...and says why", "time" in r["error"].lower())
+r = verify_quest(mq)
+check("a manual quest can't either", not r["ok"])
+check("...and says to mark it yourself", "mark it done" in r["error"].lower())
+r = verify_quest(999999)
+check("unknown quest is handled", not r["ok"] and "no such quest" in r["error"])
+
+# ── 18. auto-detecting accepted submissions ─────────────────────────────────
+print("\n[18] spotting an accepted submission")
+from core.submission_watch import detect_acceptance  # noqa: E402
+
+LC_OK = {"app": "Comet",
+         "title": "Two Sum II - Input Array Is Sorted - LeetCode - Comet",
+         "visible_text": "Accepted Runtime: 3 ms Beats 92.4% Memory 15.2 MB"}
+LC_OK2 = {"app": "Comet", "title": "3Sum - LeetCode - Comet",
+          "visible_text": "Accepted Runtime: 12 ms"}
+
+check("LeetCode accepted is detected", detect_acceptance(LC_OK) is not None)
+check("the problem is identified",
+      detect_acceptance(LC_OK)["problem"] == "Two Sum II - Input Array Is Sorted")
+check("browser suffix stripped from the name",
+      "comet" not in detect_acceptance(LC_OK)["problem"].lower())
+check("Codeforces", detect_acceptance(
+    {"app": "Chrome", "title": "Problem A - Watermelon - Codeforces",
+     "visible_text": "Accepted pretests passed"}) is not None)
+check("HackerRank", detect_acceptance(
+    {"app": "Chrome", "title": "Simple Array Sum - HackerRank",
+     "visible_text": "Congratulations! You solved this challenge."}) is not None)
+check("GeeksforGeeks", detect_acceptance(
+    {"app": "Chrome", "title": "Reverse a String - GeeksforGeeks",
+     "visible_text": "Problem Solved Successfully"}) is not None)
+
+print("\n[18b] false positives — the part that matters")
+# Counting something that didn't happen silently completes a quest the user
+# didn't earn, which defeats the whole point of verification.
+for label, ctx in [
+    ("a page merely open", {"app": "Comet", "title": "Two Sum II - LeetCode",
+                            "visible_text": "Given a 1-indexed array of integers"}),
+    ("wrong answer", {"app": "Comet", "title": "Two Sum II - LeetCode",
+                      "visible_text": "Wrong Answer Testcase 33/45"}),
+    ("a cookie banner", {"app": "Chrome", "title": "Two Sum - LeetCode",
+                         "visible_text": "We use cookies. Accepted. Cookie policy"}),
+    ("Stack Overflow's accepted answer",
+     {"app": "Chrome", "title": "python - Stack Overflow",
+      "visible_text": "Accepted answer by user123"}),
+    ("an article about a job offer",
+     {"app": "Chrome", "title": "LeetCode blog",
+      "visible_text": "She accepted the offer after her interview."}),
+    ("not a coding platform at all",
+     {"app": "Chrome", "title": "Netflix", "visible_text": "Accepted"}),
+    ("nothing on screen", {"app": "", "title": "", "visible_text": ""}),
+]:
+    check(f"ignored: {label}", detect_acceptance(ctx) is None)
+
+print("\n[18c] an old Accepted in the list doesn't beat the current verdict")
+check("current failure wins", detect_acceptance(
+    {"app": "Comet", "title": "Two Sum - LeetCode",
+     "visible_text": "Wrong Answer  |  earlier: Accepted Runtime 4ms"}) is None)
+
+print("\n[19] counting, deduplication and auto-completion")
+reset()
+pq = store.add_quest("Leetcode 2 Questions", 0, "", "dsa",
+                     kind="proof", target_count=2)
+tr = Q.QuestTracker()
+n = 8_000_000
+
+lines = []
+for _ in range(6):                 # same solve on screen for 3 minutes
+    n += 30
+    ln = tr.check_submission(LC_OK, now=n)
+    if ln:
+        lines.append(ln)
+b = store.get_quest_board()["quests"][0]
+check("one solve counted once", b["done_count"] == 1)
+check("spoke about it exactly once", len(lines) == 1)
+check("not complete on 1 of 2", not b["completed"])
+check("progress shown as a percentage", b["count_percent"] == 50)
+
+n += 30
+ln2 = tr.check_submission(LC_OK2, now=n)      # a different problem
+b = store.get_quest_board()["quests"][0]
+check("second solve counted", b["done_count"] == 2)
+check("quest auto-completes at target", b["completed"])
+check("and says so", ln2 and "done" in ln2.lower())
+
+check("the ledger records both problems",
+      len(store.get_quest_items(pq)) == 2)
+check("...marked as auto-detected",
+      all(i[1] == "auto" for i in store.get_quest_items(pq)))
+
+print("\n[19b] a completed quest stops counting")
+n += 30
+check("no further credit", tr.check_submission(
+    {"app": "Comet", "title": "Valid Parentheses - LeetCode",
+     "visible_text": "Accepted Runtime: 0 ms"}, now=n) is None)
+
+print("\n[19c] solves don't leak into the wrong quest")
+reset()
+lc = store.add_quest("Leetcode 2 Questions", 0, "", "dsa",
+                     kind="proof", target_count=2)
+jp = store.add_quest("Japanese 3 Kanji", 0, "", "japanese",
+                     kind="proof", target_count=3)
+tr2 = Q.QuestTracker()
+n += 60
+tr2.check_submission(LC_OK, now=n)
+by = {q["id"]: q for q in store.get_quest_board()["quests"]}
+check("credited to the LeetCode quest", by[lc]["done_count"] == 1)
+check("Japanese quest untouched", by[jp]["done_count"] == 0)
+
+print("\n[19d] time quests are never affected by submissions")
+reset()
+tq2 = store.add_quest("Japanese", 60, "", "japanese", kind="time")
+tr3 = Q.QuestTracker()
+n += 60
+check("no proof quest open → nothing counted",
+      tr3.check_submission(LC_OK, now=n) is None)
+check("time quest gains no count",
+      store.get_quest_board()["quests"][0]["done_count"] == 0)
 
 print("\n[10] summary line for chat")
 reset()
@@ -403,6 +658,81 @@ check("summary names what's left", "DSA" in line)
 
 reset()
 check("empty board says so", "No quests" in Q.summary_line())
+
+# ── 20. vision fallback — primary model, then a second free model ───────────
+print("\n[20] vision fallback — primary model then a second free model")
+from core import ai_router  # noqa: E402
+import requests as _requests  # noqa: E402
+
+_orig_post = _requests.post
+_orig_keys = dict(ai_router._OPENROUTER_MODEL_KEYS)
+_orig_or_key = ai_router.OPENROUTER_API_KEY
+# Force both vision models to look "keyed" regardless of what's in .env, so
+# this test is deterministic on any machine.
+ai_router.OPENROUTER_API_KEY = "test-shared-key"
+ai_router._OPENROUTER_MODEL_KEYS = {
+    ai_router.VISION_MODEL: "test-primary-key",
+    ai_router.VISION_FALLBACK_MODEL: "test-fallback-key",
+}
+
+
+class _FakeResp:
+    def __init__(self, status_code, data=None):
+        self.status_code = status_code
+        self._data = data or {}
+
+    def json(self):
+        return self._data
+
+
+def _reset_vision_cooldown():
+    ai_router._provider_cooldown.clear()
+
+
+print("\n[20a] primary rate-limited, fallback answers")
+_reset_vision_cooldown()
+calls = []
+
+
+def _post_a(url, headers=None, json=None, timeout=None):
+    calls.append(json["model"])
+    if json["model"] == ai_router.VISION_MODEL:
+        return _FakeResp(429)
+    return _FakeResp(200, {"choices": [{"message": {"content": "fallback sees it done"}}]})
+
+
+_requests.post = _post_a
+result = ai_router.call_vision("is this done?", "base64img")
+check("returns the fallback's text, not a sentinel", result == "fallback sees it done")
+check("primary was tried first", calls[0] == ai_router.VISION_MODEL)
+check("fallback was tried second", calls[1] == ai_router.VISION_FALLBACK_MODEL)
+
+print("\n[20b] both models rate-limited")
+_reset_vision_cooldown()
+_requests.post = lambda url, headers=None, json=None, timeout=None: _FakeResp(429)
+result = ai_router.call_vision("is this done?", "base64img")
+check("RATE_LIMIT surfaces when both fail that way", result == "RATE_LIMIT")
+
+print("\n[20c] primary succeeds — fallback never called (no wasted request)")
+_reset_vision_cooldown()
+calls2 = []
+
+
+def _post_c(url, headers=None, json=None, timeout=None):
+    calls2.append(json["model"])
+    return _FakeResp(200, {"choices": [{"message": {"content": "primary sees it done"}}]})
+
+
+_requests.post = _post_c
+result = ai_router.call_vision("is this done?", "base64img")
+check("returns the primary's text", result == "primary sees it done")
+check("only one request was made", len(calls2) == 1)
+check("that request went to the primary model", calls2 == [ai_router.VISION_MODEL])
+
+_requests.post = _orig_post
+ai_router._OPENROUTER_MODEL_KEYS = _orig_keys
+ai_router.OPENROUTER_API_KEY = _orig_or_key
+_reset_vision_cooldown()
 
 print("\n" + "=" * 42)
 print(f"{passed} passed, {failed} failed")

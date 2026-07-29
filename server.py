@@ -521,14 +521,40 @@ async def api_add_quest(req: Request) -> dict[str, Any]:
     preset = body.get("preset") or "custom"
     qid = store.add_quest(
         title,
-        # 0 / omitted = untimed: monitored, with no goal to hit.
+        # 0 / omitted = not time-tracked.
         int(body.get("target_minutes") or 0),
         (body.get("keywords") or "").strip(),
         preset,
         body.get("color") or PRESETS.get(preset, PRESETS["custom"])["color"],
         (body.get("project_path") or "").strip(),
+        kind=(body.get("kind") or "").strip(),
+        target_count=int(body.get("target_count") or 0),
     )
     return {"ok": True, "id": qid}
+
+
+@app.post("/api/quests/{quest_id}/verify")
+async def api_verify_quest(quest_id: int, req: Request) -> dict[str, Any]:
+    """Verify a proof quest from a screenshot.
+
+    With no body, AURA captures the screen herself. An `image` field (base64
+    JPEG/PNG, no data: prefix) is used instead when the UI supplies one.
+    """
+    from core.quest_verify import verify_quest
+    body = {}
+    try:
+        if await req.body():
+            body = await req.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    result = verify_quest(quest_id, image_b64=body.get("image") or None)
+    # Tell the UI live, so the card updates even if the panel isn't focused.
+    try:
+        from core import quests as _q
+        _q._publish({"kind": "verify", "quest_id": quest_id, **result})
+    except Exception:  # noqa: BLE001
+        pass
+    return result
 
 
 @app.get("/api/quests/{quest_id}/terms")

@@ -883,6 +883,114 @@ def clean_proactive_line(line: str) -> str | None:
     return text
 
 
+# ── Vision ──────────────────────────────────────────────────────────────────
+# Gemma 4 31B is already in the roster (it answers CASUAL/PERSONAL) and it is
+# multimodal — text AND image in, on the free tier. So screenshot verification
+# needs no new key and no new quota: it reuses OPENROUTER_KEY_CHAT.
+# Overridable in .env for when a better free vision model shows up.
+VISION_MODEL = os.getenv("AURA_VISION_MODEL", "google/gemma-4-31b-it:free")
+# Second free multimodal model on OpenRouter. Gemma's free tier gets rate-
+# limited fast (shared quota across everyone on the no-cost tier, not just
+# AURA's usage) — when that happens verification shouldn't just fail, it
+# should quietly try a different model before telling shaurya it couldn't
+# look. Same OPENROUTER_KEY_CHAT key covers this one too; no new key needed.
+VISION_FALLBACK_MODEL = os.getenv(
+    "AURA_VISION_FALLBACK_MODEL", "nvidia/nemotron-3-nano-omni-30b:free"
+)
+
+
+def vision_available() -> bool:
+    """False when there's no key for EITHER vision model — callers fall back
+    rather than erroring."""
+    _, _, key = _endpoint_for(VISION_MODEL)
+    if key:
+        return True
+    _, _, key2 = _endpoint_for(VISION_FALLBACK_MODEL)
+    return bool(key2)
+
+
+def _call_vision_one(model_id: str, prompt: str, image_b64: str, system: str,
+                      max_tokens: int, timeout: int) -> str:
+    """One attempt against a single vision model. Same sentinel contract as
+    call_vision (RATE_LIMIT / CONNECTION_ERROR / NO_VISION_KEY / text)."""
+    provider, url, api_key = _endpoint_for(model_id)
+    if not api_key:
+        return "NO_VISION_KEY"
+    cd_key = _cooldown_key(provider, model_id)
+    if _in_rate_limit_cooldown(cd_key):
+        return "RATE_LIMIT"
+
+    content: list[dict] = [{"type": "text", "text": prompt}]
+    content.append({
+        "type": "image_url",
+        "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
+    })
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": content})
+
+    try:
+        response = requests.post(
+            url,
+            headers=_headers(provider, api_key),
+            json={"model": model_id, "messages": messages,
+                  "max_tokens": max_tokens, "temperature": 0.1},
+            timeout=timeout,
+        )
+        if response.status_code == 429:
+            _start_rate_limit_cooldown(cd_key)
+            return "RATE_LIMIT"
+        data = response.json()
+        if "choices" not in data:
+            print(f"[AURA vision] {provider} error {response.status_code}: "
+                  f"{str(data)[:200]}")
+            return "CONNECTION_ERROR"
+        return (data["choices"][0]["message"]["content"] or "").strip()
+    except Exception as e:  # noqa: BLE001
+        print(f"[AURA vision] {e}")
+        return "CONNECTION_ERROR"
+
+
+def call_vision(prompt: str, image_b64: str, system: str = "",
+                max_tokens: int = 400, timeout: int = 60) -> str:
+    """Ask a vision model about one image.
+
+    Tries VISION_MODEL first, and if that comes back rate-limited (or has no
+    key) falls through to VISION_FALLBACK_MODEL before giving up — the two
+    free-tier quotas are independent, so a Gemma 429 doesn't have to mean
+    "can't verify right now" if Nemotron's omni model is free.
+
+    `image_b64` is raw base64 (no data: prefix). Returns the model's text, or
+    one of the usual sentinels — RATE_LIMIT / CONNECTION_ERROR / NO_VISION_KEY
+    — so the caller can tell "it said no" apart from "it never ran", which for
+    a verification feature is the difference between rejecting your work and
+    admitting AURA couldn't look. The sentinel returned is only ever RATE_LIMIT
+    or NO_VISION_KEY if BOTH models failed that way.
+    """
+    tried = []
+    last = "NO_VISION_KEY"
+    for model_id in (VISION_MODEL, VISION_FALLBACK_MODEL):
+        if model_id in tried:
+            continue
+        tried.append(model_id)
+        result = _call_vision_one(model_id, prompt, image_b64, system,
+                                   max_tokens, timeout)
+        if result in ("RATE_LIMIT", "CONNECTION_ERROR", "NO_VISION_KEY"):
+            if result != "NO_VISION_KEY":
+                last = result
+            elif last == "NO_VISION_KEY":
+                last = result
+            print(f"[AURA vision] {model_id} unavailable ({result}) — "
+                  f"trying next model" if model_id == VISION_MODEL else
+                  f"[AURA vision] {model_id} also unavailable ({result})")
+            continue
+        if model_id != VISION_MODEL:
+            print(f"[AURA vision] answered by fallback model {model_id}")
+        return result
+    return last
+
+
 def route_streaming(intent: str, prompt: str, system_prompt: str | None = None, model: str | None = None):
     extra = INTENT_PERSONALITY_ADJUSTMENTS.get(intent, "")
     if system_prompt is not None:

@@ -49,7 +49,9 @@ NEWTAB = {"app": "Chrome", "title": "New Tab", "visible_text": ""}
 
 # ── 1. classification ───────────────────────────────────────────────────────
 print("\n[1] what counts as work")
-store.add_quest("Aura Code Base", 0, "", "custom")
+# Deliberately a MANUAL quest: engagement must still count it as work.
+# Only time-crediting is restricted to time quests; "is he working" is not.
+store.add_quest("Aura Code Base", 0, "", "custom", kind="manual")
 
 work_cases = [
     ("code editor", {"app": "Visual Studio Code", "title": "brain.py"}, True),

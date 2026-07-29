@@ -108,6 +108,28 @@ _DUR_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Countable deliverables — things that leave visible evidence on a screen, so
+# a screenshot can settle whether they're done. "leetcode 2 questions",
+# "3 problems", "5 kanji", "2 chapters".
+_COUNT_NOUNS = (
+    "question", "questions", "ques", "qs", "problem", "problems",
+    "exercise", "exercises", "chapter", "chapters", "lesson", "lessons",
+    "kanji", "card", "cards", "review", "reviews", "video", "videos",
+    "article", "articles", "page", "pages", "task", "tasks", "commit",
+    "commits", "pr", "prs", "bug", "bugs", "test", "tests", "level",
+    "levels", "module", "modules", "set", "sets", "quiz", "quizzes",
+)
+_COUNT_RE = re.compile(
+    r"(?P<num>\d+)\s*(?P<noun>" + "|".join(_COUNT_NOUNS) + r")\b",
+    re.IGNORECASE,
+)
+# "2 leetcode" / "3 codeforces" — count before the platform instead of a noun.
+_PLATFORM_COUNT_RE = re.compile(
+    r"(?P<num>\d+)\s*(?P<noun>leetcode|codeforces|codechef|hackerrank|"
+    r"neetcode|geeksforgeeks|atcoder|anki|wanikani)\b",
+    re.IGNORECASE,
+)
+
 
 def parse_quest(text: str) -> dict:
     """Turn "japanese 2 hrs" / "2h dsa" / "read 45 min" into a quest spec.
@@ -123,13 +145,36 @@ def parse_quest(text: str) -> dict:
     for m in _DUR_RE.finditer(raw):
         val = float(m.group("num"))
         minutes += int(round(val * 60)) if m.group("unit").lower().startswith("h") else int(round(val))
+
+    # A countable deliverable, e.g. "leetcode 2 questions" → 2.
+    count = 0
+    stripped = _DUR_RE.sub(" ", raw)          # don't read "2 hrs" as a count
+    cm = _COUNT_RE.search(stripped) or _PLATFORM_COUNT_RE.search(stripped)
+    if cm:
+        count = int(cm.group("num"))
+
+    # Which kind of quest is this? Duration wins — if a time was given, time is
+    # what's being committed to. Otherwise a count means there's something to
+    # show a screenshot of. With neither, there's nothing AURA can verify, so
+    # it's yours to tick off.
+    if minutes > 0:
+        kind = "time"
+    elif count > 0:
+        kind = "proof"
+    else:
+        kind = "manual"
+
     title = _DUR_RE.sub(" ", raw)
+    # Keep the count in the title ("Leetcode 2 Questions") — it's the point of
+    # the quest, and the verifier reads it back to know what to look for.
     title = re.sub(r"\b(for|of|a|an|the|every ?day|daily|quest)\b", " ", title, flags=re.IGNORECASE)
     title = re.sub(r"[^\w\s　-鿿]+", " ", title)
     title = re.sub(r"\s+", " ", title).strip().title()
     return {
         "title": title or "Quest",
-        "target_minutes": minutes,      # 0 = untimed, monitored only
+        "target_minutes": minutes,      # 0 = not time-tracked
+        "target_count": count,          # 0 = nothing countable
+        "kind": kind,
         "preset": guess_preset(raw),
     }
 
@@ -345,16 +390,26 @@ def score_quest(quest: dict, ctx: dict[str, Any]) -> tuple[int, bool]:
     return score, saw_anchor
 
 
-def match(ctx: dict[str, Any], quests: list[dict] | None = None) -> tuple[int | None, int]:
+def match(ctx: dict[str, Any], quests: list[dict] | None = None,
+          time_only: bool = True) -> tuple[int | None, int]:
     """Return (quest_id, score) for the best match, or (None, score).
 
     A quest is only credited when it clears MIN_MATCH_SCORE *and* something
     distinctive to it was on screen.
+
+    `time_only` separates two different questions that happen to use the same
+    matcher. For CREDITING SECONDS only time quests are eligible — a proof or
+    manual quest has no clock to credit. But for "is he working right now?"
+    every kind counts: grinding LeetCode for a screenshot-verified quest is
+    obviously work, and engagement must see it or AURA starts interrupting
+    again.
     """
     try:
         board = quests if quests is not None else store.get_quest_board()["quests"]
     except Exception:  # noqa: BLE001
         return None, 0
+    if time_only:
+        board = [q for q in board if q.get("kind", "time") == "time"]
     best_id, best_score, top_seen = None, 0, 0
     for q in board:
         s, anchored = score_quest(q, ctx)
@@ -389,9 +444,13 @@ def pressure(board: dict | None = None, now: float | None = None) -> dict:
 
     # Untimed quests are excluded on purpose: they have no target, so they
     # can't be "owed" and must never make the day look overcommitted.
+    # Only time quests can be "owed" against the clock. A proof or manual
+    # quest takes as long as it takes, so counting it here would invent a
+    # deficit out of nothing.
     required = sum(
         q["remaining_seconds"] for q in board["quests"]
-        if not q["completed"] and not q.get("untimed")
+        if not q["completed"] and q.get("kind", "time") == "time"
+        and not q.get("untimed")
     ) // 60
     available = _minutes_left_in_day(now)
 
@@ -453,6 +512,74 @@ class QuestTracker:
             return False
         self._spoken[key] = now
         return True
+
+    # -- auto-detected submissions -----------------------------------------
+    def check_submission(self, ctx: dict[str, Any],
+                         now: float | None = None) -> str | None:
+        """Credit an accepted coding-platform submission to a proof quest.
+
+        Runs on every watch tick. The detector is deliberately strict and the
+        store deduplicates by problem, so seeing the same Accepted banner for
+        ten minutes credits exactly one solve.
+        """
+        now = now if now is not None else time.time()
+        try:
+            from core.submission_watch import describe, detect_acceptance
+            hit = detect_acceptance(ctx)
+            if not hit:
+                return None
+
+            board = store.get_quest_board()
+            # Which proof quest does this belong to? Match on the quest's own
+            # terms so "leetcode 2 questions" claims a LeetCode solve and a
+            # Codeforces quest doesn't.
+            candidates = [q for q in board["quests"]
+                          if q.get("kind") == "proof" and not q["completed"]]
+            if not candidates:
+                return None
+            quest = None
+            for q in candidates:
+                if score_quest(q, ctx)[0] >= MIN_MATCH_SCORE:
+                    quest = q
+                    break
+            if quest is None:
+                # No keyword match, but if exactly one proof quest is open,
+                # an accepted submission is almost certainly it.
+                if len(candidates) == 1:
+                    quest = candidates[0]
+                else:
+                    return None
+
+            count, is_new = store.record_quest_item(
+                quest["id"], hit["item"], source="auto", day=board["day"])
+            if not is_new:
+                return None
+
+            want = int(quest.get("target_count") or 0)
+            _publish({"kind": "counted", "quest_id": quest["id"],
+                      "title": quest["title"], "item": describe(hit),
+                      "count": count, "target_count": want, "day": board["day"]})
+
+            if want and count >= want:
+                try:
+                    store.complete_quest(quest["id"], day=board["day"])
+                except Exception:  # noqa: BLE001
+                    pass
+                line = (f"{quest['title']} done — that's {count} of {want}. "
+                        f"Last one was {describe(hit)}.")
+                _publish({"kind": "complete", "quest_id": quest["id"],
+                          "title": quest["title"], "text": line,
+                          "day": board["day"]})
+                if self._may_speak(f"complete:{quest['id']}", COMPLETE_COOLDOWN, now):
+                    return line
+                return None
+
+            line = f"{describe(hit)} — accepted. {count} of {want or '?'} done."
+            if self._may_speak(f"counted:{quest['id']}:{count}", 0, now):
+                return line
+        except Exception as e:  # noqa: BLE001
+            print(f"[Quests] submission check failed: {e}")
+        return None
 
     # -- main entry ---------------------------------------------------------
     def tick(self, ctx: dict[str, Any], afk: bool = False,
@@ -657,7 +784,8 @@ def create_from_text(text: str) -> dict:
     from core.quest_presets import PRESETS
     color = PRESETS.get(spec["preset"], PRESETS["custom"])["color"]
     qid = store.add_quest(
-        spec["title"], spec["target_minutes"], "", spec["preset"], color
+        spec["title"], spec["target_minutes"], "", spec["preset"], color,
+        kind=spec["kind"], target_count=spec["target_count"],
     )
     return {"id": qid, **spec, "color": color}
 

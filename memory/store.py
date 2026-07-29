@@ -855,23 +855,46 @@ _QUESTS_DDL = '''
         active         INTEGER DEFAULT 1,
         sort_order     INTEGER DEFAULT 0,
         created_at     TEXT,
-        project_path   TEXT DEFAULT ''
+        project_path   TEXT DEFAULT '',
+        kind           TEXT DEFAULT 'manual',
+        target_count   INTEGER DEFAULT 0,
+        proof_note     TEXT DEFAULT ''
     )
 '''
 
 
-def _ensure_quest_columns(conn):
-    """Add columns introduced after the first release, in place.
+# Columns added after the first release. CREATE TABLE IF NOT EXISTS won't add
+# them to an existing install, so they're ALTERed in. No-ops on a fresh DB.
+_QUEST_LATE_COLUMNS = (
+    ("project_path", "TEXT DEFAULT ''"),
+    # No DEFAULT on `kind`: existing rows must come out NULL so the backfill
+    # below can tell "never set" from "deliberately manual". Defaulting it to
+    # 'manual' silently converted every existing TIMED quest into a manual one
+    # and stopped it being tracked.
+    ("kind", "TEXT"),                       # time | proof | manual
+    ("target_count", "INTEGER DEFAULT 0"),  # e.g. 2 for "leetcode 2 questions"
+    ("proof_note", "TEXT DEFAULT ''"),      # last verification verdict
+)
 
-    project_path arrived with topic/codebase quests. Existing installs already
-    have a quests table, so CREATE TABLE IF NOT EXISTS won't add it — this
-    does, and it's a no-op on a fresh DB.
-    """
+
+def _ensure_quest_columns(conn):
     try:
         have = {r[1] for r in conn.execute("PRAGMA table_info(quests)")}
-        if have and "project_path" not in have:
-            conn.execute("ALTER TABLE quests ADD COLUMN project_path TEXT DEFAULT ''")
-            conn.commit()
+        if not have:
+            return
+        for col, decl in _QUEST_LATE_COLUMNS:
+            if col not in have:
+                conn.execute(f"ALTER TABLE quests ADD COLUMN {col} {decl}")
+        # Backfill: a row that predates `kind` keeps behaving as it did.
+        # A minutes target means it was being time-tracked.
+        conn.execute(
+            "UPDATE quests SET kind = CASE "
+            "  WHEN COALESCE(target_minutes, 0) > 0 THEN 'time' "
+            "  WHEN COALESCE(target_count, 0) > 0 THEN 'proof' "
+            "  ELSE 'manual' END "
+            "WHERE kind IS NULL OR kind = ''"
+        )
+        conn.commit()
     except Exception:  # noqa: BLE001
         pass
 
@@ -880,10 +903,36 @@ _QUEST_DAYS_DDL = '''
         quest_id     INTEGER NOT NULL,
         day          TEXT NOT NULL,
         seconds      INTEGER DEFAULT 0,
+        done_count   INTEGER DEFAULT 0,
         completed_at TEXT,
         PRIMARY KEY (quest_id, day)
     )
 '''
+
+# One row per distinct thing finished, e.g. one accepted LeetCode problem.
+# The `item` key is what makes auto-detection safe: the watcher sees the same
+# "Accepted" screen every 30 seconds, and without an identity per problem it
+# would count one solve a dozen times. UNIQUE does the deduplication.
+_QUEST_ITEMS_DDL = '''
+    CREATE TABLE IF NOT EXISTS quest_items (
+        quest_id  INTEGER NOT NULL,
+        day       TEXT NOT NULL,
+        item      TEXT NOT NULL,
+        source    TEXT DEFAULT 'auto',
+        noted_at  TEXT,
+        UNIQUE (quest_id, day, item)
+    )
+'''
+
+
+def _ensure_quest_day_columns(conn):
+    try:
+        have = {r[1] for r in conn.execute("PRAGMA table_info(quest_days)")}
+        if have and "done_count" not in have:
+            conn.execute("ALTER TABLE quest_days ADD COLUMN done_count INTEGER DEFAULT 0")
+            conn.commit()
+    except Exception:  # noqa: BLE001
+        pass
 
 # Time that was tracked but matched no quest. Stored per day so the board can
 # honestly show where the hours went without labelling anything a "distraction".
@@ -909,7 +958,92 @@ def init_quests():
         conn.execute(_QUESTS_DDL)
         conn.execute(_QUEST_DAYS_DDL)
         conn.execute(_QUEST_OTHER_DDL)
+        conn.execute(_QUEST_ITEMS_DDL)
         _ensure_quest_columns(conn)
+        _ensure_quest_day_columns(conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def record_quest_item(quest_id: int, item: str, source: str = "auto",
+                      day: str = None) -> tuple[int, bool]:
+    """Credit ONE finished thing to a proof quest.
+
+    Returns (new_count, was_new). `was_new` is False when this exact item was
+    already counted today — which is the normal case, since the screen watcher
+    keeps seeing the same accepted submission until you navigate away.
+    """
+    day = day or quest_day()
+    item = (item or "").strip().lower()[:200]
+    if not item:
+        return get_quest_count(quest_id, day), False
+    conn = _connect()
+    try:
+        conn.execute(_QUEST_ITEMS_DDL)
+        conn.execute(_QUEST_DAYS_DDL)
+        _ensure_quest_day_columns(conn)
+        try:
+            conn.execute(
+                'INSERT INTO quest_items (quest_id, day, item, source, noted_at) '
+                'VALUES (?, ?, ?, ?, ?)',
+                (quest_id, day, item, source, datetime.datetime.now().isoformat()),
+            )
+        except sqlite3.IntegrityError:
+            return get_quest_count(quest_id, day), False   # already counted
+        n = conn.execute(
+            'SELECT COUNT(*) FROM quest_items WHERE quest_id = ? AND day = ?',
+            (quest_id, day),
+        ).fetchone()[0]
+        conn.execute(
+            'INSERT INTO quest_days (quest_id, day, done_count) VALUES (?, ?, ?) '
+            'ON CONFLICT(quest_id, day) DO UPDATE SET done_count = excluded.done_count',
+            (quest_id, day, n),
+        )
+        conn.commit()
+        return n, True
+    finally:
+        conn.close()
+
+
+def get_quest_count(quest_id: int, day: str = None) -> int:
+    day = day or quest_day()
+    conn = _connect()
+    try:
+        conn.execute(_QUEST_ITEMS_DDL)
+        row = conn.execute(
+            'SELECT COUNT(*) FROM quest_items WHERE quest_id = ? AND day = ?',
+            (quest_id, day),
+        ).fetchone()
+        return row[0] if row else 0
+    finally:
+        conn.close()
+
+
+def get_quest_items(quest_id: int, day: str = None) -> list:
+    """(item, source, noted_at) — what got counted, so the UI can show it."""
+    day = day or quest_day()
+    conn = _connect()
+    try:
+        conn.execute(_QUEST_ITEMS_DDL)
+        return conn.execute(
+            'SELECT item, source, noted_at FROM quest_items '
+            ' WHERE quest_id = ? AND day = ? ORDER BY noted_at',
+            (quest_id, day),
+        ).fetchall()
+    finally:
+        conn.close()
+
+
+def clear_quest_items(quest_id: int, day: str = None):
+    day = day or quest_day()
+    conn = _connect()
+    try:
+        conn.execute(_QUEST_ITEMS_DDL)
+        conn.execute('DELETE FROM quest_items WHERE quest_id = ? AND day = ?',
+                     (quest_id, day))
+        conn.execute('UPDATE quest_days SET done_count = 0 '
+                     ' WHERE quest_id = ? AND day = ?', (quest_id, day))
         conn.commit()
     finally:
         conn.close()
@@ -917,9 +1051,19 @@ def init_quests():
 
 def add_quest(title: str, target_minutes: int = 0, keywords: str = "",
               preset: str = "custom", color: str = "#8b5cff",
-              project_path: str = "") -> int:
-    """target_minutes=0 creates an UNTIMED quest: AURA still watches for it and
-    accumulates the time, there's just no goal to hit and nothing to complete."""
+              project_path: str = "", kind: str = "", target_count: int = 0) -> int:
+    """Create a quest.
+
+    `kind` decides how it completes, and it's the whole point of the type:
+      time    — a duration was given; AURA tracks it and completes at target
+      proof   — a countable deliverable; completed by a screenshot she checks
+      manual  — nothing verifiable; you tick it off yourself
+    Left blank, it's inferred from whether a duration or a count was supplied.
+    """
+    kind = (kind or "").strip().lower()
+    if kind not in ("time", "proof", "manual"):
+        kind = "time" if int(target_minutes or 0) > 0 else (
+            "proof" if int(target_count or 0) > 0 else "manual")
     conn = _connect()
     try:
         conn.execute(_QUESTS_DDL)
@@ -927,11 +1071,11 @@ def add_quest(title: str, target_minutes: int = 0, keywords: str = "",
         row = conn.execute("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM quests").fetchone()
         cur = conn.execute(
             'INSERT INTO quests (title, target_minutes, keywords, preset, color, '
-            'active, sort_order, created_at, project_path) '
-            'VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)',
+            'active, sort_order, created_at, project_path, kind, target_count) '
+            'VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)',
             (title.strip(), max(0, int(target_minutes)), keywords.strip(),
              preset, color, row[0], datetime.datetime.now().isoformat(),
-             (project_path or "").strip()),
+             (project_path or "").strip(), kind, max(0, int(target_count or 0))),
         )
         conn.commit()
         return cur.lastrowid
@@ -958,7 +1102,8 @@ def get_quests(active_only: bool = True) -> list:
 
 def update_quest(quest_id: int, **patch):
     allowed = {"title", "target_minutes", "keywords", "preset", "color",
-               "active", "sort_order", "project_path"}
+               "active", "sort_order", "project_path", "kind", "target_count",
+               "proof_note"}
     fields = {k: v for k, v in patch.items() if k in allowed and v is not None}
     if not fields:
         return
@@ -1071,16 +1216,21 @@ def get_quest_board(day: str = None) -> dict:
         conn.execute(_QUESTS_DDL)
         conn.execute(_QUEST_DAYS_DDL)
         conn.execute(_QUEST_OTHER_DDL)
+        conn.execute(_QUEST_ITEMS_DDL)
         _ensure_quest_columns(conn)
+        _ensure_quest_day_columns(conn)
         rows = conn.execute(
             'SELECT q.id, q.title, q.target_minutes, q.keywords, q.preset, q.color, '
             '       q.sort_order, COALESCE(d.seconds, 0), d.completed_at, '
-            '       COALESCE(q.project_path, \'\') '
+            '       COALESCE(q.project_path, \'\'), COALESCE(q.kind, \'manual\'), '
+            '       COALESCE(q.target_count, 0), COALESCE(q.proof_note, \'\'), '
+            '       (SELECT COUNT(*) FROM quest_items i '
+            '         WHERE i.quest_id = q.id AND i.day = ?) '
             '  FROM quests q '
             '  LEFT JOIN quest_days d ON d.quest_id = q.id AND d.day = ? '
             ' WHERE q.active = 1 '
             ' ORDER BY q.sort_order, q.id',
-            (day,),
+            (day, day),   # first `day` is the item-count subquery
         ).fetchall()
         other = conn.execute(
             'SELECT seconds FROM quest_unallocated WHERE day = ?', (day,)
@@ -1092,22 +1242,37 @@ def get_quest_board(day: str = None) -> dict:
     for r in rows:
         target_s = int(r[2]) * 60
         done_s = int(r[7])
-        untimed = target_s <= 0
-        # An untimed quest is monitored, not measured: it accumulates time and
-        # is never "behind" or "complete" — there's no goal to be either of.
-        # A timed one keeps counting past its target, so overtime is real and
-        # visible rather than the bar just parking at 100%.
+        kind = (r[10] or "manual").lower()
+        timed = kind == "time" and target_s > 0
+        want = int(r[11] or 0)
+        have = int(r[13] or 0)
+        # A proof quest completes when enough distinct items are counted —
+        # whether they were auto-detected from the screen or verified from a
+        # screenshot. Both routes land in the same ledger.
+        count_done = kind == "proof" and want > 0 and have >= want
+        # Only a `time` quest is measured against a clock. `proof` and `manual`
+        # quests complete on a verified screenshot or on your own say-so, so a
+        # progress bar would be meaningless for them — and crucially they must
+        # never auto-complete just because time passed.
         quests.append({
             "id": r[0], "title": r[1], "target_minutes": r[2],
             "keywords": r[3] or "", "preset": r[4], "color": r[5],
             "sort_order": r[6], "project_path": r[9] or "",
+            "kind": kind,
+            "target_count": want,
+            "done_count": have,
+            "count_percent": min(100, round(have / want * 100)) if want else 0,
+            "proof_note": r[12] or "",
             "seconds": done_s,
             "target_seconds": target_s,
-            "untimed": untimed,
-            "percent": 0 if untimed else min(100, round(done_s / target_s * 100)),
-            "remaining_seconds": 0 if untimed else max(0, target_s - done_s),
-            "overtime_seconds": 0 if untimed else max(0, done_s - target_s),
-            "completed": False if untimed else (bool(r[8]) or done_s >= target_s),
+            "untimed": not timed,
+            "percent": min(100, round(done_s / target_s * 100)) if timed else 0,
+            "remaining_seconds": max(0, target_s - done_s) if timed else 0,
+            "overtime_seconds": max(0, done_s - target_s) if timed else 0,
+            # Time quests complete on the clock, proof quests on the count,
+            # manual quests only when you say so.
+            "completed": (bool(r[8]) or done_s >= target_s) if timed
+                         else (bool(r[8]) or count_done),
             "completed_at": r[8],
         })
     return {

@@ -47,11 +47,18 @@ export default function QuestsView({ event = null }: Props) {
   const [offline, setOffline] = useState(false);
 
   const [draft, setDraft] = useState("");
+  // Per-quest verification state: which is in flight, and the last verdict.
+  const [verifying, setVerifying] = useState<number | null>(null);
+  const [verdicts, setVerdicts] = useState<
+    Record<number, { ok: boolean; verdict: string; evidence: string; error: string }>
+  >({});
   const [editing, setEditing] = useState<number | null>(null);
   const [editKeywords, setEditKeywords] = useState("");
   const [editMinutes, setEditMinutes] = useState(60);
   const [editPreset, setEditPreset] = useState("custom");
   const [editPath, setEditPath] = useState("");
+  const [editKind, setEditKind] = useState<Quest["kind"]>("manual");
+  const [editCount, setEditCount] = useState(0);
   // What AURA is actually watching for — shown so a quest that isn't filling
   // up can be diagnosed instead of the matcher being a black box.
   const [terms, setTerms] = useState<{ anchors: string[]; supporting: string[] } | null>(null);
@@ -100,6 +107,8 @@ export default function QuestsView({ event = null }: Props) {
     setEditMinutes(q.target_minutes);
     setEditPreset(q.preset);
     setEditPath(q.project_path || "");
+    setEditKind(q.kind);
+    setEditCount(q.target_count || 0);
     setTerms(null);
     api
       .getQuestTerms(q.id)
@@ -107,12 +116,64 @@ export default function QuestsView({ event = null }: Props) {
       .catch(() => setTerms(null));
   };
 
+  /** Read a picked file as bare base64 (strip the data: URL prefix). */
+  const fileToB64 = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(String(fr.result).split(",")[1] || "");
+      fr.onerror = reject;
+      fr.readAsDataURL(file);
+    });
+
+  const verifyWithFile = async (q: Quest, file: File) => {
+    setVerifying(q.id);
+    try {
+      const b64 = await fileToB64(file);
+      const r = await api.verifyQuest(q.id, b64);
+      setVerdicts((v) => ({
+        ...v,
+        [q.id]: { ok: r.ok, verdict: r.verdict, evidence: r.evidence, error: r.error },
+      }));
+      load();
+    } catch {
+      setVerdicts((v) => ({
+        ...v,
+        [q.id]: { ok: false, verdict: "", evidence: "", error: "Couldn't read that image." },
+      }));
+    } finally {
+      setVerifying(null);
+    }
+  };
+
+  const verify = async (q: Quest) => {
+    setVerifying(q.id);
+    try {
+      const r = await api.verifyQuest(q.id);
+      setVerdicts((v) => ({
+        ...v,
+        [q.id]: { ok: r.ok, verdict: r.verdict, evidence: r.evidence, error: r.error },
+      }));
+      load();
+    } catch {
+      setVerdicts((v) => ({
+        ...v,
+        [q.id]: { ok: false, verdict: "", evidence: "", error: "Bridge unreachable." },
+      }));
+    } finally {
+      setVerifying(null);
+    }
+  };
+
   const saveEdit = async (q: Quest) => {
     const preset = presets.find((p) => p.id === editPreset);
     await api
       .updateQuest(q.id, {
         keywords: editKeywords,
-        target_minutes: editMinutes,
+        // A non-time quest must not keep a stale minutes target — that's what
+        // decides whether the clock runs at all.
+        target_minutes: editKind === "time" ? editMinutes : 0,
+        target_count: editKind === "proof" ? editCount : 0,
+        kind: editKind,
         preset: editPreset,
         project_path: editPath,
         // Follow the pack's colour unless the quest was already customised.
@@ -208,27 +269,59 @@ export default function QuestsView({ event = null }: Props) {
                 >
                   <div className="qcard__top">
                     <span className="qcard__title">{q.title}</span>
+                    <span className={"qkind qkind--" + q.kind}>
+                      {q.kind === "time"
+                        ? "timed"
+                        : q.kind === "proof"
+                        ? "screenshot"
+                        : "manual"}
+                    </span>
                     {active && <span className="qcard__live">tracking now</span>}
                     {streak > 1 && <span className="qcard__streak">{streak}d streak</span>}
                     {q.overtime_seconds > 0 && (
                       <span className="qcard__over">+{fmt(q.overtime_seconds)}</span>
                     )}
-                    <span className="qcard__time">
-                      {fmt(q.seconds)}
-                      {/* An untimed quest has no denominator to show. */}
-                      {!q.untimed && <em> / {fmt(q.target_seconds)}</em>}
-                    </span>
+                    {/* Only a timed quest has a clock worth showing. */}
+                    {q.kind === "time" && (
+                      <span className="qcard__time">
+                        {fmt(q.seconds)}
+                        {!q.untimed && <em> / {fmt(q.target_seconds)}</em>}
+                      </span>
+                    )}
+                    {/* Proof quests count things instead of minutes. */}
+                    {q.kind === "proof" && q.target_count > 0 && (
+                      <span className="qcard__time">
+                        {q.done_count}
+                        <em> / {q.target_count}</em>
+                      </span>
+                    )}
                   </div>
 
-                  {/* Untimed quests get a flat "always accumulating" rail
-                      rather than a progress bar — there's nothing to fill. */}
-                  <div className={"qcard__bar" + (q.untimed ? " qcard__bar--open" : "")}>
-                    <span style={{ width: q.untimed ? "100%" : `${q.percent}%` }} />
-                  </div>
+                  {/* Time quests fill by the clock, proof quests by the count.
+                      Manual quests have nothing to fill. */}
+                  {q.kind === "time" && (
+                    <div className={"qcard__bar" + (q.untimed ? " qcard__bar--open" : "")}>
+                      <span style={{ width: q.untimed ? "100%" : `${q.percent}%` }} />
+                    </div>
+                  )}
+                  {q.kind === "proof" && q.target_count > 0 && (
+                    <div className="qcard__bar">
+                      <span style={{ width: `${q.count_percent}%` }} />
+                    </div>
+                  )}
 
                   <div className="qcard__foot">
                     <span className="qcard__meta">
-                      {q.untimed
+                      {q.kind === "proof"
+                        ? q.completed
+                          ? "verified"
+                          : `${Math.max(0, q.target_count - q.done_count)} to go · ` +
+                            "AURA counts accepted submissions automatically"
+                        : q.kind === "manual"
+                        ? q.completed
+                          ? "done"
+                          : "mark it done when you've done it"
+                        : q.untimed
                         ? "no target · monitored"
                         : q.completed
                         ? q.overtime_seconds > 0
@@ -238,9 +331,38 @@ export default function QuestsView({ event = null }: Props) {
                       {q.preset !== "custom" && ` · ${q.preset}`}
                     </span>
                     <span className="qcard__actions">
-                      <button onClick={() => api.adjustQuest(q.id, 15).then(load)}>
-                        +15m
-                      </button>
+                      {/* +15m only makes sense against a clock. */}
+                      {q.kind === "time" && (
+                        <button onClick={() => api.adjustQuest(q.id, 15).then(load)}>
+                          +15m
+                        </button>
+                      )}
+                      {q.kind === "proof" && !q.completed && (
+                        <>
+                          <button
+                            className="qcard__verify"
+                            disabled={verifying === q.id}
+                            onClick={() => verify(q)}
+                            title="AURA captures your screen and checks it"
+                          >
+                            {verifying === q.id ? "looking..." : "verify screen"}
+                          </button>
+                          {/* Fallback for when auto-detection missed it, or
+                              the proof lives somewhere she can't see. */}
+                          <label className="qcard__upload" title="Upload a screenshot instead">
+                            upload
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                e.target.value = "";
+                                if (f) verifyWithFile(q, f);
+                              }}
+                            />
+                          </label>
+                        </>
+                      )}
                       <button
                         onClick={() => api.completeQuest(q.id, q.completed).then(load)}
                       >
@@ -251,17 +373,71 @@ export default function QuestsView({ event = null }: Props) {
                     </span>
                   </div>
 
+                  {/* Verification verdict. Three outcomes, kept distinct:
+                      passed, looked-but-not-done, and couldn't-look. */}
+                  {(verdicts[q.id] || q.proof_note) && (
+                    <div
+                      className={
+                        "qverdict " +
+                        (!verdicts[q.id]
+                          ? "qverdict--note"
+                          : !verdicts[q.id].ok
+                          ? "qverdict--error"
+                          : verdicts[q.id].verdict === "pass"
+                          ? "qverdict--pass"
+                          : "qverdict--fail")
+                      }
+                    >
+                      {!verdicts[q.id] ? (
+                        <span>Last check: {q.proof_note}</span>
+                      ) : !verdicts[q.id].ok ? (
+                        <span>{verdicts[q.id].error}</span>
+                      ) : verdicts[q.id].verdict === "pass" ? (
+                        <span>Verified — {verdicts[q.id].evidence}</span>
+                      ) : (
+                        <span>
+                          Not yet. {verdicts[q.id].evidence}{" "}
+                          <button onClick={() => verify(q)}>check again</button>
+                        </span>
+                      )}
+                    </div>
+                  )}
+
                   {editing === q.id && (
                     <div className="qedit">
                       <label>
-                        Target (minutes) — leave 0 to just monitor it with no goal
-                        <input
-                          type="number"
-                          min={0}
-                          value={editMinutes}
-                          onChange={(e) => setEditMinutes(Number(e.target.value))}
-                        />
+                        How does this finish?
+                        <select
+                          value={editKind}
+                          onChange={(e) => setEditKind(e.target.value as Quest["kind"])}
+                        >
+                          <option value="time">Timed — AURA tracks the clock</option>
+                          <option value="proof">Screenshot — AURA verifies it</option>
+                          <option value="manual">Manual — you mark it done</option>
+                        </select>
                       </label>
+                      {editKind === "time" && (
+                        <label>
+                          Target (minutes) — 0 to monitor with no goal
+                          <input
+                            type="number"
+                            min={0}
+                            value={editMinutes}
+                            onChange={(e) => setEditMinutes(Number(e.target.value))}
+                          />
+                        </label>
+                      )}
+                      {editKind === "proof" && (
+                        <label>
+                          How many to finish? AURA looks for this in the screenshot.
+                          <input
+                            type="number"
+                            min={0}
+                            value={editCount}
+                            onChange={(e) => setEditCount(Number(e.target.value))}
+                          />
+                        </label>
+                      )}
                       <label>
                         Keyword pack — what AURA looks for on screen
                         <select

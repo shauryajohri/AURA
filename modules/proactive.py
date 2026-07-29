@@ -793,7 +793,11 @@ def _loop(speak_fn, on_suggestion_fn=None, on_presence_fn=None):
             # cycle and is silent almost always — it only returns a line when
             # a quest completes or the day genuinely stops fitting.
             try:
-                quest_line = _quests().get_tracker().tick(ctx)
+                tracker = _quests().get_tracker()
+                # Accepted submissions first — a solve landing is more worth
+                # saying than a time milestone, and it can complete the quest
+                # outright.
+                quest_line = tracker.check_submission(ctx) or tracker.tick(ctx)
             except Exception as e:  # noqa: BLE001
                 print(f"[AURA Proactive] Quest tick skipped: {e}")
                 quest_line = None

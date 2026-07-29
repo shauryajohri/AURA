@@ -62,6 +62,16 @@ export interface Quest {
   color: string;
   sort_order: number;
   project_path: string;
+  /** How it completes: time = tracked clock, proof = verified screenshot,
+   *  manual = you tick it off. */
+  kind: "time" | "proof" | "manual";
+  /** For proof quests: how many of the thing ("leetcode 2 questions" → 2). */
+  target_count: number;
+  /** How many have been credited today — auto-detected or screenshot-verified. */
+  done_count: number;
+  count_percent: number;
+  /** What AURA saw on the last verification attempt. */
+  proof_note: string;
   seconds: number;
   target_seconds: number;
   /** No target set — monitored only, never completes. */
@@ -227,8 +237,22 @@ export const api = {
   getQuests: () => j<QuestBoard>("/api/quests"),
   addQuest: (body: { text?: string; title?: string; target_minutes?: number; preset?: string; keywords?: string; project_path?: string }) =>
     j<{ ok: boolean; id?: number }>("/api/quests", { method: "POST", body: JSON.stringify(body) }),
-  updateQuest: (id: number, patch: Partial<Pick<Quest, "title" | "target_minutes" | "keywords" | "preset" | "color" | "sort_order" | "project_path">> & { active?: number }) =>
+  updateQuest: (id: number, patch: Partial<Pick<Quest, "title" | "target_minutes" | "keywords" | "preset" | "color" | "sort_order" | "project_path" | "kind" | "target_count">> & { active?: number }) =>
     j(`/api/quests/${id}`, { method: "PUT", body: JSON.stringify(patch) }),
+  /** Omit `image` and AURA captures the screen herself; pass base64 (no
+   *  data: prefix) to verify a file you picked instead. */
+  verifyQuest: (id: number, image?: string) =>
+    j<{
+      ok: boolean;
+      title: string;
+      verdict: "pass" | "fail" | "";
+      evidence: string;
+      completed: boolean;
+      error: string;
+    }>(`/api/quests/${id}/verify`, {
+      method: "POST",
+      body: JSON.stringify(image ? { image } : {}),
+    }),
   getQuestTerms: (id: number) =>
     j<{ ok: boolean; anchors: string[]; supporting: string[]; project_path: string; harvested: string[] }>(
       `/api/quests/${id}/terms`,

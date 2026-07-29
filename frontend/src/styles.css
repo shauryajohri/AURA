@@ -530,6 +530,41 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
     color-mix(in srgb, var(--qc, #8b5cff) 10%, transparent));
   opacity: .65;
 }
+.qkind {
+  font-size: 9px; letter-spacing: .9px; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 5px;
+}
+.qkind--time { color: var(--violet-bright); background: rgba(139,92,255,0.16); }
+.qkind--proof { color: var(--cyan); background: rgba(56,225,255,0.14); }
+.qkind--manual { color: var(--muted); background: rgba(255,255,255,0.06); }
+
+.qcard__verify {
+  color: var(--cyan) !important; border-color: rgba(56,225,255,0.4) !important;
+}
+.qcard__verify:disabled { opacity: .55; }
+/* The file input is hidden; the label is the button. */
+.qcard__upload {
+  border: 1px solid var(--border); border-radius: 7px; color: var(--muted);
+  font-size: 11px; padding: 3px 9px; cursor: var(--cursor-point);
+  display: inline-flex; align-items: center;
+}
+.qcard__upload:hover { color: var(--text); border-color: var(--border-bright); }
+.qcard__upload input { display: none; }
+
+.qverdict {
+  margin-top: 9px; padding: 8px 11px; border-radius: 8px; font-size: 12px;
+  line-height: 1.45; border: 1px solid var(--border); background: rgba(0,0,0,0.25);
+}
+.qverdict--pass { border-color: rgba(74,222,128,0.4); color: #b7f5cb; }
+.qverdict--fail { border-color: rgba(245,166,35,0.42); color: #ffd9a1; }
+.qverdict--error { border-color: rgba(255,107,138,0.4); color: #ffc2ce; }
+.qverdict--note { color: var(--muted); }
+.qverdict button {
+  margin-left: 6px; background: none; border: 1px solid var(--border);
+  border-radius: 6px; color: inherit; font-size: 11px; padding: 2px 8px;
+  cursor: var(--cursor-point);
+}
+
 .qcard__over {
   font-size: 9.5px; letter-spacing: .6px; text-transform: uppercase;
   color: #4ade80; background: rgba(74,222,128,0.13);

@@ -108,7 +108,9 @@ def classify(ctx: dict[str, Any]) -> dict[str, Any]:
     #    is what they'd be doing today, and it's on screen.
     try:
         from core import quests
-        qid, _score = quests.match(ctx)
+        # Every kind counts here: working toward a screenshot-verified or
+        # manual quest is still working, even though no clock is running.
+        qid, _score = quests.match(ctx, time_only=False)
         if qid is not None:
             board = quests.store.get_quest_board()["quests"]
             q = next((x for x in board if x["id"] == qid), None)

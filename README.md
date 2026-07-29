@@ -1,214 +1,57 @@
-# 🌌 AURA
+# AURA — AI Desktop Companion & Multi-Agent Coding Environment
 
-> **An OS-level AI companion built to understand, observe, and work alongside you.**
+AURA is a self-hosted AI companion built to live on your desktop and work alongside you — not a chatbot you summon, but a system that observes, remembers, and steps in when it's actually useful.
 
-AURA is a context-aware desktop AI assistant designed to go beyond traditional chatbots. Instead of simply responding to commands, AURA understands your workflow, observes your workspace, remembers previous interactions, and proactively assists when it can genuinely improve your productivity.
-
-The long-term vision is to build an intelligent operating system companion that feels less like software and more like a trusted teammate.
+It routes every query through a cost-aware, multi-model pipeline, remembers context across sessions instead of starting fresh every time, and pairs voice interaction with real-time awareness of your active workspace.
 
 ---
 
-## ✨ Vision
+## ✨ Core Features
 
-Modern AI assistants wait for commands.
-
-AURA aims to understand context.
-
-Instead of:
-
-```
-User → Prompt → Response
-```
-
-AURA works more like:
-
-```
-Observe
-      ↓
-Understand
-      ↓
-Plan
-      ↓
-Choose the best AI model or local tool
-      ↓
-Execute
-      ↓
-Remember
-```
-
-The goal is to create an assistant that quietly lives beside the user, understands what they're doing, and provides meaningful assistance only when appropriate.
+- **4-stage routing pipeline** — a 550+ entry pattern-matcher, a local Ollama gate, and an intent-based router across 5 free-tier LLMs (via Groq and OpenRouter) bring per-query inference cost to $0, with automatic fallback on rate limits.
+- **Persistent memory layer** — 11 SQLite tables covering conversations, facts, tasks, session snapshots, and working memory, enabling durable recall across sessions instead of stateless, forgetful chat.
+- **Rule-based Error Intelligence engine** — classifies coding errors into 4 severity levels locally, only escalating to an LLM when it can't resolve the issue itself, keeping common errors fast and free to diagnose.
+- **Real-time voice I/O** — wake-word activation ("Aura"), speech in and out, built for hands-free, ambient interaction.
+- **Live screen & workspace awareness** — AURA can see your active application/IDE context to give situationally relevant help.
+- **AURA Domain — coding workspace** — an integrated development environment inside AURA itself: live git status, file explorer, real terminal, and project switching.
+- **Proactive + curiosity engines** — notices when you're stuck, idle, or hit an error, and speaks up without being asked.
+- **Slash-command modes** — `/code`, `/research`, `/plan`, `/discussion`, `/prompt` for different working styles without leaving the chat.
 
 ---
 
-# 🚀 Current Features
+## 🧠 Philosophy
 
-### 🧠 Context Awareness
-- Understands user intent before execution
-- Workspace-aware interactions
-- Session memory
-- Conversation history
-- Context-aware responses
+Most AI assistants wait for a prompt and reply. AURA is built around a different loop:
 
-### 🤖 Multi-Model Routing
-Automatically selects the most suitable AI model depending on the task.
-
-Current integrations include:
-
-- GPT
-- Claude
-- Gemini
-- Groq
-- Ollama (Local Models)
+> Observe before interrupting. Understand before responding. Remember before asking again. Stay silent when silence is better.
 
 ---
 
-### 👀 Workspace Awareness
+## 🖥️ Two Interfaces, One Brain
 
-AURA can observe your working environment to better understand what you're doing.
-
-Current capabilities include:
-
-- Active application detection
-- Screen understanding
-- VS Code awareness
-- Project context indexing
-- Coding workspace observations
+1. **PySide6 desktop app** — the original interface: a floating orb with a cosmic, black-hole-themed visualization.
+2. **React + TypeScript + Electron + Three.js frontend** *(active development)* — a cinematic universe-style UI with a "Sanctuary" home (live tasks, quick shortcuts, memory graph, settings) and a full "Domain" workspace (kanban planning, code/markdown editors, project shell). Communicates with the same Python backend over a FastAPI WebSocket bridge.
 
 ---
 
-### 💻 Coding Companion
+## 🛠️ Tech Stack
 
-Designed specifically for developers.
-
-Features include:
-
-- Project context indexing
-- Codebase understanding
-- Bug detection assistance
-- Workspace observations
-- Project-aware responses
+**Backend:** Python, PySide6, Groq API, OpenRouter, Ollama, SQLite, edge-tts
+**Frontend (new):** React, TypeScript, Vite, Electron, Three.js
+**Bridge:** FastAPI (WebSocket)
+**Memory search:** FAISS + sentence-transformers
 
 ---
 
-### 🧩 Modular Architecture
+## 📌 Project Status
 
-AURA is built as independent engines working together.
+Actively evolving — most core systems (routing, memory, voice, error intelligence, workspace) are live and used daily. A few pieces are built but not yet fully wired in: a deeper session-awareness engine, settings-to-visuals integration, a plan-approval panel, and a packaged installer.
 
-Current architecture includes:
-
-- Intent Engine
-- Prompt Maker
-- Memory Engine
-- Proactive Engine
-- Curiosity Engine
-- Workspace Observer
-- Interestingness Engine
-- Voice Gate
-- Screen Reader
-- Model Router
-
-Each module has a single responsibility, making AURA easy to expand and maintain.
+**Roadmap:** relationship engine, study mode, Spotify integration, cross-device context.
 
 ---
 
-### 🎨 Desktop Companion
 
-Current UI includes:
+## 🗺️ Why "AURA"
 
-- Floating Orb
-- Animated Thinking State
-- Listening State
-- Speaking State
-- Responsive Chat Interface
-- Dark-themed desktop companion
-
-The orb represents AURA itself while additional windows provide tools and information.
-
----
-
-# 🛣 Roadmap
-
-AURA is an actively evolving project.
-
-Upcoming features include:
-
-- Relationship Engine
-- Study Mode
-- Knowledge Cache
-- Conversation Director
-- Better Prompt Planner
-- Advanced Coding Companion
-- Spotify Integration
-- Improved Voice System
-- Camera-based Awareness (Optional)
-- Desktop Companion Behaviours
-- Cross-device Context
-
----
-
-# 💡 Philosophy
-
-AURA follows a few simple principles:
-
-- Observe before interrupting.
-- Understand before responding.
-- Remember before asking again.
-- Plan before executing.
-- Stay silent when silence is better.
-- Be a teammate, not just another chatbot.
-
----
-
-# 🛠 Tech Stack
-
-### Languages
-
-- Python
-
-### AI Models
-
-- OpenAI
-- Anthropic Claude
-- Google Gemini
-- Groq
-- Ollama
-
-### Libraries
-
-- PyQt6
-- Whisper
-- Vosk
-- Edge-TTS
-- Pygame
-- FAISS
-- Sentence Transformers
-
----
-
-# ⚠ Current Status
-
-AURA is currently under active development.
-
-Many systems are experimental and evolve rapidly as new ideas are tested and refined.
-
----
-
-# 🌌 Long-Term Goal
-
-The goal isn't to build another AI chatbot.
-
-The goal is to build an operating system companion that:
-
-- Understands your workflow.
-- Learns from long-term interactions.
-- Works proactively without becoming intrusive.
-- Helps with coding, productivity, and everyday computer tasks.
-- Feels like a natural part of your desktop.
-
----
-
-> **AURA isn't trying to replace your tools.**
->
-> **It's designed to connect them.**
->
-> *Observe. Understand. Plan. Assist.*
+Built as a real, daily-use tool — not a class assignment — around the idea that an AI companion should feel like a teammate sitting next to you, not a tool you have to open and address every time.

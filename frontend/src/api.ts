@@ -284,6 +284,14 @@ export const api = {
       body: JSON.stringify({ success }),
     }),
 
+  // Voice — fallback speech-to-text when the browser's Web Speech API can't
+  // do the job. `wavBase64` is a bare base64 16 kHz mono WAV (no data: prefix).
+  transcribe: (wavBase64: string) =>
+    j<{ ok: boolean; text: string; error: string }>("/api/voice/transcribe", {
+      method: "POST",
+      body: JSON.stringify({ audio: wavBase64 }),
+    }),
+
   // App settings
   getSettings: () => j<{ settings: Settings }>("/api/settings").then((r) => r.settings),
   saveSettings: (patch: Settings) =>

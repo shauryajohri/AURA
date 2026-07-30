@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Settings } from "../../api";
 import { Layout, ColId, Size, CARD_TITLES, DEFAULT_LAYOUT } from "./layoutTypes";
+import MicCheck from "../MicCheck";
 
 // ============================================================================
 // Focused settings editors. Clicking "Blackhole" in the settings card doesn't
@@ -16,7 +17,7 @@ export type SettingsCategory = "blackhole" | "planets" | "voice" | "autochat" | 
 export const CATEGORY_META: Record<SettingsCategory, { icon: string; title: string; desc: string }> = {
   blackhole: { icon: "◉", title: "Blackhole", desc: "The core — glow, particles, rotation" },
   planets: { icon: "◍", title: "Planets", desc: "The constellation — orbits, rings, labels" },
-  voice: { icon: "♪", title: "Voice", desc: "How AURA speaks" },
+  voice: { icon: "♪", title: "Voice", desc: "How AURA speaks — and how she hears you" },
   autochat: { icon: "✦", title: "Auto-chat", desc: "How chatty AURA is on her own" },
   layout: { icon: "▦", title: "Layout", desc: "Size & position of your sanctuary cards" },
 };
@@ -340,6 +341,9 @@ export default function SettingsOverlay({
 
         {preview()}
         {controls()}
+        {/* Output above (how AURA speaks), input below (how she hears you).
+            Not part of the draft — it touches hardware, not settings. */}
+        {category === "voice" && <MicCheck />}
 
         <footer className="setov__foot">
           <button className="setov__cancel" onClick={onClose}>Cancel</button>

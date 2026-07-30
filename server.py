@@ -471,6 +471,54 @@ async def api_save_settings(req: Request) -> dict[str, Any]:
     return {"ok": True, "settings": store.get_settings()}
 
 
+# ── Voice: speech-to-text fallback for the browser ──────────────────────────
+# The React mic prefers the browser's own Web Speech API. When that's missing
+# or its network path dies, the frontend encodes the utterance as a 16 kHz mono
+# WAV and posts it here instead. WAV (not webm) on purpose: speech_recognition
+# reads it natively, so this needs no ffmpeg/pydub on the machine.
+@app.post("/api/voice/transcribe")
+async def api_transcribe(req: Request) -> dict[str, Any]:
+    import base64
+    import io
+
+    body = await req.json()
+    raw = body.get("audio") or ""
+    if not raw:
+        return {"ok": False, "text": "", "error": "no audio"}
+
+    # Tolerate a data: URL prefix in case a caller sends one.
+    if "," in raw[:64] and raw.lstrip().startswith("data:"):
+        raw = raw.split(",", 1)[1]
+
+    try:
+        wav = base64.b64decode(raw)
+    except Exception:
+        return {"ok": False, "text": "", "error": "audio is not valid base64"}
+
+    def _run() -> dict[str, Any]:
+        try:
+            import speech_recognition as sr
+        except Exception:
+            return {"ok": False, "text": "", "error": "speech_recognition not installed"}
+        recognizer = sr.Recognizer()
+        try:
+            with sr.AudioFile(io.BytesIO(wav)) as source:
+                audio = recognizer.record(source)
+        except Exception as e:
+            return {"ok": False, "text": "", "error": f"unreadable audio: {e}"}
+        try:
+            return {"ok": True, "text": recognizer.recognize_google(audio), "error": ""}
+        except sr.UnknownValueError:
+            # Silence or nothing intelligible — not an error, just no words.
+            return {"ok": True, "text": "", "error": ""}
+        except sr.RequestError as e:
+            return {"ok": False, "text": "", "error": f"speech service unavailable: {e}"}
+
+    # recognize_google is a blocking network call — keep it off the event loop
+    # or it stalls the WebSocket that's streaming AURA's reply.
+    return await asyncio.to_thread(_run)
+
+
 # ── Nature: AURA's locked personality (auto / chill / focus / savage / …) ────
 @app.get("/api/nature")
 async def api_get_nature() -> dict[str, Any]:

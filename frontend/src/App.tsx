@@ -317,7 +317,13 @@ export default function App() {
           {chatOpen ? (
             <>
               <Resizer onResize={setChatWidth} />
-              <ChatPanel status={status} turns={turns} onSend={send} onCollapse={() => setChatOpen(false)} />
+              <ChatPanel
+                status={status}
+                turns={turns}
+                onSend={send}
+                auraState={auraState}
+                onCollapse={() => setChatOpen(false)}
+              />
             </>
           ) : (
             <button className="chat-reveal" onClick={() => setChatOpen(true)} title="Show chat">

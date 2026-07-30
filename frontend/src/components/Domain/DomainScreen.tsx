@@ -5,18 +5,22 @@ import DomainNav from "./DomainNav";
 import DomainHeader from "./DomainHeader";
 import DomainChat from "./DomainChat";
 import DomainBoundary from "./DomainBoundary";
-import DomainDashboard from "./views/DomainDashboard";
-import PlanningBoard from "./views/PlanningBoard";
-import TasksBoard from "./views/TasksBoard";
+import BrainDashboard from "./brain/BrainDashboard";
+import ProjectsView from "./brain/ProjectsView";
+import ResearchView from "./brain/ResearchView";
+import BrainTasks from "./brain/BrainTasks";
+import GraphView from "./brain/GraphView";
+import BrainTimeline from "./brain/BrainTimeline";
+import NodeDrawer from "./brain/NodeDrawer";
 import CodePane from "./views/CodePane";
+import CodeReviewView from "./views/CodeReviewView";
 import DocumentationView from "./views/DocumentationView";
 import NotesView from "./views/NotesView";
 import TerminalView from "./views/TerminalView";
 import DomainSettings from "./views/DomainSettings";
-import HistoryView from "./views/HistoryView";
 import AgentsView from "./views/AgentsView";
-import DomainPlaceholder from "./views/DomainPlaceholder";
 import "./domain.css";
+import "./brain/brain.css";
 
 // ============================================================================
 // AURA Domain — the workspace beyond the beam.
@@ -39,19 +43,21 @@ export default function DomainScreen({ onExit }: Props) {
 
   const center = () => {
     switch (section) {
-      case "dashboard": return <DomainDashboard />;
-      case "projects": return <PlanningBoard />;
-      case "tasks": return <TasksBoard />;
+      // the Project Brain owns these — real graph, not local mock state
+      case "dashboard": return <BrainDashboard />;
+      case "projects": return <ProjectsView />;
+      case "research": return <ResearchView />;
+      case "tasks": return <BrainTasks />;
+      case "graph": return <GraphView />;
+      case "history": return <BrainTimeline />;
       case "code": return <CodePane />;
+      case "review": return <CodeReviewView />;
       case "documents": return <DocumentationView />;
       case "notes": return <NotesView />;
       case "terminal": return <TerminalView />;
       case "settings": return <DomainSettings />;
       case "agents": return <AgentsView />;
-      case "research":
-        return <DomainPlaceholder icon="◎" title="Research Canvas" line="A thinking surface for sources, threads and discoveries — arriving soon." />;
-      case "history": return <HistoryView />;
-      default: return <DomainDashboard />;
+      default: return <BrainDashboard />;
     }
   };
 
@@ -95,6 +101,9 @@ export default function DomainScreen({ onExit }: Props) {
           <DomainChat collapsed={!chatOpen} onToggle={() => setChatOpen((v) => !v)} />
         )}
       </div>
+
+      {/* one drawer for the whole workspace: any view can open any node */}
+      <NodeDrawer />
     </div>
   );
 }

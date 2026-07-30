@@ -12,8 +12,9 @@ import { persist } from "zustand/middleware";
 // ============================================================================
 
 export type DomainSection =
-  | "dashboard" | "projects" | "tasks" | "code" | "research" | "documents"
-  | "notes" | "agents" | "terminal" | "history" | "settings";
+  | "dashboard" | "projects" | "research" | "tasks" | "graph" | "code"
+  | "review" | "documents" | "notes" | "agents" | "terminal" | "history"
+  | "settings";
 
 export type ProjectStatus = "idea" | "progress" | "paused" | "completed";
 
@@ -155,16 +156,31 @@ export interface DomainLayout {
 }
 
 export const ALL_SECTIONS: DomainSection[] = [
-  "dashboard", "projects", "tasks", "code", "research",
+  "dashboard", "projects", "research", "tasks", "graph", "code", "review",
   "documents", "notes", "agents", "terminal", "history", "settings",
 ];
+
+/** Sections that existed in older builds, and where they went. Persisted
+ *  layouts and the remembered section are rewritten through this on load —
+ *  without it, a saved nav order silently loses the renamed entry. */
+const SECTION_ALIASES: Record<string, DomainSection> = {
+  brainstorm: "research",   // Research absorbed it: chooser + discussion in one
+};
+
+export const migrateSection = (s: unknown): DomainSection | null => {
+  if (typeof s !== "string") return null;
+  const mapped = SECTION_ALIASES[s] ?? s;
+  return (ALL_SECTIONS as string[]).includes(mapped) ? (mapped as DomainSection) : null;
+};
 
 export const SECTION_META: Record<DomainSection, { icon: string; label: string }> = {
   dashboard: { icon: "◈", label: "Dashboard" },
   projects: { icon: "▣", label: "Projects" },
+  research: { icon: "✧", label: "Research" },
   tasks: { icon: "☑", label: "Tasks" },
+  graph: { icon: "◉", label: "Knowledge Graph" },
   code: { icon: "⌥", label: "Code" },
-  research: { icon: "◎", label: "Research" },
+  review: { icon: "⇄", label: "Code Review" },
   documents: { icon: "≡", label: "Documentation" },
   notes: { icon: "✎", label: "Notes" },
   agents: { icon: "✦", label: "AI Agents" },
@@ -269,15 +285,33 @@ function normalizeProject(p: any): Project {
 /** Same idea for the top-level slice. */
 function normalizeState(s: any): any {
   const projects = (Array.isArray(s?.projects) ? s.projects : []).map(normalizeProject);
-  const known = new Set<DomainSection>(ALL_SECTIONS);
+
+  // Renamed sections must survive a saved layout: map old ids to their new
+  // home, then drop anything unrecognised. Deduped, because a layout that
+  // already contained both the old and new id would otherwise render twice.
+  const savedLayout = s?.layout ?? {};
+  const mapList = (v: unknown): DomainSection[] => {
+    const out: DomainSection[] = [];
+    for (const raw of Array.isArray(v) ? v : []) {
+      const m = migrateSection(raw);
+      if (m && !out.includes(m)) out.push(m);
+    }
+    return out;
+  };
+
   return {
     ...s,
     projects: projects.length ? projects : [SEED],
     activeId:
       projects.find((p: Project) => p.id === s?.activeId)?.id ?? projects[0]?.id ?? SEED.id,
-    section: known.has(s?.section) ? s.section : "dashboard",
+    section: migrateSection(s?.section) ?? "dashboard",
     modelId: s?.modelId ?? "laguna",
-    layout: { ...DEFAULT_LAYOUT, ...(s?.layout ?? {}) },
+    layout: {
+      ...DEFAULT_LAYOUT,
+      ...savedLayout,
+      ...(savedLayout.navOrder ? { navOrder: mapList(savedLayout.navOrder) } : {}),
+      ...(savedLayout.hidden ? { hidden: mapList(savedLayout.hidden) } : {}),
+    },
     activity: Array.isArray(s?.activity) ? s.activity : [],
     pendingFile: null,
   };

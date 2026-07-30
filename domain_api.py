@@ -206,6 +206,114 @@ async def git_publish(req: Request) -> dict[str, Any]:
 
 
 # ============================================================================
+# Code review — AURA reads a file and proposes a better version
+# ============================================================================
+# The Code Review panel is a dual pane: AURA's suggestion on the left, your
+# editable file on the right. This endpoint produces the left side. It NEVER
+# writes: applying the suggestion is a separate, explicit /fs/write from the UI,
+# so the model can't touch the working tree on its own.
+_REVIEW_SYSTEM = (
+    "You are AURA reviewing a source file for the developer who wrote it. "
+    "Return ONLY JSON: {\"findings\":[{\"line\":<int|null>,"
+    "\"severity\":\"bug|risk|style|idea\",\"note\":\"<one sentence>\"}],"
+    "\"code\":\"<the full revised file>\"}. "
+    "Keep the author's structure and naming; change only what you can justify. "
+    "If the file is already fine, return an empty findings list and the code "
+    "unchanged. No markdown fences, no prose outside the JSON."
+)
+
+
+@router.post("/api/domain/review")
+async def code_review(req: Request) -> dict[str, Any]:
+    """Ask the model for a reviewed rewrite of a file.
+
+    Body: {path?, content?, lang?, instruction?}. `path` is read from disk when
+    `content` is absent. Returns {ok, findings[], suggestion, source}.
+    """
+    import json as _json
+
+    body = await req.json()
+    path = str(body.get("path") or "").strip()
+    content = body.get("content")
+    lang = str(body.get("lang") or "").strip()
+    instruction = str(body.get("instruction") or "").strip()
+
+    if content is None:
+        if not path:
+            return _err("path or content required")
+        from core import domain_fs
+        try:
+            f = domain_fs.read_file(path)
+        except domain_fs.FsError as e:
+            return _err(str(e))
+        content = f.get("content", "")
+        lang = lang or (f.get("lang") or "")
+
+    content = str(content)
+    if not content.strip():
+        return _err("nothing to review — the file is empty")
+    # A whole large file blows the context window; review the head and say so.
+    MAX = 12000
+    truncated = len(content) > MAX
+    body_text = content[:MAX]
+
+    prompt = (
+        f"FILE: {path or 'untitled'}\nLANGUAGE: {lang or 'unknown'}\n"
+        + (f"FOCUS: {instruction}\n" if instruction else "")
+        + (f"NOTE: only the first {MAX} characters are shown.\n" if truncated else "")
+        + f"\n{body_text}"
+    )
+
+    try:
+        from core.ai_router import call_groq_raw
+        raw = call_groq_raw(prompt, _REVIEW_SYSTEM, max_tokens=3000, temperature=0.2)
+    except Exception as e:  # noqa: BLE001
+        return _err(f"model call failed: {e}")
+
+    if not raw or raw in ("RATE_LIMIT", "CONNECTION_ERROR"):
+        return _err({
+            "RATE_LIMIT": "the model is rate-limited right now — try again shortly",
+            "CONNECTION_ERROR": "no connection to the model provider",
+        }.get(raw, "the model returned nothing"))
+
+    # Models like to wrap JSON in fences even when told not to.
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.split("```", 2)[1] if text.count("```") >= 2 else text
+        text = text.split("\n", 1)[1] if "\n" in text else text
+        text = text.rsplit("```", 1)[0]
+    start, end = text.find("{"), text.rfind("}")
+    parsed: dict[str, Any] | None = None
+    if start != -1 and end > start:
+        try:
+            parsed = _json.loads(text[start:end + 1])
+        except Exception:  # noqa: BLE001
+            parsed = None
+
+    if not isinstance(parsed, dict) or "code" not in parsed:
+        # Still useful: hand the raw reply over as a note rather than failing.
+        return {"ok": True, "source": "unstructured", "suggestion": content,
+                "truncated": truncated,
+                "findings": [{"line": None, "severity": "idea",
+                              "note": raw.strip()[:600]}]}
+
+    findings = []
+    for f in parsed.get("findings") or []:
+        if not isinstance(f, dict):
+            continue
+        line = f.get("line")
+        findings.append({
+            "line": int(line) if isinstance(line, (int, float)) else None,
+            "severity": str(f.get("severity") or "idea"),
+            "note": str(f.get("note") or "").strip(),
+        })
+
+    return {"ok": True, "source": "llm", "truncated": truncated,
+            "suggestion": str(parsed.get("code") or content),
+            "findings": [f for f in findings if f["note"]]}
+
+
+# ============================================================================
 # Connectors (OAuth)
 # ============================================================================
 @router.get("/api/connectors")

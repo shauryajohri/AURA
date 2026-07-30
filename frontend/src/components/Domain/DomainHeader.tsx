@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { MODELS } from "../../data/models";
-import { SECTION_META, useActiveProject, useDomainStore } from "../../stores/domainStore";
+import { SECTION_META, useDomainStore } from "../../stores/domainStore";
+import { useBrainStore } from "../../stores/brainStore";
 
 // Minimal top bar: project · breadcrumb · model selector · search · bells.
 
@@ -10,8 +11,14 @@ const SECTION_LABEL: Record<string, string> = Object.fromEntries(
 );
 
 export default function DomainHeader() {
-  const project = useActiveProject();
+  // the breadcrumb names the *brain's* project — that's what every view reads
+  const projects = useBrainStore((s) => s.projects);
+  const activeId = useBrainStore((s) => s.activeId);
+  const select = useBrainStore((s) => s.select);
+  const project = projects.find((p) => p.id === activeId) ?? null;
   const section = useDomainStore((s) => s.section);
+  const setSection = useDomainStore((s) => s.setSection);
+  const [projOpen, setProjOpen] = useState(false);
   const modelId = useDomainStore((s) => s.modelId);
   const setModel = useDomainStore((s) => s.setModel);
   const [modelOpen, setModelOpen] = useState(false);
@@ -24,8 +31,29 @@ export default function DomainHeader() {
       <div className="dhead__crumb">
         <span className="dhead__brand">AURA DOMAIN</span>
         <span className="dhead__sep">/</span>
-        <span className="dhead__project" style={{ color: project?.accent }}>
-          {project?.name ?? "No project"}
+        <span className="dhead__model">
+          <button className="dhead__project" onClick={() => setProjOpen((o) => !o)}>
+            {project?.name ?? "No project"} <span className="dhead__chev">{projOpen ? "▴" : "▾"}</span>
+          </button>
+          {projOpen && (
+            <div className="dhead__modelmenu">
+              {projects.map((p) => (
+                <button
+                  key={p.id}
+                  className={"dhead__modelrow" + (p.id === activeId ? " dhead__modelrow--on" : "")}
+                  onClick={() => { void select(p.id); setProjOpen(false); }}
+                >
+                  <span className="dhead__modelname">{p.name}</span>
+                </button>
+              ))}
+              <button
+                className="dhead__modelrow"
+                onClick={() => { setSection("projects"); setProjOpen(false); }}
+              >
+                <span className="dhead__modelname">＋ New / import…</span>
+              </button>
+            </div>
+          )}
         </span>
         <span className="dhead__sep">/</span>
         <span className="dhead__section">{SECTION_LABEL[section]}</span>

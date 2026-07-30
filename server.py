@@ -393,6 +393,45 @@ async def api_delete_fact(fact_id: int) -> dict[str, Any]:
     return {"ok": True}
 
 
+# ── Saved notes + session recaps: the other two thirds of the Memory panel ───
+# The store has had these readers since the Qt panel; only the HTTP surface was
+# missing, so the React Memory view could show facts but nothing else AURA
+# remembers. Read + delete only on purpose: notes and recaps are WRITTEN by the
+# brain (knowledge extraction, session snapshots), never typed in by hand.
+def _note_dict(r) -> dict[str, Any]:
+    return {"id": r[0], "title": r[1], "summary": r[2], "created_at": r[3]}
+
+
+def _recap_dict(r) -> dict[str, Any]:
+    return {"id": r[0], "app": r[1], "summary": r[2], "created_at": r[3]}
+
+
+@app.get("/api/notes")
+async def api_notes(limit: int = 300) -> dict[str, Any]:
+    from memory import store
+    return {"notes": [_note_dict(r) for r in store.get_all_knowledge(limit)]}
+
+
+@app.delete("/api/notes/{note_id}")
+async def api_delete_note(note_id: int) -> dict[str, Any]:
+    from memory import store
+    store.delete_knowledge(note_id)
+    return {"ok": True}
+
+
+@app.get("/api/recaps")
+async def api_recaps(limit: int = 60) -> dict[str, Any]:
+    from memory import store
+    return {"recaps": [_recap_dict(r) for r in store.get_all_snapshots(limit)]}
+
+
+@app.delete("/api/recaps/{recap_id}")
+async def api_delete_recap(recap_id: int) -> dict[str, Any]:
+    from memory import store
+    store.delete_snapshot(recap_id)
+    return {"ok": True}
+
+
 # ── Saved links: the Sanctuary link vault ───────────────────────────────────
 def _link_dict(r) -> dict[str, Any]:
     return {"id": r[0], "name": r[1], "url": r[2], "created_at": r[3]}

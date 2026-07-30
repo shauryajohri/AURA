@@ -535,8 +535,15 @@ _re_mod = __import__("re")
 _META_STRONG_RE = _re_mod.compile(
     r"(?i)("
     # third-person narration about the person being spoken to
-    r"\bthe user\b|\buser'?s (?:message|question|query|request|input|typo|last)\b|"
+    r"\bthe user\b|"
+    # "user's" without a "the" in front — "No mention of user's activity unless
+    # they explicitly told" was a real leak that slipped past, because the noun
+    # list only covered things a user SAYS, not things a user IS DOING.
+    r"\buser'?s (?:message|question|query|request|input|typo|last|activity|"
+    r"screen|context|intent|tone|state|situation|goal|mood|words?|wording|"
+    r"task|project|problem|behaviou?r|session)\b|"
     r"\bthey (?:want|said|asked|mean|are asking|likely)\b|\blikely they\b|"
+    r"\bunless they (?:explicitly|specifically|actually)\b|"
     # Narrating the person as a subject under observation. Deliberately narrow:
     # "they should be joined" (about threads) must stay legal, while
     # "they're on the Two Sum II problem" and "they should be thinking about"
@@ -552,6 +559,10 @@ _META_STRONG_RE = _re_mod.compile(
     r"\brule \d+\b|according to (?:the )?rule|per the (?:rule|instruction)|"
     r"banned words?|obey the rules|follow the rules|\bthe rules?:|"
     r"max(?:imum)? \d+ sentence|\d+\s*-\s*\d+ sentences|two sentences|"
+    # counting its own sentences in WORDS, not digits — "That's one sentence?"
+    # is the model checking its work out loud, which the digit patterns missed.
+    r"\b(?:that'?s|is that|thats|keep(?:ing)? it to|just|only)\s+"
+    r"(?:one|two|three|a single)\s+sentences?\b|"
     # any sentence that talks about its own sentence budget is self-instruction
     r"(?:need|keep it to|limit|within|use|only)\s+\d+\s+sentences?\b|"
     r"\d+\s+sentences?\s+(?:max|only|or less|at most)\b|"
@@ -569,6 +580,16 @@ _META_STRONG_RE = _re_mod.compile(
     r"ask (?:a )?clarifying|clarifying question|"
     r"(?:provide|give|write|produce|output|keep|make) (?:a |the )?"
     r"(?:concise|short|brief|clear|direct|final|good) (?:answer|response|reply|version|explanation)|"
+    # THE SEAM. A reasoning model that has finished thinking announces its
+    # output before writing it — "So answer: …", "So we can say: …",
+    # "Final answer: …". The sentence that follows is usually the real reply,
+    # which is exactly why this used to survive: nothing in it names the user,
+    # quotes a rule, or plans anything. It just narrates the handover.
+    r"\b(?:so|thus|hence|therefore|ok(?:ay)?)[,:]?\s*(?:the\s+)?(?:final\s+)?"
+    r"answer\s*[:\-]|"
+    r"\b(?:final|short|concise|direct)\s+answer\s*[:\-]|"
+    r"\b(?:so|thus|hence|therefore)?\s*(?:we|i)\s+(?:can|could|should|shall|"
+    r"will|'ll|might)\s+say\s*[:,]|"
     r"as an ai|chain[- ]of[- ]thought"
     r")"
 )
@@ -591,6 +612,23 @@ _META_RE = _re_mod.compile(
     "(?i)(" + _META_STRONG_RE.pattern[5:-1] + "|" + _META_WEAK_RE.pattern[5:-1] + ")"
 )
 _SENT_SPLIT = _re_mod.compile(r"([.!?\n]+)")
+
+# The handover phrase a reasoning model writes between thinking and answering.
+# Whatever follows the LAST one of these is the reply it settled on, so instead
+# of discarding the sentence (and the answer inside it) we cut to the tail.
+# Anchored on the colon/dash: "So answer:" is a seam, "so we can say that X"
+# in the middle of an explanation is not.
+_SEAM_RE = _re_mod.compile(
+    r"(?i)(?:^|[.!?\n]\s*|\s)"
+    r"(?:"
+    r"(?:so|thus|hence|therefore|ok(?:ay)?)[,:]?\s*(?:the\s+)?(?:final\s+)?answer"
+    r"|(?:final|short|concise|direct)\s+answer"
+    r"|(?:so|thus|hence|therefore)[,:]?\s*(?:we|i)\s+"
+    r"(?:can|could|should|shall|will|'ll|might)\s+say"
+    r"|(?:we|i)\s+(?:can|could|should|shall|will|'ll)\s+say"
+    r")"
+    r"\s*[:\-—]\s*"
+)
 
 
 def _is_meta_sentence(s: str) -> bool:
@@ -694,6 +732,28 @@ def sanitize_text(text: str, query: str = "") -> str:
     def _code_only() -> str:
         return "\n\n".join(blocks).strip()
 
+    # Cut to the answer the model settled on. A leak like
+    #   "Looking at X now. So answer: You're on X. No mention of user's
+    #    activity unless they explicitly told. So we can say: You're viewing X."
+    # is deliberation wrapped around the real reply, and the reply sits after
+    # the LAST handover phrase. Taking that tail keeps the answer instead of
+    # binning the whole turn — the sentence filters below still clean the tail.
+    # Only trusted when something substantial follows, so a response that merely
+    # ends with "final answer:" (cut off mid-stream) falls through untouched.
+    seams = list(_SEAM_RE.finditer(text))
+    if seams:
+        tail = text[seams[-1].end():].strip()
+        if len(tail) >= 12:
+            # The handover often carries filler into the answer — 'maybe "Start
+            # with Genki I…' — including a quote it never closes. Drop that.
+            tail = re.sub(
+                r'^(?:maybe|perhaps|something like|roughly|i\.e\.|e\.g\.)[,:]?\s*',
+                "", tail, flags=re.I)
+            tail = tail.lstrip('"“\'` ').strip()
+            if tail and tail[0].islower():
+                tail = tail[0].upper() + tail[1:]
+            text = tail
+
     sentences = [s for s in _split_sentences(text) if s.strip()]
     if not sentences:
         return _code_only()
@@ -719,7 +779,14 @@ def sanitize_text(text: str, query: str = "") -> str:
     #    the raw text would punish the common good case — a short preamble
     #    followed by a genuine answer — so it only judges the remainder.
     strong = sum(1 for s in rest if _strong(s))
-    if len(rest) >= 2 and strong / len(rest) >= 0.5:
+    # Three or more sentences: half being meta means the whole thing is a
+    # monologue. Two sentences: half is ONE sentence, and "<real answer>. That's
+    # one sentence?" is exactly that shape — an answer with the model's own
+    # sanity-check stuck to the end. Binning it would throw away the reply, so a
+    # short remainder must be entirely meta before it's discarded.
+    if len(rest) >= 3 and strong / len(rest) >= 0.5:
+        return _code_only()
+    if len(rest) <= 2 and strong == len(rest):
         return _code_only()
 
     # 3. Drop any remaining strongly-meta sentences wherever they sit.

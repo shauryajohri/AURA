@@ -185,8 +185,19 @@ check("'no extra fluff' now matches", _is_strong_meta("No extra fluff."))
 check("'Should we ask clarifying?' matches", _is_strong_meta("Should we ask clarifying?"))
 check("'We have enough info' matches", _is_strong_meta("We have enough info to give suggestions."))
 check("'Provide concise answer' matches", _is_strong_meta("Provide concise answer: maybe this."))
-check("whole SEARCH leak is discarded", sanitize_text(LEAK_SEARCH, query=Q_JP) == "")
-check("discarded even without the query", sanitize_text(LEAK_SEARCH) == "")
+# Behaviour CHANGED 2026-07-30 and deliberately so: this leak ends with
+# "Provide concise answer: maybe "Start with Genki I…" — the real reply is
+# sitting right there after the handover phrase. It used to be discarded
+# wholesale (fallback line shown); now the tail is recovered, de-quoted and
+# capitalised. The deliberation must still be gone either way.
+for _q in (Q_JP, ""):
+    _out = sanitize_text(LEAK_SEARCH, query=_q)
+    _label = "with query" if _q else "without query"
+    check(f"SEARCH leak: deliberation gone ({_label})",
+          "should we ask" not in _out.lower() and "enough info" not in _out.lower())
+    check(f"SEARCH leak: prompt echo gone ({_label})", "clear n3 in next" not in _out.lower())
+    check(f"SEARCH leak: the settled answer is recovered ({_label})", "Genki I" in _out)
+    check(f"SEARCH leak: filler quote stripped ({_label})", not _out.startswith('maybe'))
 
 print("\n[query-echo detection]")
 check(
@@ -252,6 +263,54 @@ check("partial block keeps its newlines", "\n    return 1" in out)
 print("\n[prose-only answers are still normalised]")
 check("runs of spaces collapse",
       sanitize_text("Two   pointers    work here.") == "Two pointers work here.")
+
+print("\n[third live leak — screen-reading lane, 2026-07-30]")
+# Nothing in this one named a rule or planned an answer: it narrated the
+# handover from thinking to replying ("So answer:", "So we can say:") and
+# checked its own work ("That's one sentence?"). Every sentence looked
+# innocent to the old patterns, so the whole monologue printed.
+LEAK_SEAM = (
+    "Looking at Merge Sorted Array - LeetCode - Comet now. "
+    "So answer: You're looking at the Comet project (Merge Sorted Array on "
+    "LeetCode). No mention of user's activity unless they explicitly told. "
+    "That's explicit. So we can say: You're currently viewing the Comet "
+    "project — the Merge Sorted Array LeetCode problem. That's one sentence?"
+)
+check("'So answer:' is strong", _is_strong_meta("So answer: you're on LeetCode."))
+check("'Final answer:' is strong", _is_strong_meta("Final answer: 42."))
+check("'So we can say:' is strong", _is_strong_meta("So we can say: it's fine."))
+check("\"user's activity\" is strong", _is_strong_meta("No mention of user's activity."))
+check("'unless they explicitly' is strong", _is_strong_meta("Unless they explicitly told."))
+check("'That's one sentence?' is strong", _is_strong_meta("That's one sentence?"))
+
+out = sanitize_text(LEAK_SEAM)
+check("deliberation is gone", "so answer" not in out.lower())
+check("self-check is gone", "one sentence" not in out.lower())
+check("third-person narration gone", "user's activity" not in out.lower())
+# The reply it settled on sits after the LAST handover phrase — keep it rather
+# than binning the turn.
+check("the settled answer is recovered", "currently viewing the Comet" in out)
+check("only the answer remains", out.count(".") <= 2)
+
+print("\n[the seam cut doesn't eat legitimate prose]")
+check(
+    "'we can say' mid-explanation without a colon is left alone",
+    sanitize_text("From the invariant we can say the loop terminates.")
+    == "From the invariant we can say the loop terminates.",
+)
+check(
+    "a trailing 'final answer:' with nothing after it isn't trusted",
+    "Two pointers" in sanitize_text("Two pointers work here. Final answer:"),
+)
+check(
+    "an answer that merely mentions sentences is untouched",
+    sanitize_text("Split the paragraph into sentences first.")
+    == "Split the paragraph into sentences first.",
+)
+check(
+    "one trailing meta sentence doesn't nuke a two-sentence answer",
+    "Redis is in-memory" in sanitize_text("Redis is in-memory. That's one sentence?"),
+)
 
 print("\n[guard_output refuses to print a monologue]")
 from core.brain import guard_output  # noqa: E402

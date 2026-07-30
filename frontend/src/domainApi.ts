@@ -54,6 +54,53 @@ export interface RepoStatus {
   last_commit?: { message: string; author?: string; date?: string; url?: string };
 }
 
+/** One thing AURA noticed while reading a file. `line` is 1-based when known. */
+export interface ReviewFinding {
+  line: number | null;
+  severity: "bug" | "risk" | "style" | "idea" | string;
+  note: string;
+}
+
+export interface ReviewResult {
+  ok: boolean;
+  error?: string;
+  source?: "llm" | "unstructured";
+  truncated?: boolean;
+  suggestion?: string;
+  findings?: ReviewFinding[];
+}
+
+/** git status, parsed — what a commit would actually include. */
+export interface GitPreview {
+  ok: boolean;
+  error?: string;
+  is_repo?: boolean;
+  root?: string;
+  branch?: string;
+  protected?: boolean;
+  files?: { path: string; state: string; staged: boolean }[];
+  file_count?: number;
+  clean?: boolean;
+  has_upstream?: boolean;
+  upstream?: string;
+  ahead?: number;
+  behind?: number;
+  oversized?: boolean;
+}
+
+export interface GitResult {
+  ok: boolean;
+  error?: string;
+  output?: string;
+  message?: string;
+  sha?: string;
+  files?: number;
+  branch?: string;
+  remote?: string;
+  pushed?: number | null;
+  preview?: GitPreview;
+}
+
 export interface Connector {
   id: string;
   label: string;
@@ -191,6 +238,30 @@ export const domainApi = {
   // ---- github -------------------------------------------------------------
   repo: (url: string, force = false) =>
     j<RepoStatus>("/api/domain/github" + q({ url, force })),
+
+  // ---- code review --------------------------------------------------------
+  /** AURA reads a file and proposes a revised version. Never writes. */
+  review: (body: { path?: string; content?: string; lang?: string; instruction?: string }) =>
+    j<ReviewResult>("/api/domain/review", { method: "POST", body: JSON.stringify(body) }),
+
+  // ---- local git write path (preview → commit → push) ---------------------
+  gitPreview: (root: string) =>
+    j<GitPreview>("/api/domain/git/preview" + q({ root })),
+  gitCommit: (root: string, message: string, opts?: { paths?: string[]; allow_oversized?: boolean }) =>
+    j<GitResult>("/api/domain/git/commit", {
+      method: "POST",
+      body: JSON.stringify({ root, message, confirm: true, ...opts }),
+    }),
+  gitPush: (root: string, opts?: { allow_protected?: boolean; remote?: string }) =>
+    j<GitResult>("/api/domain/git/push", {
+      method: "POST",
+      body: JSON.stringify({ root, confirm: true, ...opts }),
+    }),
+  gitPublish: (root: string, message: string, opts?: { allow_protected?: boolean; allow_oversized?: boolean }) =>
+    j<GitResult>("/api/domain/git/publish", {
+      method: "POST",
+      body: JSON.stringify({ root, message, confirm: true, ...opts }),
+    }),
 
   // ---- connectors ---------------------------------------------------------
   connectors: () =>

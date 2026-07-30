@@ -32,6 +32,22 @@ export interface SavedLink {
   created_at: string | null;
 }
 
+/** A note AURA extracted from a conversation — written by the brain, not typed. */
+export interface MemoryNote {
+  id: number;
+  title: string;
+  summary: string;
+  created_at: string | null;
+}
+
+/** A session snapshot: what you were doing in an app, summarised. */
+export interface MemoryRecap {
+  id: number;
+  app: string;
+  summary: string;
+  created_at: string | null;
+}
+
 export interface DayStat {
   date: string;
   user_msgs: number;
@@ -206,6 +222,14 @@ export const api = {
   updateFact: (id: number, fact: string) =>
     j(`/api/facts/${id}`, { method: "PUT", body: JSON.stringify({ fact }) }),
   deleteFact: (id: number) => j(`/api/facts/${id}`, { method: "DELETE" }),
+
+  // Saved notes + session recaps (read/delete — the brain writes them)
+  getNotes: (limit = 300) =>
+    j<{ notes: MemoryNote[] }>(`/api/notes?limit=${limit}`).then((r) => r.notes),
+  deleteNote: (id: number) => j(`/api/notes/${id}`, { method: "DELETE" }),
+  getRecaps: (limit = 60) =>
+    j<{ recaps: MemoryRecap[] }>(`/api/recaps?limit=${limit}`).then((r) => r.recaps),
+  deleteRecap: (id: number) => j(`/api/recaps/${id}`, { method: "DELETE" }),
 
   // Task edit
   updateTask: (id: number, patch: { title?: string; priority?: string }) =>

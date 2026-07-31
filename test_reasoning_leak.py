@@ -312,6 +312,117 @@ check(
     "Redis is in-memory" in sanitize_text("Redis is in-memory. That's one sentence?"),
 )
 
+print("\n[fourth live leak — style-rule echo, 2026-07-31]")
+# shaurya asked "find me some websites from where i can see portfolio and
+# design them" and got back the persona rules themselves. Nothing in it names
+# the user, quotes a numbered rule, counts sentences, or ends in a colon seam —
+# it's four bare imperatives, which is why every earlier tier missed it.
+LEAK_RULES = (
+    'No starting with "I" unless unavoidable. Avoid meta commentary. '
+    'So we can\'t say "You are looking for..." We can just give answer.'
+)
+check("'unless unavoidable' is strong meta",
+      _is_strong_meta('No starting with "I" unless unavoidable.'))
+check("'avoid meta commentary' is strong meta",
+      _is_strong_meta("Avoid meta commentary."))
+check("contraction planning ('we can\\'t say \"...') is strong meta",
+      _is_strong_meta('So we can\'t say "You are looking for..."'))
+check("article-less 'we can just give answer' is strong meta",
+      _is_strong_meta("We can just give answer."))
+check("the whole rule-echo leak is discarded", sanitize_text(LEAK_RULES) == "")
+check("no orphan quote survives", sanitize_text(LEAK_RULES).strip('"') == "")
+check("guarded with the query too",
+      sanitize_text(LEAK_RULES, query="find me some websites from where i can "
+                                      "see portfolio and design them") == "")
+
+print("\n[rule-echo markers don't catch legitimate answers]")
+check(
+    "'can't say for sure' is a normal thing to tell someone",
+    sanitize_text("We can't say for sure until the profiler runs.")
+    == "We can't say for sure until the profiler runs.",
+)
+check(
+    "ordinary 'don't start with' advice survives",
+    sanitize_text("Don't start with the whole array — take a window first.")
+    == "Don't start with the whole array — take a window first.",
+)
+check(
+    "offering an answer in normal speech survives",
+    sanitize_text("I'll give you an answer once the build finishes.")
+    == "I'll give you an answer once the build finishes.",
+)
+check(
+    "a real portfolio answer is untouched",
+    sanitize_text("Awwwards, Godly and Dribbble are the three worth opening first.")
+    == "Awwwards, Godly and Dribbble are the three worth opening first.",
+)
+check(
+    "a markdown rule line isn't eaten as a stray fragment",
+    "---" in sanitize_text("Two options.\n---\nPick one."),
+)
+
+print("\n[fifth live leak — context narration, nemotron, 2026-07-31]")
+# nvidia/nemotron-3-super-120b-a12b via OpenRouter, right after work_recall
+# started injecting the project brain: the model read the injected context back
+# out loud, recited the style rules, then announced its answer with "Probably:".
+# The answer IS in there — everything after the last handover — so the right
+# outcome is a REPAIR, not a discard.
+LEAK_CTX = (
+    "We have context: Wasabikiri_remake — last: Fix dashboard layout overflow, "
+    "22h ago. So we can suggest focusing on that or other improvements. "
+    'No "I think". No "Sure". Must start directly. '
+    'Probably: "Start by pulling the latest main branch, then address the '
+    'dashboard overflow you noted—maybe adjust the container\'s max-width'
+)
+check("'we have context:' is strong meta",
+      _is_strong_meta("We have context: Wasabikiri_remake — last: Fix dashboard overflow."))
+check("'so we can suggest' is strong meta",
+      _is_strong_meta("So we can suggest focusing on that or other improvements."))
+check("a quoted banned phrase is strong meta", _is_strong_meta('No "I think".'))
+check("...and the second one", _is_strong_meta('No "Sure".'))
+check("a subjectless imperative is strong meta", _is_strong_meta("Must start directly."))
+
+out_ctx = sanitize_text(LEAK_CTX)
+check("the deliberation is gone", "we have context" not in out_ctx.lower())
+check("the rule echoes are gone", "I think" not in out_ctx and "Must start" not in out_ctx)
+check("the ANSWER is recovered", out_ctx.startswith("Start by pulling the latest main branch"))
+check("the opening quote is stripped", not out_ctx.startswith('"'))
+check("the injected project name isn't parroted", "Wasabikiri_remake" not in out_ctx)
+
+print("\n[the hedged seam doesn't eat legitimate prose]")
+check(
+    "'probably' mid-sentence is ordinary English",
+    sanitize_text("The cause is probably a race in the worker pool.")
+    == "The cause is probably a race in the worker pool.",
+)
+check(
+    "a colon mid-sentence after 'probably' isn't a handover",
+    "race" in sanitize_text("It's probably: a race in the worker pool."),
+)
+check(
+    "'maybe' opening a real sentence survives",
+    sanitize_text("Maybe start with the smaller file.")
+    == "Maybe start with the smaller file.",
+)
+check(
+    "ordinary negation without a quote survives",
+    sanitize_text("No, that won't work on Windows.")
+    == "No, that won't work on Windows.",
+)
+check(
+    "'we have the context we need' style prose is still caught",
+    _is_strong_meta("We have context on the project already."),
+)
+
+print("\n[leak telemetry names the model]")
+from core.ai_router import note_leak, leak_stats  # noqa: E402
+before = sum(sum(v.values()) for v in leak_stats().values())
+note_leak("test")
+note_leak("test", repaired=True)
+after = leak_stats()
+check("both kinds are counted", sum(sum(v.values()) for v in after.values()) == before + 2)
+check("split by outcome", any(v["repaired"] >= 1 and v["discarded"] >= 1 for v in after.values()))
+
 print("\n[guard_output refuses to print a monologue]")
 from core.brain import guard_output  # noqa: E402
 

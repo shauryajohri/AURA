@@ -170,6 +170,42 @@ for i in range(14):
     t7.observe(YOUTUBE, now=T + 1200 + i * 30)
 check("False once they're watching anime", not E.is_working(T + 1200 + 14 * 30))
 
+# ── 4b. allows() — the ONE rule every speaking path asks ────────────────────
+# shaurya, 2026-07-31: "if user is doing something in pc then aura proactive
+# should not act. if user is not doing imp things then aura should speak up."
+# proactive used to gate two of its own action names by hand, so quest
+# milestones, V3 session lines and task nudges spoke over real work through
+# other code paths.
+print("\n[4b] allows() — what may interrupt real work")
+t8 = E.EngagementTracker()
+E._TRACKER = t8
+for i in range(40):
+    t8.observe(VSCODE, now=T + i * 30)
+WORKING = T + 40 * 30
+check("mid-session: no social check-in", not E.allows("interaction", WORKING))
+check("mid-session: no 'you seem stuck'", not E.allows("stuck", WORKING))
+check("mid-session: no quest milestone", not E.allows("quest", WORKING))
+check("mid-session: no V3 session commentary", not E.allows("v3", WORKING))
+check("mid-session: no idle chatter", not E.allows("suggestion", WORKING))
+check("mid-session: an ERROR still gets through", E.allows("error", WORKING))
+check("...however proactive labels it", E.allows("code_error", WORKING))
+check("...including the V3 classifier", E.allows("v3_error", WORKING))
+check("the log says why", "working" in E.block_reason("interaction", WORKING))
+check("no reason when nothing was blocked", E.block_reason("error", WORKING) == "")
+
+# Anime on screen is not work — this is the "speak up" half.
+for i in range(14):
+    t8.observe(YOUTUBE, now=T + 1200 + i * 30)
+IDLE = T + 1200 + 14 * 30
+check("off the clock: check-ins allowed", E.allows("interaction", IDLE))
+check("off the clock: quests allowed", E.allows("quest", IDLE))
+check("off the clock: everything allowed", E.allows("whatever", IDLE))
+
+# A broken gate must never mute her permanently.
+_broken, E.get_tracker = E.get_tracker, lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+check("a broken tracker defaults to allowing speech", E.allows("interaction"))
+E.get_tracker = _broken
+
 print("\n[5] formatting")
 check("minutes", E.describe_minutes(25 * 60) == "25 minutes")
 check("one hour", E.describe_minutes(60 * 60) == "1 hour")

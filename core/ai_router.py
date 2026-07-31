@@ -109,6 +109,40 @@ def last_model_used() -> str:
     return _last_model_used
 
 
+# ── which model is actually doing this to us ────────────────────────────────
+# Five separate leak fixes in five days, each for a different phrasing, and the
+# 2026-07-31 one arrived from nvidia/nemotron-3-super-120b — a reasoning model
+# that emits its deliberation as ordinary content, so OpenRouter's
+# `reasoning: {exclude: True}` has nothing to strip. Counting them per model
+# turns "AURA is being weird again" into "this specific endpoint is the
+# problem", which is the difference between guessing and swapping the model.
+_LEAKS: dict[str, dict[str, int]] = {}
+
+
+def note_leak(where: str = "", repaired: bool = False) -> None:
+    """Record that a response contained chain-of-thought. Never raises."""
+    try:
+        model = last_model_used() or "unknown"
+        row = _LEAKS.setdefault(model, {"discarded": 0, "repaired": 0})
+        row["repaired" if repaired else "discarded"] += 1
+        total = row["discarded"] + row["repaired"]
+        verb = "repaired" if repaired else "DISCARDED"
+        print(f"[AURA] reasoning leak {verb} — {model} "
+              f"(#{total} this run{', ' + where if where else ''})")
+        if total in (3, 10) or (total > 10 and total % 25 == 0):
+            print(f"[AURA] ⚠ {model} has leaked its thinking {total} times this "
+                  "run. It writes deliberation as ordinary content, so no "
+                  "server-side flag can suppress it — lock this model in the "
+                  "Models panel if it keeps happening.")
+    except Exception:  # noqa: BLE001 — telemetry must never break a reply
+        pass
+
+
+def leak_stats() -> dict[str, dict[str, int]]:
+    """Per-model leak counts since the process started."""
+    return {k: dict(v) for k, v in _LEAKS.items()}
+
+
 def _set_last_model(model_id: str):
     global _last_model_used
     _last_model_used = model_id
@@ -508,6 +542,18 @@ _NO_THINK_ALOUD = (
     "them directly. Do NOT think out loud, restate the rules, or narrate your "
     "process. Never write phrases like \"the user wants\", \"looking at the "
     "conversation history\", \"we need to\", or \"there's a typo\" — just answer."
+    # These three showed up in real leaks AFTER the first two fixes: the model
+    # had stopped naming rules and started narrating the handover instead
+    # ("So answer: ...", "So we can say: ...", "That's one sentence?"). Naming
+    # the exact phrases is what finally moved the behaviour, since a general
+    # "don't think out loud" reads as satisfied once the rule-echoes are gone.
+    "\nDo not announce your answer before giving it — never write \"So answer:\", "
+    "\"Final answer:\", \"So we can say:\", or \"Provide concise answer:\". "
+    "Write the answer itself as your first words."
+    "\nDo not evaluate your own reply afterwards — no \"That's one sentence?\", "
+    "no \"That's explicit\", no counting your sentences back to the user."
+    "\nSpeak in second person to them (\"you're\"), never third person about "
+    "them (\"they're\", \"user's activity\")."
 )
 
 
@@ -567,6 +613,59 @@ _META_STRONG_RE = _re_mod.compile(
     r"(?:need|keep it to|limit|within|use|only)\s+\d+\s+sentences?\b|"
     r"\d+\s+sentences?\s+(?:max|only|or less|at most)\b|"
     r"no emoji|no (?:extra |added )?fluff|brevity rules?|"
+    # STYLE-RULE ECHO (2026-07-31 leak). The model recited the persona rules
+    # as bare imperatives — no "the user", no colon-seam, no digits, so every
+    # existing pattern missed all four sentences:
+    #   'No starting with "I" unless unavoidable. Avoid meta commentary.
+    #    So we can't say "You are looking for..." We can just give answer.'
+    r"meta[- ]?commentary|unless unavoidable|"
+    # "No starting with "I"" / "Avoid opening with I". A quote or a bare "I"
+    # is required after `with`, so an ordinary instruction like "don't start
+    # with the whole array" stays legal.
+    r"(?:no|avoid|never|don'?t|do not)\s+(?:start|begin|open)(?:ing)?\s+"
+    r"(?:the |your |a |my )?(?:reply|response|answer|sentence|message)?\s*"
+    r"with\s+[\"“'‘]|"
+    r"(?:no|avoid|never|don'?t|do not)\s+(?:start|begin|open)(?:ing)?\s+"
+    r"(?:the |your |a |my )?(?:reply|response|answer|sentence|message)?\s*"
+    r"with\s+I\b|"
+    r"\b(?:first|second|third)[- ]person\b|"
+    # CONTEXT NARRATION (2026-07-31, nvidia/nemotron via OpenRouter). Now that
+    # work_recall injects the project brain, the model reads it back out loud
+    # before answering: "We have context: Wasabikiri_remake — last: Fix
+    # dashboard layout overflow, 22h ago." The richer the context, the more
+    # there is to narrate, so this grew with the feature.
+    r"\bwe have (?:the |a |some )?(?:context|info|information|history|memory|details?)\b|"
+    r"\b(?:given|from|based on) the (?:context|above)\b[^.!?]{0,40}\bwe\b|"
+    r"\b(?:so |thus |then )?we (?:can|could|should|might|will) "
+    # "note" is deliberately absent: "we should note that Python ints are
+    # arbitrary precision" is a legitimate explanatory sentence, and these
+    # markers delete the sentence wherever it sits.
+    r"(?:suggest|recommend|mention|offer|propose|point out|tell them|ask them)\b|"
+    # Quoted banned-phrase rules: 'No "I think".' / 'Avoid "Sure".' The quote
+    # is required, so ordinary negation ("no, that won't work") is untouched.
+    r"(?:^|[.!?])\s*(?:no|avoid|never|don'?t use|don'?t say|not)\s+"
+    r"[\"“'][^\"”']{1,40}[\"”']|"
+    # A subjectless imperative IS self-instruction — nobody says "Must start
+    # directly." to another person. Anchored to the sentence start.
+    r"(?:^|[.!?])\s*must\s+"
+    r"(?:start|begin|open|be|use|keep|avoid|not|stay|end|answer|reply|respond)\b|"
+    r"\bstart(?:ing)? directly\b|"
+    # Contraction form of the planning markers. The spelled-out "we can not"
+    # was covered; "we can't say" was not. Kept narrow — a QUOTE must follow,
+    # because "we can't say for sure" is a legitimate thing to tell someone.
+    r"we (?:can'?t|cannot|won'?t|shouldn'?t|mustn'?t|couldn'?t)\s+"
+    r"(?:say|write|start|begin|open|use|mention|respond|reply|answer)\b"
+    r"\s*[:,]?\s*[\"“'‘]|"
+    # "We can just give answer." The provide-answer pattern below demands an
+    # adjective ("concise answer"), so the filler form walked straight past.
+    # Two shapes, both model-speak: with a hedge word, or with no article.
+    r"\b(?:we|i)\s+(?:can|could|should|shall|will|'ll|must|might)?\s*"
+    r"(?:just|simply|only)\s+(?:provide|give|write|produce|output|say)\s+"
+    r"(?:a |an |the )?(?:concise |short |brief |clear |direct |final |good )?"
+    r"(?:answer|response|reply)\b|"
+    r"\b(?:we|i)\s+(?:can|could|should|will|'ll|must)\s+"
+    r"(?:provide|give|write|produce|output)\s+"
+    r"(?:concise |short |brief |direct |final )?(?:answer|response|reply)\b|"
     # explicit planning / self-instruction about the answer
     r"we (?:must|should|need to|can|have to|are) not\b|"
     r"we need to (?:respond|answer|produce|give|write|say|follow|avoid|infer)|"
@@ -590,6 +689,10 @@ _META_STRONG_RE = _re_mod.compile(
     r"\b(?:final|short|concise|direct)\s+answer\s*[:\-]|"
     r"\b(?:so|thus|hence|therefore)?\s*(?:we|i)\s+(?:can|could|should|shall|"
     r"will|'ll|might)\s+say\s*[:,]|"
+    # The hedged handover — "Probably: "Start by pulling the latest main…"".
+    # Same seam, worn as a guess instead of a conclusion.
+    r"(?:^|[.!?])\s*(?:probably|perhaps|maybe|likely|something like|"
+    r"i'?d say|response|reply|output)\s*:|"
     r"as an ai|chain[- ]of[- ]thought"
     r")"
 )
@@ -627,6 +730,18 @@ _SEAM_RE = _re_mod.compile(
     r"(?:can|could|should|shall|will|'ll|might)\s+say"
     r"|(?:we|i)\s+(?:can|could|should|shall|will|'ll)\s+say"
     r")"
+    r"\s*[:\-—]\s*"
+)
+
+# The HEDGED handover, kept separate because it needs a tighter anchor. A
+# reasoning model that isn't certain still announces its reply before writing
+# it — 'Probably: "Start by pulling the latest main branch…"' — and the text
+# after the colon is the actual answer, so cutting to it recovers the turn.
+# Must be at a sentence start: "the cause is probably: a race" would otherwise
+# get truncated to "A race", and "probably" mid-sentence is ordinary English.
+_HEDGE_SEAM_RE = _re_mod.compile(
+    r"(?i)(?:^|[.!?\n]\s*)"
+    r"(?:probably|perhaps|maybe|likely|i'?d say|final response|response|reply|output)"
     r"\s*[:\-—]\s*"
 )
 
@@ -740,8 +855,9 @@ def sanitize_text(text: str, query: str = "") -> str:
     # binning the whole turn — the sentence filters below still clean the tail.
     # Only trusted when something substantial follows, so a response that merely
     # ends with "final answer:" (cut off mid-stream) falls through untouched.
-    seams = list(_SEAM_RE.finditer(text))
+    seams = list(_SEAM_RE.finditer(text)) + list(_HEDGE_SEAM_RE.finditer(text))
     if seams:
+        seams.sort(key=lambda m: m.end())
         tail = text[seams[-1].end():].strip()
         if len(tail) >= 12:
             # The handover often carries filler into the answer — 'maybe "Start
@@ -754,7 +870,16 @@ def sanitize_text(text: str, query: str = "") -> str:
                 tail = tail[0].upper() + tail[1:]
             text = tail
 
-    sentences = [s for s in _split_sentences(text) if s.strip()]
+    # Stray punctuation fragments are dropped before anything is counted.
+    # Splitting on [.!?] turns 'we can't say "You are looking for..."' into a
+    # meta sentence PLUS a lone '"', and that orphan quote is what saved the
+    # 2026-07-31 leak: it matches no marker, so the peel stopped on it and the
+    # density check counted it as content. Fragments only survive if they carry
+    # a letter or digit, or are long enough to be deliberate (a --- rule).
+    sentences = [
+        s for s in _split_sentences(text)
+        if s.strip() and (re.search(r"[A-Za-z0-9]", s) or len(s.strip()) > 2)
+    ]
     if not sentences:
         return _code_only()
 
@@ -794,6 +919,11 @@ def sanitize_text(text: str, query: str = "") -> str:
     # Whitespace-normalise the PROSE only, then put the code back verbatim.
     prose = re.sub(r"[ \t]*\n[ \t]*", "\n", "".join(kept))
     prose = re.sub(r"[ \t]{2,}", " ", prose).strip()
+    # Whatever survived has to actually say something. If the filters ate every
+    # word and left punctuation behind, that's the same case as an all-reasoning
+    # response — the caller must fall back, not print an orphan quote mark.
+    if not re.search(r"[A-Za-z0-9]", prose):
+        return _code_only()
     return _restore(prose).strip()
 
 
@@ -1206,10 +1336,15 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
         # sanitize_text separates those concerns, so the long lanes can be
         # filtered without being truncated.
         if is_personal or is_explain or is_longform:
+            # NOT query=prompt: `prompt` here is the whole built context, which
+            # now carries the project block. A legitimate answer quoting a task
+            # title back would trip _echoes_query and get deleted as a leak.
             cleaned = sanitize_text(raw)
             if not cleaned:
-                print("[AURA] response was entirely reasoning — discarded")
+                note_leak("non-streaming lane")
                 return "THINKING_LEAK"
+            if cleaned != raw.strip():
+                note_leak("non-streaming lane", repaired=True)
             return cleaned
         return clean_response(raw)
     except Exception as e:

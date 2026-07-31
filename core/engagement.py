@@ -274,6 +274,44 @@ def is_working(now: float | None = None) -> bool:
         return False    # never let a bug here cause SILENCE forever
 
 
+# What an interruption is WORTH. Only these earn the right to cut into real
+# work — everything else waits until the stretch ends.
+#
+# shaurya, 2026-07-31: "if user is doing something in pc then aura proactive
+# should not act. if user is not doing imp things then aura should speak up."
+# The first half was only half-built: proactive gated two of its own actions
+# ("interaction", "stuck") and let quest milestones, V3 session lines and
+# curiosity walk straight past — so being deep in a file still got you "still
+# on VS Code?" from a different code path.
+CRITICAL_KINDS = frozenset({
+    "error",        # something on screen is actually broken
+    "code_error",   # …the same, named the way proactive labels it
+    "v3_error",     # the V3 error-knowledge classifier fired
+})
+
+
+def allows(kind: str, now: float | None = None) -> bool:
+    """May something of this kind speak right now?
+
+    While a work stretch is open: only CRITICAL_KINDS. Otherwise: everything,
+    which is the "speak up when they're not doing anything important" half —
+    the frequency dial and the voice gate still apply downstream, this only
+    stops being the thing that blocks her.
+    """
+    if kind in CRITICAL_KINDS:
+        return True
+    return not is_working(now)
+
+
+def block_reason(kind: str, now: float | None = None) -> str:
+    """Why `allows` said no — for the proactive log, which is how this gets
+    debugged when AURA is too quiet rather than too loud."""
+    if allows(kind, now):
+        return ""
+    st = get_tracker().state(now)
+    return f"{kind} suppressed — working ({st.get('reason') or st.get('kind')})"
+
+
 def describe_minutes(seconds: float) -> str:
     m = int(seconds // 60)
     if m < 60:

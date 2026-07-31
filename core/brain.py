@@ -199,6 +199,22 @@ def conversational_recall(query: str) -> str:
     AURA actually knows (session snapshot, recent conversation, knowledge
     hits) and let the LLM answer naturally."""
     parts = []
+    # The project graph first — when they ask "what were we doing", the answer
+    # is almost always a project, not a chat line. This is the same block the
+    # ordinary chat turn gets, expanded.
+    try:
+        from core import work_recall
+        # If the question names a project she knows, lead with THAT project's
+        # detail — "what did we decide on the portfolio?" should answer about
+        # the portfolio, not about whatever was touched most recently.
+        focused = work_recall.find_project(query)
+        if focused:
+            parts.append(work_recall.focus_block(focused, query))
+        work = work_recall.answer_context(query)
+        if work:
+            parts.append(work)
+    except Exception:
+        pass
     try:
         last = store.get_last_session()
         if last and last.get("summary"):
@@ -233,19 +249,29 @@ def conversational_recall(query: str) -> str:
     if not parts:
         return "Honestly, that one's fuzzy — remind me what we were on?"
 
-    from core.ai_router import call_groq_raw
+    from core.ai_router import call_groq_raw, sanitize_text
     system = (
-        "You are AURA, a sharp, warm AI companion. The user is asking what you "
-        "remember. Answer naturally in 1-3 sentences, like a friend recalling "
-        "it — specifics first. If what you know doesn't cover their question, "
-        "say it's fuzzy and ask them to remind you. NEVER mention 'context', "
-        "'database', 'saved entries', or that you were given information."
+        "You are AURA, a sharp, warm AI companion, answering a question about "
+        "what you remember. Speak straight TO them in second person. Answer in "
+        "1-3 sentences, specifics first — name the project, the file, the "
+        "decision. If what you know doesn't cover it, say it's fuzzy and ask "
+        "them to remind you. NEVER mention 'context', 'database', 'saved "
+        "entries', or that you were given information. Do not restate or "
+        "analyse the question, do not write \"you asked\" or \"So answer:\" — "
+        "the first words out of you are the answer itself."
     )
-    prompt = f'The user asks: "{query}"\n\nWhat you know:\n' + "\n\n".join(parts)
+    # The old framing here was 'The user asks: "<query>"', which is precisely
+    # the third-person shape the leak filter has to strip back out. Ask the
+    # question as a question and the model answers instead of narrating.
+    prompt = f'THEIR QUESTION: {query}\n\nWHAT YOU KNOW:\n' + "\n\n".join(parts)
     result = call_groq_raw(prompt, system, max_tokens=200, temperature=0.6)
     if result in ("RATE_LIMIT", "CONNECTION_ERROR"):
         return "My memory's being slow — give me a second and ask again."
-    return result
+    # This path bypassed guard_output, so a leak here reached the screen raw.
+    cleaned = sanitize_text(result, query=query)
+    if not cleaned:
+        return "That one's fuzzy — remind me what we were on?"
+    return cleaned
 
 
 # Lines that must never be fed back as "context": compiled plan templates
@@ -440,6 +466,20 @@ def build_context_prompt(query: str, intent: str, thought_context: str, comeback
     thought_section = f"\nContext: {thought_context}" if thought_context else ""
     facts_section = f"\n{facts_text}" if facts_text else ""
 
+    # The Project Brain, in the conversation. Without this the chat could see
+    # eight lines of history and nothing else, so "what project were we on last
+    # time?" was answered by guessing — while the whole project graph (features,
+    # tasks, decisions, commits, progress) sat in the same SQLite file. Compact
+    # on ordinary turns; expanded when they're actually asking about the work.
+    work_memory_section = ""
+    try:
+        from core import work_recall
+        block = work_recall.prompt_section(query)
+        if block:
+            work_memory_section = f"\n{block}"
+    except Exception as e:  # noqa: BLE001 — context is a bonus, never a blocker
+        print(f"[AURA] work_recall skipped: {e}")
+
     # If the user is asking about AURA herself, surface her fuller self-knowledge
     # so "who are you / who made you / what can you do" answers as her, not as a
     # generic assistant or a third-party tool.
@@ -541,6 +581,7 @@ def build_context_prompt(query: str, intent: str, thought_context: str, comeback
     return f"""Recent conversation:
 {history_text}
 {facts_section}
+{work_memory_section}
 {identity_section}
 {screen_info}
 {thought_section}
@@ -902,6 +943,22 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
         else:
             intent = "CASUAL"
         full_prompt = query
+        # A compiled prompt is deliberately NOT wrapped in the usual context —
+        # but "what were we working on" asked inside a workspace mode is still a
+        # memory question, and answering it from nothing looked like amnesia.
+        # Append the project block only for those, so ordinary compiled prompts
+        # stay exactly as the engine built them.
+        # Also for a question that names a project: "/code ... how do I upgrade
+        # the portfolio?" is a question about a real codebase, and answering it
+        # from nothing is the same amnesia in a different mode.
+        try:
+            from core import work_recall
+            if work_recall.is_work_question(query) or work_recall.find_project(query):
+                block = work_recall.prompt_section(query)
+                if block:
+                    full_prompt = f"{query}\n\nWHAT YOU KNOW ABOUT THE WORK:\n{block}"
+        except Exception:
+            pass
     elif _re.search(r'https?://', query):
         intent = "SEARCH"
         full_prompt = build_context_prompt(query, intent, "", comeback=comeback_hint)
@@ -995,14 +1052,18 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
         from core.ai_router import sanitize_text
         # Pass the query: sentences that quote it back verbatim are the model
         # restating the prompt to itself, not answering it.
+        from core.ai_router import note_leak
         deleaked = sanitize_text(answer, query=query)
         if not deleaked:
             # The model spent its whole budget deliberating and never wrote an
             # answer. Showing the monologue is strictly worse than admitting it.
-            print("[AURA] streamed response was all reasoning — discarded")
+            note_leak("streamed")
             return "Lost my train of thought there — say that again?"
         if deleaked != answer:
-            print("[AURA] stripped reasoning leak from streamed answer")
+            # Repaired, not lost: usually the seam cut recovering the reply the
+            # model settled on. Still counted — five leaks in five days means
+            # the model matters more than the phrasing.
+            note_leak("streamed", repaired=True)
         answer = deleaked
 
     # Response Composer + Persona Layer: every model's raw answer becomes

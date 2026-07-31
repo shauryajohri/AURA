@@ -3,6 +3,7 @@ import type { AuraState, ChatTurn, ConnStatus } from "../types";
 import { useVoiceInput } from "../hooks/useVoiceInput";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import MicCheck from "./MicCheck";
+import { renderMarkdown } from "./Markdown";
 
 interface Props {
   status: ConnStatus;
@@ -13,72 +14,8 @@ interface Props {
   auraState?: AuraState;
 }
 
-/** One fenced block, with its language label and a copy button. */
-function CodeBlock({ lang, code }: { lang: string; code: string }) {
-  const [copied, setCopied] = useState(false);
-  const copy = () => {
-    navigator.clipboard?.writeText(code).then(
-      () => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1600);
-      },
-      () => {},
-    );
-  };
-  return (
-    <div className="codeblock">
-      <div className="codeblock__bar">
-        <span className="codeblock__lang">{lang || "code"}</span>
-        <button className="codeblock__copy" onClick={copy} title="Copy code">
-          {copied ? "copied" : "copy"}
-        </button>
-      </div>
-      <pre className="codeblock__pre">
-        <code>{code}</code>
-      </pre>
-    </div>
-  );
-}
-
-/**
- * Split a message into prose and fenced ```code``` segments.
- *
- * Handles an UNTERMINATED fence, which the previous version didn't: while a
- * reply is still streaming the closing ``` hasn't arrived yet, so the regex
- * failed to match and the half-written code rendered as flat prose — the
- * fence, the language tag and all the source on one running line.
- */
-function renderMessage(text: string): React.ReactNode[] {
-  const out: React.ReactNode[] = [];
-  const fence = /```([\w+#-]*)[ \t]*\n?([\s\S]*?)```/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-  let key = 0;
-
-  while ((m = fence.exec(text)) !== null) {
-    if (m.index > last) {
-      out.push(<span key={key++}>{text.slice(last, m.index)}</span>);
-    }
-    out.push(<CodeBlock key={key++} lang={m[1]} code={m[2].replace(/\n$/, "")} />);
-    last = m.index + m[0].length;
-  }
-
-  const tail = text.slice(last);
-  const open = tail.indexOf("```");
-  if (open !== -1) {
-    // Still streaming: render what's arrived as code so it never flashes as
-    // a wall of unformatted text mid-answer.
-    if (open > 0) out.push(<span key={key++}>{tail.slice(0, open)}</span>);
-    const rest = tail.slice(open + 3);
-    const nl = rest.indexOf("\n");
-    const lang = nl === -1 ? rest.trim() : rest.slice(0, nl).trim();
-    const body = nl === -1 ? "" : rest.slice(nl + 1);
-    out.push(<CodeBlock key={key++} lang={lang} code={body} />);
-  } else if (tail) {
-    out.push(<span key={key++}>{tail}</span>);
-  }
-  return out;
-}
+// Message rendering (fenced code, tables, links, lists) lives in Markdown.tsx
+// now — DomainChat renders the same replies and was drifting from this copy.
 
 export default function ChatPanel({ status, turns, onSend, onCollapse, auraState }: Props) {
   const [input, setInput] = useState("");
@@ -149,7 +86,7 @@ export default function ChatPanel({ status, turns, onSend, onCollapse, auraState
                 browser silently closed the paragraph early and the code block
                 escaped the bubble's layout. */}
             <div className="bubble__text">
-              {renderMessage(t.text)}
+              {renderMarkdown(t.text)}
               {t.streaming && <span className="caret" />}
             </div>
           </div>

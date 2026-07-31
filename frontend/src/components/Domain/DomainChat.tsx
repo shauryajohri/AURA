@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, type NatureInfo } from "../../api";
 import { useAuraSocket } from "../../hooks/useAuraSocket";
 import { MODELS } from "../../data/models";
+import { renderMarkdown } from "../Markdown";
 
 // ============================================================================
 // AURA Chat — the right rail of the Domain.
@@ -14,23 +15,10 @@ interface Props {
   onToggle: () => void;
 }
 
-/** Split a message into plain-text and fenced ```code``` segments. */
-function renderMessage(text: string) {
-  const parts = text.split(/```(\w*)\n?([\s\S]*?)```/g);
-  const out: React.ReactNode[] = [];
-  for (let i = 0; i < parts.length; i += 3) {
-    if (parts[i]) out.push(<span key={i}>{parts[i]}</span>);
-    if (i + 2 < parts.length) {
-      out.push(
-        <pre className="dchat__code" key={i + 2}>
-          {parts[i + 1] && <span className="dchat__lang">{parts[i + 1]}</span>}
-          <code>{parts[i + 2]}</code>
-        </pre>
-      );
-    }
-  }
-  return out;
-}
+// Rendering is shared with the sanctuary chat (components/Markdown.tsx). This
+// file used to carry its own fence-splitter that knew nothing about tables or
+// links, so the same reply looked different depending on which screen you
+// asked from.
 
 export default function DomainChat({ collapsed, onToggle }: Props) {
   const { status, turns, send, mode, activeModelId } = useAuraSocket();
@@ -125,10 +113,13 @@ export default function DomainChat({ collapsed, onToggle }: Props) {
               {t.role === "user" ? "You" : "AURA"}
               {t.ts && <span className="dchat__time">{t.ts}</span>}
             </span>
-            <p className="dchat__text">
-              {renderMessage(t.text)}
+            {/* A div, not a <p>: block elements (pre, table, ul) inside a
+                paragraph are invalid HTML and the browser closes the <p>
+                early, dropping them out of the turn's layout. */}
+            <div className="dchat__text">
+              {renderMarkdown(t.text)}
               {t.streaming && <span className="dchat__caret" />}
-            </p>
+            </div>
           </div>
         ))}
       </div>

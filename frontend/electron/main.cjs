@@ -3,7 +3,7 @@
 // the built dist/index.html AND boots the Python brain itself, so a single
 // double-click brings the whole of AURA to life — and closing the window
 // puts her back to sleep (the brain is killed with the app).
-const { app, BrowserWindow, ipcMain, Menu } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, shell } = require("electron");
 const { spawn } = require("child_process");
 const path = require("path");
 const net = require("net");
@@ -94,6 +94,22 @@ function createWindow() {
   });
   win.on("unmaximize", () => win.maximize());
 
+  // Belt and braces for links. The renderer routes clicks through the preload
+  // bridge, but anything that still tries to open a window or navigate the app
+  // away (a stray target=_blank, a middle-click) is intercepted here: the
+  // window must never leave AURA's own UI, or the socket to the brain dies.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    openExternal(url);
+    return { action: "deny" };
+  });
+  win.webContents.on("will-navigate", (e, url) => {
+    const here = isDev ? "http://localhost:5173" : "file://";
+    if (!url.startsWith(here)) {
+      e.preventDefault();
+      openExternal(url);
+    }
+  });
+
   if (isDev) {
     win.loadURL("http://localhost:5173");
     win.webContents.openDevTools({ mode: "detach" });
@@ -102,9 +118,21 @@ function createWindow() {
   }
 }
 
+/** Hand a URL to the OS browser — http(s) only, never file:// or a custom
+ *  scheme, which is how "open this link" turns into "run this program". */
+function openExternal(raw) {
+  try {
+    const u = new URL(String(raw));
+    if (u.protocol === "http:" || u.protocol === "https:") shell.openExternal(u.href);
+  } catch {
+    /* not a URL — ignore */
+  }
+}
+
 // Window controls invoked from the renderer (TopBar buttons).
 ipcMain.on("win:minimize", (e) => BrowserWindow.fromWebContents(e.sender)?.minimize());
 ipcMain.on("win:close", (e) => BrowserWindow.fromWebContents(e.sender)?.close());
+ipcMain.on("shell:open-external", (_e, url) => openExternal(url));
 
 app.whenReady().then(() => {
   if (!isDev) startBrainIfNeeded(); // in dev you run server.py yourself

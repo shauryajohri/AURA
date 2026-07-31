@@ -9,4 +9,7 @@ contextBridge.exposeInMainWorld("aura", {
   // Window controls for AURA's own chrome (frameless window).
   minimize: () => ipcRenderer.send("win:minimize"),
   close: () => ipcRenderer.send("win:close"),
+  // Links in chat. Without this an <a href> NAVIGATES THIS WINDOW — the whole
+  // UI is replaced by the website and the socket to the brain dies with it.
+  openExternal: (url) => ipcRenderer.send("shell:open-external", String(url)),
 });

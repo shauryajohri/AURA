@@ -713,12 +713,39 @@ def generate_message(action: str, task: str, ctx: dict) -> str | None:
 _afk_logged = False   # add this near the other state globals at the top
 
 
+# ── The one gate ────────────────────────────────────────────────────────────
+# Every line that could be spoken asks core.engagement whether it's allowed,
+# instead of each code path deciding for itself. That divergence is the bug:
+# the loop gated "interaction" and "stuck" while quest milestones, V3 session
+# lines and everything generate_message() produced spoke over real work.
+#
+# Wrapped so a failure here can never make AURA permanently silent — a broken
+# gate defaults to ALLOW, matching the rest of the engagement module.
+def _engagement_allows(kind: str) -> bool:
+    try:
+        from core.engagement import allows
+        return allows(kind)
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def _engagement_reason(kind: str) -> str:
+    try:
+        from core.engagement import block_reason
+        return block_reason(kind)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _loop(speak_fn, on_suggestion_fn=None, on_presence_fn=None):
     """
     on_presence_fn(state: str) — called when presence changes.
     state is one of: 'working' | 'idle' | 'afk'
     """
     global _pending_offer, _afk_logged
+    # Logged once per reason, not once per 30-second cycle: this is how you
+    # find out WHY she's quiet without the console scrolling forever.
+    _last_gate_log = ""
     print("[AURA Proactive] Loop started")
 
     _start_afk_tracker()
@@ -801,6 +828,11 @@ def _loop(speak_fn, on_suggestion_fn=None, on_presence_fn=None):
             except Exception as e:  # noqa: BLE001
                 print(f"[AURA Proactive] Quest tick skipped: {e}")
                 quest_line = None
+            # Quest milestones used to fire ABOVE the engagement gate, so a
+            # "20 minutes in, nice" landed in the middle of the very work it
+            # was tracking. It's good news, but it isn't urgent — it waits.
+            if quest_line and _busy and not _engagement_allows("quest"):
+                quest_line = None
             if quest_line and _autochat_on:
                 if request_to_speak("quest", quest_line):
                     print(f"[AURA Proactive] (quest) {quest_line}")
@@ -817,10 +849,23 @@ def _loop(speak_fn, on_suggestion_fn=None, on_presence_fn=None):
             # this returns None the overwhelming majority of the time. When it
             # does produce a line it still has to clear the same voice gate as
             # everything else — V3 gets no special speaking privileges.
+            #
+            # The two halves are kept SEPARATE now, because they're worth
+            # different amounts mid-session: observe_screen fires on a real
+            # error that's on screen right now (worth interrupting for), while
+            # tick is session commentary (not). Fusing them with `or` meant one
+            # gate had to cover both, and the loose setting won.
+            v3_line, v3_kind = None, "v3"
             try:
-                v3_line = _v3().observe_screen(ctx) or _v3().tick()
+                err_line = _v3().observe_screen(ctx)
+                if err_line:
+                    v3_line, v3_kind = err_line, "v3_error"
+                else:
+                    v3_line = _v3().tick()
             except Exception as e:  # noqa: BLE001
                 print(f"[AURA Proactive] V3 skipped: {e}")
+                v3_line = None
+            if v3_line and _busy and not _engagement_allows(v3_kind):
                 v3_line = None
             if v3_line and _autochat_on:
                 if request_to_speak("v3", v3_line):
@@ -831,6 +876,10 @@ def _loop(speak_fn, on_suggestion_fn=None, on_presence_fn=None):
                     continue
             # ──────────────────────────────────────────────────────────────
 
+            # Initialised because the locked-app branch never scores: the gate
+            # below reads it, and an unset name raised NameError inside the
+            # try, which the loop swallowed as a generic proactive error.
+            ie_result = None
             if _locked_app:
                 if _locked_app not in ctx.get("app", "").lower():
                     action, task = _decide_locked_distracted(ctx)
@@ -841,22 +890,34 @@ def _loop(speak_fn, on_suggestion_fn=None, on_presence_fn=None):
                 action, task = _decide(ctx, ie_result=ie_result)
 
             # ── Interestingness gate ──────────────────────────────────────
-            if action in {"interaction", "error"}:
+            # Skipped entirely when they're NOT working: that's the other half
+            # of what shaurya asked for — idle time is exactly when she should
+            # speak up, and the interestingness score is tuned to protect focus
+            # that isn't currently happening. The frequency dial and the voice
+            # gate below still apply, so this loosens rather than opens.
+            if action in {"interaction", "error"} and _busy and ie_result:
                 if not ie_result["should_interrupt"]:
                     continue
             # ─────────────────────────────────────────────────────────────
 
+            # Nothing to say anyway — checked before the gate so the log below
+            # isn't spammed with "silent suppressed" every single cycle.
+            if action == "silent" or not engine.should_interrupt(observation):
+                continue
+
             # ── Engagement gate ───────────────────────────────────────────
-            # While they're working, only genuinely useful interruptions get
-            # through. "interaction" and "stuck" are social check-ins ("still
-            # on Claude?") and are exactly what made AURA annoying mid-session.
-            # Errors and code insights stay — those earn the interruption.
-            if _busy and action in {"interaction", "stuck"}:
+            # One rule for every kind of line now (core.engagement.allows):
+            # while a work stretch is open, ONLY an error on screen may speak.
+            # The old version listed two actions by hand and let everything
+            # else — suggestions, task nudges, idle chatter — straight through.
+            if not _engagement_allows(action):
+                _reason = _engagement_reason(action)
+                if _reason and _reason != _last_gate_log:
+                    print(f"[AURA Proactive] {_reason}")
+                    _last_gate_log = _reason
                 continue
             # ─────────────────────────────────────────────────────────────
 
-            if action == "silent" or not engine.should_interrupt(observation):
-                continue
             # User's own dials, checked last so all the observation bookkeeping
             # above still happens even when AURA has been told to stay quiet.
             if not _autochat_on or not _frequency_allows():

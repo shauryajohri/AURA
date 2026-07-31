@@ -602,8 +602,12 @@
 }
 .dchat__turn--user .dchat__who { color: rgba(56, 225, 255, 0.75); }
 .dchat__time { font-size: 9px; color: rgba(139, 143, 202, 0.45); letter-spacing: 0.5px; }
+/* `normal`: the shared markdown renderer emits block elements, and pre-wrap
+   on the container turned the newlines between them into blank gaps. Each
+   paragraph keeps its own pre-wrap (see .md-p in styles.css). */
 .dchat__text {
-  margin: 0; font-size: 12.3px; line-height: 1.55; white-space: pre-wrap;
+  margin: 0; font-size: 12.3px; line-height: 1.55; white-space: normal;
+  min-width: 0;
   color: rgba(236, 234, 254, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px;
   background: rgba(255, 255, 255, 0.035); padding: 9px 11px;

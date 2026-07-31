@@ -414,6 +414,45 @@ check(
     _is_strong_meta("We have context on the project already."),
 )
 
+print("\n[sixth live leak — reasoning about a gap in the context, 12:33]")
+# He asked what the project DOES. Nothing about that was stored, so the model
+# thought out loud about the hole instead of admitting it. Two bugs in one
+# reply: the leak, and the truncation at the end (the CASUAL token ceiling was
+# 150 — raised to 400, since a sentence that stops mid-phrase is worse than a
+# long one). The answer it settled on comes after "So we can say", which has
+# NO colon — which is exactly why it survived every earlier seam.
+LEAK_GAP = (
+    "We can describe what it is doing: likely a dashboard? Not given "
+    "explicitly, but we can infer it's a remake of Wasabikiri project, maybe a "
+    "UI/dashboard. We know last activity: Fix dashboard layout overflow. "
+    "So we can say it's a dashboard-focused project, maybe a UI"
+)
+check("'we can describe' is strong meta",
+      _is_strong_meta("We can describe what it is doing: likely a dashboard?"))
+check("'not given explicitly' is strong meta",
+      _is_strong_meta("Not given explicitly, but we can infer it's a remake."))
+check("'we can infer' is strong meta", _is_strong_meta("We can infer it's a remake."))
+check("'we know last activity:' is strong meta",
+      _is_strong_meta("We know last activity: Fix dashboard layout overflow."))
+
+out_gap = sanitize_text(LEAK_GAP)
+check("the deliberation is gone", "we can describe" not in out_gap.lower())
+check("the gap-reasoning is gone", "not given explicitly" not in out_gap.lower())
+check("the context read-back is gone", "we know last activity" not in out_gap.lower())
+check("the answer it settled on survives",
+      out_gap.lower().startswith("it's a dashboard-focused project"))
+
+check(
+    "a colon-less 'so we can say' mid-explanation is left alone",
+    sanitize_text("From the invariant we can say the loop terminates.")
+    == "From the invariant we can say the loop terminates.",
+)
+check(
+    "'we know' without a colon is ordinary prose",
+    sanitize_text("We know the loop terminates because n shrinks each pass.")
+    == "We know the loop terminates because n shrinks each pass.",
+)
+
 print("\n[leak telemetry names the model]")
 from core.ai_router import note_leak, leak_stats  # noqa: E402
 before = sum(sum(v.values()) for v in leak_stats().values())

@@ -115,6 +115,29 @@ check("...but still gets the project detail", "case study pages" in plain)
 check("...and is told to answer about this project", "THIS project" in plain)
 
 
+print("\n[describe intent — 'what is this project even doing?']")
+for q in ["tell me info abt this project what it is doing ?",
+          "what is this project", "what does it do", "explain the project",
+          "what's it about", "describe this"]:
+    check(f"describe: {q!r}", W.describe_intent(q))
+for q in ["how do i upgrade it", "what's left to do", "open the folder"]:
+    check(f"not describe: {q!r}", not W.describe_intent(q))
+
+# The live failure: nothing stored about what the project IS, so the model
+# reasoned about the gap out loud — "likely a dashboard? Not given explicitly,
+# but we can infer…". With no description, the block must SAY there's none.
+blind = W.focus_block(PROJECTS[1], "tell me info abt this project what it is doing ?")
+check("admits the description is missing", "NO description" in blind)
+check("forbids guessing from task titles", "do not guess" in blind.lower())
+check("tells her to ask him for it", "ask them" in blind.lower())
+
+# With a description stored, she just answers.
+described = dict(PROJECTS[1], meta={"description": "A portfolio site for SDE roles in Japan."})
+told = W.focus_block(described, "what is this project doing?")
+check("a stored description is used", "portfolio site for SDE roles" in told)
+check("...and the 'you don't know' warning is gone", "NO description" not in told)
+
+
 print("\n[prompt_section picks the right tier]")
 sec = W.prompt_section("how do i upgrade my portfolio")
 check("focused project leads", sec.startswith("THE PROJECT THEY'RE ASKING ABOUT"))

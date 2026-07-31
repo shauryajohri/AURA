@@ -270,6 +270,22 @@ _IMPROVE_RE = re.compile(
     r")\b"
 )
 
+# Asking what a thing IS, not how it's going. Live 2026-07-31: "tell me info
+# abt this project what it is doing?" — she had no description stored, so the
+# model reasoned about the gap out loud instead of admitting it.
+_DESCRIBE_RE = re.compile(
+    r"(?i)\b("
+    r"what (?:is|are|was) (?:it|this|that|the )|what'?s (?:it|this|that)\b|"
+    r"what (?:is |it |this )?(?:it|this|the project) (?:is )?do(?:ing|es)|"
+    r"what does (?:it|this|the project|that) do|"
+    r"tell me (?:about|info|more|what)|info (?:about|abt|on)\b|"
+    r"explain (?:this|it|the project|what)|"
+    r"describe (?:this|it|the project)|"
+    r"what kind of (?:project|app|thing)|what'?s it about|"
+    r"remind me what (?:it|this|that)"
+    r")"
+)
+
 # Index cache: rebuilding a project's searchable title list on every keystroke
 # would hammer sqlite. Keyed by project id, invalidated by its updated_at.
 _INDEX: dict[str, tuple[str, set[str], list[str]]] = {}
@@ -283,6 +299,11 @@ def _tokens(text: str) -> set[str]:
 def improve_intent(query: str) -> bool:
     """True when they're asking how to make something better."""
     return bool(query and _IMPROVE_RE.search(query))
+
+
+def describe_intent(query: str) -> bool:
+    """True when they're asking what something IS / what it does."""
+    return bool(query and _DESCRIBE_RE.search(query))
 
 
 def _project_index(p: dict[str, Any]) -> tuple[set[str], list[str]]:
@@ -361,6 +382,16 @@ def focus_block(project: dict[str, Any], query: str = "") -> str:
     if root:
         lines.append(f"  folder: {root}")
 
+    # WHAT IT IS. Without this, "tell me about this project, what is it doing?"
+    # had nothing to answer from, and the model filled the hole out loud:
+    # "likely a dashboard? Not given explicitly, but we can infer…" (seen live
+    # 2026-07-31). Stored description first, then the README, then nothing —
+    # and "nothing" is stated explicitly below so she says so instead of
+    # guessing.
+    about = _safe(lambda: _about(project), "")
+    if about:
+        lines.append(f"  what it is: {about}")
+
     prog = _safe(lambda: _progress(pid), {}) or {}
     if prog.get("total"):
         lines.append(
@@ -390,9 +421,10 @@ def focus_block(project: dict[str, Any], query: str = "") -> str:
     if recent:
         lines.append("  recently: " + "; ".join(recent))
 
-    # The stack, but only when they're asking for improvements — analyze()
-    # walks the folder, which is far too expensive for an ordinary turn.
-    if root and improve_intent(query):
+    # The stack, for "what is this" as well as "how do I improve this" — both
+    # are questions the languages and frameworks actually answer. analyze()
+    # walks the folder, so it stays off the ordinary turn.
+    if root and (improve_intent(query) or describe_intent(query)):
         tech = _safe(lambda: _stack(root), {}) or {}
         if tech.get("ok"):
             bits = []
@@ -415,11 +447,86 @@ def focus_block(project: dict[str, Any], query: str = "") -> str:
             "what's built or already decided, and say WHY each one fits this "
             "project. Generic advice that would fit any project is a failure.)"
         )
+    elif describe_intent(query) and not about:
+        # The specific failure this prevents: with nothing stored, the model
+        # reasoned about the gap out loud rather than admitting it.
+        lines.append(
+            f"\n(They're asking what {name} IS, and you have NO description of "
+            "it stored — only the activity above. Do not guess from the task "
+            "titles and do not speculate. Say plainly that you've been "
+            "tracking the work but never got the summary, tell them the one or "
+            "two things you DO know from the list above, and ask them to tell "
+            "you in a line what it does.)"
+        )
     else:
         lines.append(
             "\n(Answer about THIS project specifically, using the detail above.)"
         )
     return "\n".join(lines)
+
+
+# ── what a project actually is ──────────────────────────────────────────────
+_README_NAMES = ("README.md", "README.MD", "readme.md", "README", "README.txt",
+                 "README.rst", "readme.txt")
+_ABOUT_CHARS = 400
+_READMES: dict[str, tuple[float, str]] = {}
+_README_TTL = 10 * 60
+
+
+def _about(project: dict[str, Any]) -> str:
+    """One paragraph on what this project is, or "" if nobody ever said.
+
+    "" is load-bearing — focus_block turns it into an explicit "you don't know
+    this, say so" instruction, which is the whole point. Inventing a plausible
+    description would be worse than admitting the gap.
+    """
+    meta = project.get("meta") or {}
+    for key in ("description", "summary", "about", "pitch", "what"):
+        val = str(meta.get(key) or "").strip()
+        if val:
+            return val[:_ABOUT_CHARS]
+    return _readme_blurb(str(project.get("root") or ""))
+
+
+def _readme_blurb(root: str) -> str:
+    """The first real prose paragraph of the README. Cached; never raises."""
+    if not root:
+        return ""
+    hit = _READMES.get(root)
+    if hit and (time.time() - hit[0]) < _README_TTL:
+        return hit[1]
+
+    import os
+    blurb = ""
+    try:
+        for fname in _README_NAMES:
+            path = os.path.join(root, fname)
+            if not os.path.isfile(path):
+                continue
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                text = fh.read(8000)
+            para: list[str] = []
+            for raw in text.splitlines():
+                line = raw.strip()
+                # Skip the title, badges, images, code fences and rules — the
+                # first PROSE is the description, and READMEs open with junk.
+                if not line:
+                    if para:
+                        break
+                    continue
+                if (line.startswith(("#", ">", "```", "---", "===", "|", "!["))
+                        or line.startswith("[!")):
+                    continue
+                para.append(line)
+                if sum(len(x) for x in para) > _ABOUT_CHARS:
+                    break
+            blurb = " ".join(para)[:_ABOUT_CHARS].strip()
+            if blurb:
+                break
+    except Exception:  # noqa: BLE001 — a missing README is not an error
+        blurb = ""
+    _READMES[root] = (time.time(), blurb)
+    return blurb
 
 
 # Cached because analyze() walks the whole folder tree.

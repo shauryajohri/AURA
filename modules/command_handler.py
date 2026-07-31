@@ -261,16 +261,70 @@ def describe_afk_status() -> str:
     return "You haven't been AFK — been active this whole time."
 
 
+# ── "open X" vs someone just using the word "start" ─────────────────────────
+# The old test was `"start " in q` — ANYWHERE in the message. So
+#   "yes so lets start with wasabikiri upgrade disscussion"
+# was read as a launch command for an app called "with wasabikiri upgrade
+# disscussion", and AURA answered "I couldn't find … on your system. Try
+# saying the full app name once." mid-conversation (seen live 2026-07-31).
+#
+# Three guards now, all needed:
+#   1. The verb must OPEN the message (after an optional polite lead-in).
+#      "lets start with X" doesn't, so it's conversation.
+#   2. What follows can't begin with a preposition — "start WITH the
+#      discussion" and "run THROUGH the plan" are English, not commands.
+#   3. An app name is short. A sentence isn't.
+_OPEN_RE = re.compile(
+    r"^\s*(?:(?:hey|ok|okay|yo)\s+)?(?:aura[,\s]+)?"
+    r"(?:can you |can u |could you |would you |please |pls |just )*"
+    r"(?:open|launch|start|run|fire up|boot|bring up)\s+"
+    r"(?P<rest>.+?)\s*[?.!]*$",
+    re.IGNORECASE,
+)
+
+# Words that mean the "verb" was ordinary English, not an instruction.
+_NOT_AN_APP_HEAD = {
+    "with", "on", "off", "about", "by", "from", "to", "into", "through",
+    "over", "up", "out", "again", "working", "work", "discussing", "talking",
+    "thinking", "planning", "building", "coding", "fixing", "learning",
+    "doing", "it", "that", "this", "there", "here", "now", "today", "then",
+    "the", "a", "an", "my", "our", "some", "another", "next", "first",
+}
+
+MAX_APP_NAME_WORDS = 4
+
+
+def _launch_target(q: str) -> str | None:
+    """The app to open, or None when the sentence merely used the word."""
+    m = _OPEN_RE.match(q)
+    if not m:
+        return None
+    rest = m.group("rest").strip(" ?.!,")
+    if not rest:
+        return None
+    words = rest.split()
+    if words[0].lower() in _NOT_AN_APP_HEAD:
+        return None
+    if len(words) > MAX_APP_NAME_WORDS:
+        return None
+    # A project he's discussing is not an app to launch. This is the same
+    # brain the chat uses, so "open wasabikiri_remake" stays a launch only if
+    # it isn't a known project — otherwise it's a conversation about the work.
+    try:
+        from core import work_recall
+        if work_recall.find_project(rest):
+            return None
+    except Exception:  # noqa: BLE001 — the launcher must work without the brain
+        pass
+    return rest
+
+
 def handle_command(query: str) -> str | None:
     q = query.lower()
 
     if AFK_QUERY_PATTERN.search(q):
         return describe_afk_status()
 
-    open_triggers = [
-        "can you open ", "please open ", "can u open ",
-        "open ", "launch ", "start ", "run "
-    ]
     look_match = LOOK_AT_PATTERN.search(q)
     if look_match:
         target = look_match.group("target").strip()
@@ -293,9 +347,9 @@ def handle_command(query: str) -> str | None:
 
     if any(trigger in q for trigger in STATUS_TRIGGERS):
         return screen_reader.describe_current_focus()
-    for trigger in open_triggers:
-        if trigger in q:
-            app_name = q.split(trigger, 1)[1].strip("?. ")
-            return open_app(app_name)
+
+    app_name = _launch_target(q)
+    if app_name:
+        return open_app(app_name)
 
     return None

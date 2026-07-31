@@ -359,7 +359,17 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
             {"role": "system", "content": strict_system},
             {"role": "user",   "content": prompt}
         ],
-        "max_tokens": 2048 if (is_coding or is_longform) else (1024 if is_explain else (300 if is_personal else 150)),
+        # 150 was the CASUAL budget, and it is why answers arrived chopped
+        # mid-word ("…a dashboard-focused project, maybe a UI"). A reasoning
+        # model spends part of that budget thinking out loud, so the sentence
+        # it finally starts writing runs out of room. The filter then either
+        # bins a truncated answer or hands over half of one.
+        #
+        # shaurya, 2026-07-31: "text can come in paragraph thats not the issue.
+        # text are cutted without sending full meaning text." Longer is fine;
+        # incomplete is not. Brevity is enforced by the prompt and the clamp,
+        # which cut on SENTENCE boundaries — the token ceiling doesn't.
+        "max_tokens": 2048 if (is_coding or is_longform) else (1024 if is_explain else (600 if is_personal else 400)),
         "temperature": 0.6 if is_longform else (0.5 if is_explain else (0.3 if is_coding else 0.7)),
         "stream": True
     }
@@ -640,7 +650,17 @@ _META_STRONG_RE = _re_mod.compile(
     # "note" is deliberately absent: "we should note that Python ints are
     # arbitrary precision" is a legitimate explanatory sentence, and these
     # markers delete the sentence wherever it sits.
-    r"(?:suggest|recommend|mention|offer|propose|point out|tell them|ask them)\b|"
+    r"(?:suggest|recommend|mention|offer|propose|point out|tell them|ask them|"
+    r"describe|summari[sz]e|infer)\b|"
+    # Reasoning ABOUT the gaps in its own context — the 12:33 leak, where she
+    # had no description of the project stored and thought out loud about it:
+    # "likely a dashboard? Not given explicitly, but we can infer…"
+    r"\bnot (?:given|stated|specified|mentioned|provided) (?:explicitly|directly|anywhere)\b|"
+    r"\bisn'?t (?:given|stated|specified) (?:explicitly|directly)\b|"
+    # "We know last activity: Fix dashboard layout overflow." — reading the
+    # injected context aloud. The colon is required, so "we know the loop
+    # terminates" stays legal.
+    r"\bwe know\b[^.!?]{0,30}:|"
     # Quoted banned-phrase rules: 'No "I think".' / 'Avoid "Sure".' The quote
     # is required, so ordinary negation ("no, that won't work") is untouched.
     r"(?:^|[.!?])\s*(?:no|avoid|never|don'?t use|don'?t say|not)\s+"
@@ -740,9 +760,16 @@ _SEAM_RE = _re_mod.compile(
 # Must be at a sentence start: "the cause is probably: a race" would otherwise
 # get truncated to "A race", and "probably" mid-sentence is ordinary English.
 _HEDGE_SEAM_RE = _re_mod.compile(
-    r"(?i)(?:^|[.!?\n]\s*)"
+    r"(?i)(?:^|[.!?\n]\s*)(?:"
     r"(?:probably|perhaps|maybe|likely|i'?d say|final response|response|reply|output)"
-    r"\s*[:\-—]\s*"
+    r"\s*[:\-—]"
+    # "So we can say it's a dashboard-focused project" — the same handover with
+    # NO colon, which is how it slipped past the strong marker and _SEAM_RE
+    # (both anchor on the punctuation). Safe only because it must open a
+    # sentence: "from the invariant we can say the loop terminates" doesn't.
+    r"|(?:so|thus|hence|therefore|ok(?:ay)?)[,]?\s*(?:we|i)\s+"
+    r"(?:can|could|should|shall|will|'ll|might)\s+say\s*[:,]?"
+    r")\s*"
 )
 
 
@@ -1309,7 +1336,8 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
                     {"role": "system", "content": strict_system},
                     {"role": "user",   "content": prompt}
                 ],
-                "max_tokens": 2048 if (is_coding or is_longform) else (1024 if is_explain else (300 if is_personal else 150)),
+                # Same ceiling as the streaming path — see the note there.
+                "max_tokens": 2048 if (is_coding or is_longform) else (1024 if is_explain else (600 if is_personal else 400)),
                 "temperature": 0.6 if is_longform else (0.5 if is_explain else (0.3 if is_coding else 0.7)),
                 "stream": False
             },

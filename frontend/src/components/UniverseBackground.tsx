@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AuraState } from "../types";
 
 interface Props {
@@ -7,9 +7,11 @@ interface Props {
   onFail?: () => void;
 }
 
-// Relative path — works from Vite's dev server AND Electron's file:// origin
+// Relative paths — work from Vite's dev server AND Electron's file:// origin
 // (an absolute "/universe.mp4" resolves to the DISK root under file://).
-const SRC = "./universe.mp4";
+// The new "Aura Main" cosmos plays first; the original universe file is the
+// fallback if it's missing, before we give up to the CSS starfield.
+const SOURCES = ["./aura-main.mp4", "./universe.mp4"];
 /** Seconds of crossfade around the loop point so the restart is invisible. */
 const FADE_S = 0.9;
 
@@ -43,6 +45,7 @@ const FILTER: Record<string, string> = {
 };
 
 export default function UniverseBackground({ state, onFail }: Props) {
+  const [srcIdx, setSrcIdx] = useState(0);
   const wrapRef = useRef<HTMLDivElement>(null);
   const vaRef = useRef<HTMLVideoElement>(null);
   const vbRef = useRef<HTMLVideoElement>(null);
@@ -123,6 +126,11 @@ export default function UniverseBackground({ state, onFail }: Props) {
     const onError = () => {
       if (failed) return;
       failed = true;
+      // Step down the source list before surrendering to the CSS starfield.
+      if (srcIdx < SOURCES.length - 1) {
+        setSrcIdx(srcIdx + 1); // effect reruns with fresh flags + new src
+        return;
+      }
       onFail?.();
     };
 
@@ -184,7 +192,9 @@ export default function UniverseBackground({ state, onFail }: Props) {
       document.removeEventListener("visibilitychange", onVis);
       va.pause(); vb.pause();
     };
-  }, [onFail]);
+  }, [onFail, srcIdx]);
+
+  const SRC = SOURCES[srcIdx];
 
   return (
     <div ref={wrapRef} className="universe-bg" aria-hidden="true">

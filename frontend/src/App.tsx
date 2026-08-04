@@ -5,40 +5,46 @@ import { useSettingsStore } from "./stores/settingsStore";
 import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
 import Stage from "./components/Stage";
-import ChatPanel from "./components/ChatPanel";
-import Resizer from "./components/Resizer";
+import ChatDock from "./components/ChatDock";
+import HomeStatusCard from "./components/HomeStatusCard";
 import CosmicBackground from "./components/CosmicBackground";
 import UniverseBackground from "./components/UniverseBackground";
 import ParticleField from "./components/ParticleField";
-import SanctuarySection from "./components/Home/SanctuarySection";
-import TransitionParticles from "./components/Home/TransitionParticles";
-import { useScrollJourney, seg } from "./components/Home/ScrollController";
 import DomainScreen from "./components/Domain/DomainScreen";
 import PortalTransition from "./components/Domain/PortalTransition";
-import ModelsView from "./views/ModelsView";
-import MemoryView from "./views/MemoryView";
-import SkillsView from "./views/SkillsView";
+import MemoryPage from "./views/MemoryPage";
+import TasksPage from "./views/TasksPage";
+import ModelsPage from "./views/ModelsPage";
 import SettingsView from "./views/SettingsView";
-import IntelligenceView from "./views/IntelligenceView";
-import QuestsView from "./views/QuestsView";
-import TasksView from "./views/TasksView";
-import PlaceholderView from "./views/PlaceholderView";
 
-const SIDEBAR_W = 244;
+/**
+ * AURA OS — one fixed shell, no scroll journey.
+ *
+ * Home is the permanent landing page: the core at the center, the chat dock
+ * at the bottom, one small status card. The glass sidebar opens every other
+ * page with a crossfade, and "Aura Domain" crosses the portal into the
+ * dedicated coding workspace. The old second "Village" screen is gone — what
+ * lived there (tasks, links vault, memory, settings) lives in the pages now.
+ */
 
-const TITLES: Record<string, string> = {};
+// Old localStorage view ids → the page that now owns that feature.
+const LEGACY: Record<string, string> = {
+  quests: "tasks",
+  skills: "models",
+  analytics: "models",
+};
+const PAGES = ["home", "memory", "tasks", "models", "settings"];
 
 export default function App() {
   const { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, send } =
     useAuraSocket();
-  const [sidebarOpen, setSidebarOpen] = useLocalStorage<boolean>("aura.sidebarOpen", true);
-  const [chatOpen, setChatOpen] = useLocalStorage<boolean>("aura.chatOpen", true);
-  const [chatWidth, setChatWidth] = useLocalStorage<number>("aura.chatWidth", 460);
-  const [view, setView] = useLocalStorage<string>("aura.view", "home");
-  // Background video health. A failure swaps in the CSS starfield, but it used
-  // to be permanent — one transient decoder hiccup meant no universe until the
-  // app was restarted. Retry a couple of times, backing off, before accepting
-  // that the file is genuinely unplayable.
+  const [collapsed, setCollapsed] = useLocalStorage<boolean>("aura.sidebarMin", false);
+  const [rawView, setView] = useLocalStorage<string>("aura.view", "home");
+  const view = PAGES.includes(rawView) ? rawView : LEGACY[rawView] ?? "home";
+
+  // Background video health. A failure swaps in the CSS starfield, but a
+  // transient decoder hiccup shouldn't cost the universe until restart —
+  // retry with backoff before giving up.
   const [videoOk, setVideoOk] = useState(true);
   const videoRetriesRef = useRef(0);
   const handleVideoFail = useCallback(() => {
@@ -48,338 +54,73 @@ export default function App() {
     videoRetriesRef.current += 1;
     setTimeout(() => setVideoOk(true), delay);
   }, []);
-  const [ambientOk, setAmbientOk] = useState(true);
-  const [transOk, setTransOk] = useState(true);
 
-  // Pull the saved appearance/voice settings from the brain once at startup
-  // and push them into the visual stores. Without this the Sanctuary sliders
-  // persist to the backend but never reach the black hole or the planets.
+  // Pull saved appearance/voice settings from the brain once at startup and
+  // push them into the visual stores (core, planets, background).
   const loadSettings = useSettingsStore((s) => s.load);
   useEffect(() => { loadSettings(); }, [loadSettings]);
 
-  // React state only flips at the very end of the journey (card reveal).
-  const [entered, setEntered] = useState(false);
-  const enteredRef = useRef(false);
-
-  // ---- AURA Domain: the workspace beyond the beam -------------------------
-  // portal: "in" = crossing into the Domain, "out" = returning to sanctuary.
+  // ---- AURA Domain: the workspace beyond the portal -----------------------
   const [domainOpen, setDomainOpen] = useState(false);
   const [portal, setPortal] = useState<null | "in" | "out">(null);
   const enterDomain = useCallback(() => setPortal("in"), []);
   const exitDomain = useCallback(() => setPortal("out"), []);
   const portalDone = useCallback(() => setPortal(null), []);
 
-  // Imperative layer refs — mutated per-frame, zero React re-renders.
-  const screen1Ref = useRef<HTMLDivElement>(null);
-  const transWrapRef = useRef<HTMLDivElement>(null);
-  const transVideoRef = useRef<HTMLVideoElement>(null);
-  const ambientWrapRef = useRef<HTMLDivElement>(null);
-  const ambientVideoRef = useRef<HTMLVideoElement>(null);
-  const sanRef = useRef<HTMLDivElement>(null);
-  const transTextRef = useRef<HTMLDivElement>(null);
-  const lastPRef = useRef(0);
-  const dirRef = useRef<1 | -1>(1);
-  const uniPausedRef = useRef(false);
+  const goHome = useCallback(() => setView("home"), [setView]);
 
-  // ---- Bridge-video scrubbing ---------------------------------------------
-  // Seeking a video on every scroll event is what makes scrub feel laggy: the
-  // wheel fires in coarse jumps and each one demands an immediate decode.
-  // Instead the scroll only sets a TARGET time; a rAF loop eases the video
-  // toward it and skips seeks the decoder can't service yet (seeking flag) or
-  // that are too small to see. Result: continuous glide, no stutter.
-  const seekTargetRef = useRef(0);
-  const seekActiveRef = useRef(false);
-  const prerollRef = useRef(false); // true while the warm-up pass is running
-
-  // Preload the bridge into MEMORY at startup.
-  //
-  // This is why scrolling down used to stutter while scrolling back up was
-  // smooth: on the way down every frame was being pulled off disk for the
-  // first time (seek + I/O + decode); on the way back those bytes were already
-  // in the OS cache. Fetching the whole file up front and playing it from a
-  // blob URL removes the disk entirely — the first pass is as smooth as the
-  // second. Then we pre-roll it once (fast, muted, invisible) so the decoder
-  // has already walked every frame before you ever get there.
-  useEffect(() => {
-    let cancelled = false;
-    let blobUrl = "";
-
-    (async () => {
-      try {
-        const res = await fetch("./transition.mp4");
-        const blob = await res.blob();
-        if (cancelled) return;
-        const v = transVideoRef.current;
-        if (!v) return;
-        blobUrl = URL.createObjectURL(blob);
-        v.src = blobUrl;
-        v.load();
-
-        // pre-roll: race through the clip once so every frame is decoded,
-        // then park at the start. Nothing is visible — the wrapper is hidden.
-        const preroll = () => {
-          prerollRef.current = true;
-          v.playbackRate = 16;
-          const stop = () => {
-            if (!prerollRef.current) return;
-            prerollRef.current = false;
-            v.pause();
-            v.playbackRate = 1;
-            v.removeEventListener("ended", stop);
-          };
-          v.play()
-            .then(() => {
-              v.addEventListener("ended", stop);
-              setTimeout(stop, 3000); // safety net if "ended" never fires
-            })
-            .catch(() => { prerollRef.current = false; v.playbackRate = 1; });
-        };
-        v.addEventListener("loadeddata", preroll, { once: true });
-        if (v.readyState >= 2) preroll();
-      } catch {
-        /* fetch failed — the plain src in the JSX still works, just colder */
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
-    };
-  }, []);
-
-  useEffect(() => {
-    let raf = 0;
-    const tick = () => {
-      raf = requestAnimationFrame(tick);
-      const v = transVideoRef.current;
-      if (!v || !seekActiveRef.current || !v.duration || v.seeking) return;
-      // If the user reaches the bridge while it's still warming up, cut the
-      // warm-up short and hand control straight to the scroll.
-      if (prerollRef.current) {
-        prerollRef.current = false;
-        v.pause();
-        v.playbackRate = 1;
-      }
-      const cur = v.currentTime;
-      const target = seekTargetRef.current;
-      const delta = target - cur;
-      if (Math.abs(delta) < 0.012) return;           // already there — don't thrash
-      // Big jumps snap (scroll flick), small ones ease — always forward-smooth.
-      const next = Math.abs(delta) > 1.2 ? target : cur + delta * 0.28;
-      try { v.currentTime = Math.max(0, Math.min(v.duration - 0.05, next)); } catch { /* seeking */ }
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, []);
-
-  useScrollJourney((p) => {
-    const dive = seg(p, 0.25, 0.5);      // screen 1 rushes TOWARD you
-    const uniFade = seg(p, 0.2, 0.5);    // dissolving into light as it passes
-    const sanIn = seg(p, 0.88, 1);       // sanctuary emerges
-    const vis = seg(p, 0.38, 0.48) * (1 - seg(p, 0.9, 0.99)); // bridge video
-
-    const s1 = screen1Ref.current;
-    if (s1) {
-      // Never travels backwards: the screen accelerates forward as it fades,
-      // so the camera flies THROUGH it. transform + opacity ONLY — a CSS
-      // filter here would re-rasterize the whole UI (every glass panel has a
-      // backdrop-filter) on every frame, which is what made this stutter.
-      const ease = dive * dive * (3 - 2 * dive); // smoothstep for a real surge
-      s1.style.opacity = String(1 - uniFade);
-      s1.style.transform = `scale(${1 + 0.5 * ease})`;
-      s1.style.pointerEvents = p < 0.15 ? "auto" : "none";
-      // fully faded → stop compositing the blurred panels entirely
-      s1.style.visibility = uniFade >= 1 ? "hidden" : "visible";
-
-      // Two 1080p+ videos decoding at once is the other half of the stutter.
-      // Once the universe is mostly gone, park it; bring it back on the way up.
-      const shouldPause = uniFade > 0.55;
-      if (shouldPause !== uniPausedRef.current) {
-        uniPausedRef.current = shouldPause;
-        s1.querySelectorAll("video").forEach((v) => {
-          if (shouldPause) v.pause();
-          else v.play().catch(() => {});
-        });
-      }
-    }
-
-    const tw = transWrapRef.current;
-    if (tw) {
-      tw.style.opacity = String(vis);
-      tw.style.visibility = vis <= 0 ? "hidden" : "visible";
-    }
-    // Only publish a target; the rAF loop above does the actual easing.
-    const tv = transVideoRef.current;
-    if (tv && tv.duration) {
-      seekTargetRef.current = tv.duration * seg(p, 0.45, 0.9);
-      seekActiveRef.current = vis > 0;
-    }
-
-    // crossing-verses text: direction decides the message
-    if (p !== lastPRef.current) dirRef.current = p > lastPRef.current ? 1 : -1;
-    lastPRef.current = p;
-    const tt = transTextRef.current;
-    if (tt) {
-      const msg = dirRef.current === 1 ? "ENTERING AURA CITY" : "ASCENDING TO THE COSMOS";
-      if (tt.textContent !== msg) tt.textContent = msg;
-      tt.style.opacity = String(vis);
-    }
-
-    const aw = ambientWrapRef.current;
-    if (aw) {
-      aw.style.opacity = String(sanIn);
-      aw.style.visibility = sanIn <= 0 ? "hidden" : "visible";
-    }
-    const av = ambientVideoRef.current;
-    if (av && sanIn > 0 && av.paused) av.play().catch(() => {});
-
-    const sn = sanRef.current;
-    if (sn) {
-      sn.style.opacity = String(sanIn);
-      sn.style.visibility = sanIn <= 0 ? "hidden" : "visible";
-      sn.style.pointerEvents = p > 0.985 ? "auto" : "none";
-    }
-
-    const ent = p > 0.985;
-    if (ent !== enteredRef.current) {
-      enteredRef.current = ent;
-      setEntered(ent);
-    }
-  });
-
-  // Only emit tracks for panels that are actually rendered —
-  // otherwise the center section lands in a 0px track and the layout implodes.
-  const cols =
-    (sidebarOpen ? SIDEBAR_W + "px " : "") +
-    "1fr" +
-    (chatOpen ? " 6px " + chatWidth + "px" : "");
-
-  const renderCenterBody = () => {
-    // Views that no longer exist (tasks/inventory/workspace) could still be
-    // sitting in localStorage from an earlier run — send those home.
-    if (!["home", "tasks", "quests", "skills", "models", "memory", "analytics", "settings"].includes(view)) {
-      return <Stage state={auraState} activeModelId={activeModelId} />;
-    }
+  const renderPage = () => {
     switch (view) {
-      case "home":
-        return <Stage state={auraState} activeModelId={activeModelId} />;
-      case "tasks":
-        return <TasksView />;
-      case "quests":
-        return <QuestsView event={questEvent} />;
-      case "skills":
-        return <SkillsView />;
-      case "models":
-        return <ModelsView />;
       case "memory":
-        return <MemoryView />;
+        return <MemoryPage />;
+      case "tasks":
+        return <TasksPage questEvent={questEvent} />;
+      case "models":
+        return <ModelsPage v3Events={v3Events} onGoHome={goHome} />;
       case "settings":
         return <SettingsView />;
-      case "analytics":
-        // "analytics" is the historical id (it's what's already sitting in
-        // localStorage); the panel behind it is now V3 Intelligence.
-        return <IntelligenceView events={v3Events} />;
       default:
-        return <PlaceholderView title={TITLES[view] || view} />;
+        return null;
     }
   };
 
   return (
-    <div className="scroll-root">
-      {/* ---- Section 1: the universe (surges forward, then dissolves) ---- */}
-      <div ref={screen1Ref} className="screen screen--one">
-        <div className="app" style={{ gridTemplateColumns: cols }}>
-          {videoOk ? (
-            <UniverseBackground state={auraState} onFail={handleVideoFail} />
-          ) : (
-            <CosmicBackground state={auraState} />
-          )}
-          <ParticleField state={auraState} />
-
-          {sidebarOpen ? (
-            <Sidebar
-              active={view}
-              onNavigate={setView}
-              listening={presence === "working" || auraState === "thinking"}
-              onCollapse={() => setSidebarOpen(false)}
-            />
-          ) : (
-            <button className="sidebar-reveal" onClick={() => setSidebarOpen(true)} title="Show sidebar">
-              {"☰"}
-            </button>
-          )}
-
-          <section className="center">
-            <TopBar mode={mode} />
-            {renderCenterBody()}
-          </section>
-
-          {chatOpen ? (
-            <>
-              <Resizer onResize={setChatWidth} />
-              <ChatPanel
-                status={status}
-                turns={turns}
-                onSend={send}
-                auraState={auraState}
-                onCollapse={() => setChatOpen(false)}
-              />
-            </>
-          ) : (
-            <button className="chat-reveal" onClick={() => setChatOpen(true)} title="Show chat">
-              {"💬"}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* ---- Section 2: the bridge — video scrubbed by scroll ---- */}
-      {transOk && (
-        <div ref={transWrapRef} className="screen screen--transition" style={{ visibility: "hidden", opacity: 0 }}>
-          <video
-            ref={transVideoRef}
-            src="./transition.mp4"
-            muted
-            playsInline
-            preload="auto"
-            onError={() => setTransOk(false)}
-          />
-          <TransitionParticles />
-          <div ref={transTextRef} className="trans-text" style={{ opacity: 0 }}>
-            ENTERING AURA CITY
-          </div>
-        </div>
+    <div className="os-root">
+      {/* the living universe — always behind everything, never replaced */}
+      {videoOk ? (
+        <UniverseBackground state={auraState} onFail={handleVideoFail} />
+      ) : (
+        <CosmicBackground state={auraState} />
       )}
+      <ParticleField state={auraState} />
 
-      {/* ---- Section 3 background: looping ambient world ---- */}
-      <div ref={ambientWrapRef} className="screen screen--ambient" style={{ visibility: "hidden", opacity: 0 }}>
-        {ambientOk ? (
-          <video
-            ref={ambientVideoRef}
-            src="./ambient.mp4"
-            autoPlay
-            muted
-            loop
-            playsInline
-            preload="auto"
-            onError={() => setAmbientOk(false)}
-          />
+      <Sidebar
+        active={view}
+        collapsed={collapsed}
+        onNavigate={setView}
+        onLaunchDomain={enterDomain}
+        onToggle={() => setCollapsed(!collapsed)}
+        listening={presence === "working" || auraState === "thinking"}
+      />
+
+      <main className="os-main">
+        {view === "home" ? (
+          <div className="os-home page-fade" key="home">
+            <TopBar mode={mode} />
+            <div className="os-stagewrap">
+              <Stage state={auraState} activeModelId={activeModelId} />
+              <HomeStatusCard status={status} activeModelId={activeModelId} mode={mode} />
+            </div>
+            <ChatDock status={status} turns={turns} onSend={send} auraState={auraState} />
+          </div>
         ) : (
-          <div className="ambient-fallback" />
+          <div className="os-page page-fade" key={view}>
+            {renderPage()}
+          </div>
         )}
-        <div className="ambient-shade" />
-      </div>
+      </main>
 
-      {/* ---- Section 3 UI: the sanctuary ---- */}
-      <div
-        ref={sanRef}
-        className={"screen screen--sanctuary" + (portal === "in" ? " screen--recede" : "")}
-        style={{ visibility: "hidden", opacity: 0, pointerEvents: "none" }}
-      >
-        <SanctuarySection entered={entered} onEnterDomain={enterDomain} />
-      </div>
-
-      {/* ---- The Domain: workspace beyond the beam ---- */}
+      {/* ---- The Domain: a different workspace entirely ---- */}
       {domainOpen && (
         <div className="screen screen--domain">
           <DomainScreen onExit={exitDomain} />

@@ -1,61 +1,91 @@
-const NAV = [
-  { id: "home", label: "Home", icon: "⌂" },
-  { id: "tasks", label: "Tasks", icon: "✓" },
-  { id: "quests", label: "Quests", icon: "❖" },
-  { id: "skills", label: "Skills", icon: "⚚" },
-  { id: "models", label: "Models", icon: "◈" },
-  { id: "memory", label: "Memory", icon: "❋" },
-  // id stays "analytics" for backwards-compatible localStorage; the view
-  // behind it is the V3 Intelligence panel.
-  { id: "analytics", label: "Intelligence", icon: "◎" },
-  { id: "settings", label: "Settings", icon: "⚙" },
+/**
+ * The fixed glass sidebar — AURA OS navigation.
+ *
+ * Six destinations. "Aura Domain" is special: it doesn't swap the page, it
+ * crosses the portal into the dedicated coding workspace. Collapsed mode is
+ * icons-only; the width animates (CSS) and labels fade out, nothing snaps.
+ * The bottom is reserved for identity: profile, version, plan.
+ */
+
+interface NavItem {
+  id: string;
+  label: string;
+  icon: string;
+  hint: string;
+  domain?: boolean;
+}
+
+const NAV: NavItem[] = [
+  { id: "home", label: "Home", icon: "⌂", hint: "The AURA core" },
+  { id: "domain", label: "Aura Domain", icon: "❖", hint: "Coding workspace", domain: true },
+  { id: "memory", label: "Memory", icon: "❋", hint: "Timeline · search · bookmarks" },
+  { id: "tasks", label: "Tasks", icon: "✓", hint: "Today · projects · quests" },
+  { id: "models", label: "Models", icon: "◈", hint: "Planets · routing · orbits" },
+  { id: "settings", label: "Settings", icon: "⚙", hint: "Appearance · voice · keys" },
 ];
 
 interface Props {
   active: string;
+  collapsed: boolean;
   onNavigate: (id: string) => void;
+  onLaunchDomain: () => void;
+  onToggle: () => void;
   listening?: boolean;
-  onCollapse?: () => void;
 }
 
-export default function Sidebar({ active, onNavigate, listening = false, onCollapse }: Props) {
+export default function Sidebar({
+  active,
+  collapsed,
+  onNavigate,
+  onLaunchDomain,
+  onToggle,
+  listening = false,
+}: Props) {
   return (
-    <aside className="sidebar">
-      <div className="brand">
-        <div className="brand__mark" />
-        <div className="brand__text">
+    <aside className={"osbar" + (collapsed ? " osbar--min" : "")}>
+      <div className="osbar__brand" onClick={onToggle} title={collapsed ? "Expand" : "Collapse"}>
+        <div className={"osbar__mark" + (listening ? " osbar__mark--live" : "")} />
+        <div className="osbar__brandtext">
           <h1>A U R A</h1>
-          <span className="brand__sub">Prime Core Online</span>
-          <span className="brand__tag">Your AI Companion</span>
+          <span>Prime Core Online</span>
         </div>
-        <button className="brand__collapse" onClick={onCollapse} title="Hide sidebar">
-          {"«"}
-        </button>
+        <span className="osbar__fold">{collapsed ? "»" : "«"}</span>
       </div>
 
-      <nav className="nav">
+      <nav className="osbar__nav">
         {NAV.map((item) => (
           <button
             key={item.id}
-            className={"nav__item " + (active === item.id ? "nav__item--active" : "")}
-            onClick={() => onNavigate(item.id)}
+            className={
+              "osbar__item" +
+              (active === item.id && !item.domain ? " osbar__item--active" : "") +
+              (item.domain ? " osbar__item--domain" : "")
+            }
+            onClick={() => (item.domain ? onLaunchDomain() : onNavigate(item.id))}
+            title={collapsed ? item.label : undefined}
           >
-            <span className="nav__icon">{item.icon}</span>
-            <span className="nav__label">{item.label}</span>
-            {active === item.id && <span className="nav__chevron">{"›"}</span>}
+            <span className="osbar__icon">{item.icon}</span>
+            <span className="osbar__meta">
+              <span className="osbar__label">{item.label}</span>
+              <span className="osbar__hint">{item.hint}</span>
+            </span>
+            {active === item.id && !item.domain && <span className="osbar__glowline" />}
           </button>
         ))}
       </nav>
 
-      <div className={"voice-card " + (listening ? "voice-card--on" : "")}>
-        <span className="voice-card__title">VOICE MODE</span>
-        <div className="voice-card__mic">{"🎙"}</div>
-        <div className="voice-card__wave">
-          {Array.from({ length: 20 }).map((_, i) => (
-            <span key={i} style={{ animationDelay: i * 0.06 + "s" }} />
-          ))}
+      <div className="osbar__foot">
+        <div className="osbar__profile" title="Shaurya">
+          <span className="osbar__avatar">S</span>
+          <span className="osbar__meta">
+            <span className="osbar__label">Shaurya</span>
+            <span className="osbar__hint">Companion linked</span>
+          </span>
         </div>
-        <span className="voice-card__status">{listening ? "Listening..." : "Tap to speak"}</span>
+        <div className="osbar__plan">
+          <span className="osbar__planbadge">SUPERNOVA</span>
+          <span className="osbar__version">v3.0</span>
+        </div>
       </div>
     </aside>
   );

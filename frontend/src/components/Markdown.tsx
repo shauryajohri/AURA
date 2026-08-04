@@ -122,7 +122,9 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
 const INLINE_RE = new RegExp(
   [
     /\[([^\]\n]+)\]\(([^)\s]+)\)/.source,          // 1 label, 2 href
-    /(`+)([^`]+?)\3/.source,                        // 3 ticks, 4 code
+    // 3 ticks, 4 code — a plain string, not a literal: \3 is only a valid
+    // backreference in the COMBINED pattern, and tsc checks literals alone.
+    "(`+)([^`]+?)\\3",
     /\*\*([^*\n]+)\*\*/.source,                     // 5 bold
     /__([^_\n]+)__/.source,                         // 6 bold
     /(?<![*\w])\*([^*\n]+)\*(?!\*)/.source,         // 7 italic

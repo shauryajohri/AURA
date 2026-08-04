@@ -10,6 +10,29 @@ export interface Task {
   done_at: string | null;
   /** "now" = doing it today, "later" = the backlog. */
   bucket: "now" | "later";
+  /** ISO date (YYYY-MM-DD) or null. */
+  due?: string | null;
+  /** Free-text project name this task belongs to. */
+  project?: string | null;
+  /** "user" = you typed it, "aura" = she suggested it. */
+  origin?: "user" | "aura" | string;
+}
+
+/** One task AURA pulled out of a conversation — a suggestion, not a record. */
+export interface SuggestedTask {
+  title: string;
+  group: string;
+  complexity: "low" | "medium" | "high";
+  hours: number;
+  priority: "low" | "medium" | "high";
+}
+
+export interface ExtractResult {
+  ok: boolean;
+  source: "llm" | "heuristic" | "empty";
+  tasks: SuggestedTask[];
+  groups: { name: string; count: number }[];
+  total_hours: number;
 }
 
 export interface ModelInfo {
@@ -197,8 +220,27 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   // Tasks
   getTasks: () => j<{ tasks: Task[] }>("/api/tasks").then((r) => r.tasks),
-  addTask: (title: string, priority = "medium", bucket: "now" | "later" = "now") =>
-    j("/api/tasks", { method: "POST", body: JSON.stringify({ title, priority, bucket }) }),
+  addTask: (
+    title: string,
+    priority = "medium",
+    bucket: "now" | "later" = "now",
+    extra: { due?: string | null; project?: string | null; origin?: string } = {},
+  ) =>
+    j("/api/tasks", {
+      method: "POST",
+      body: JSON.stringify({ title, priority, bucket, ...extra }),
+    }),
+  /** AI Task Assistant — suggestions only, nothing is stored until accepted. */
+  extractTasks: (text?: string, limit = 40) =>
+    j<ExtractResult>("/api/tasks/extract", {
+      method: "POST",
+      body: JSON.stringify({ text: text ?? "", limit }),
+    }),
+  rewriteTask: (title: string) =>
+    j<{ ok: boolean; title: string; complexity: string; hours: number; original: string; source: string }>(
+      "/api/tasks/rewrite",
+      { method: "POST", body: JSON.stringify({ title }) },
+    ),
   setTaskBucket: (id: number, bucket: "now" | "later") =>
     j(`/api/tasks/${id}/bucket`, { method: "POST", body: JSON.stringify({ bucket }) }),
   promoteTask: (id: number, target_minutes = 0) =>
@@ -232,7 +274,10 @@ export const api = {
   deleteRecap: (id: number) => j(`/api/recaps/${id}`, { method: "DELETE" }),
 
   // Task edit
-  updateTask: (id: number, patch: { title?: string; priority?: string }) =>
+  updateTask: (
+    id: number,
+    patch: { title?: string; priority?: string; due?: string | null; project?: string | null },
+  ) =>
     j(`/api/tasks/${id}`, { method: "PUT", body: JSON.stringify(patch) }),
 
   // Saved links

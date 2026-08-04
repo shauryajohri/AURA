@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { useAuraSocket } from "./hooks/useAuraSocket";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 import { useSettingsStore } from "./stores/settingsStore";
@@ -10,12 +10,28 @@ import HomeStatusCard from "./components/HomeStatusCard";
 import CosmicBackground from "./components/CosmicBackground";
 import UniverseBackground from "./components/UniverseBackground";
 import ParticleField from "./components/ParticleField";
-import DomainScreen from "./components/Domain/DomainScreen";
+import CursorLens from "./components/CursorLens";
 import PortalTransition from "./components/Domain/PortalTransition";
-import MemoryPage from "./views/MemoryPage";
-import TasksPage from "./views/TasksPage";
-import ModelsPage from "./views/ModelsPage";
-import SettingsView from "./views/SettingsView";
+
+// Pages are code-split: Home boots instantly and the heavy panels (Domain's
+// editor, the settings overlay, the memory/task views) only download when you
+// actually open them. This is the single biggest startup win available.
+const DomainScreen = lazy(() => import("./components/Domain/DomainScreen"));
+const MemoryPage = lazy(() => import("./views/MemoryPage"));
+const TasksPage = lazy(() => import("./views/TasksPage"));
+const ModelsPage = lazy(() => import("./views/ModelsPage"));
+const SettingsView = lazy(() => import("./views/SettingsView"));
+const LabsPage = lazy(() => import("./views/LabsPage"));
+
+/** Shown for the instant a lazy page is fetched — a calm pulse, never a jolt. */
+function PageLoading() {
+  return (
+    <div className="pageloading">
+      <span className="pageloading__orb" />
+      <span className="pageloading__text">opening…</span>
+    </div>
+  );
+}
 
 /**
  * AURA OS — one fixed shell, no scroll journey.
@@ -33,10 +49,10 @@ const LEGACY: Record<string, string> = {
   skills: "models",
   analytics: "models",
 };
-const PAGES = ["home", "memory", "tasks", "models", "settings"];
+const PAGES = ["home", "memory", "tasks", "models", "settings", "labs"];
 
 export default function App() {
-  const { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, send } =
+  const { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, activity, send } =
     useAuraSocket();
   const [collapsed, setCollapsed] = useLocalStorage<boolean>("aura.sidebarMin", false);
   const [rawView, setView] = useLocalStorage<string>("aura.view", "home");
@@ -76,9 +92,11 @@ export default function App() {
       case "tasks":
         return <TasksPage questEvent={questEvent} />;
       case "models":
-        return <ModelsPage v3Events={v3Events} onGoHome={goHome} />;
+        return <ModelsPage v3Events={v3Events} onGoHome={goHome} activeModelId={activeModelId} />;
       case "settings":
         return <SettingsView />;
+      case "labs":
+        return <LabsPage />;
       default:
         return null;
     }
@@ -108,14 +126,19 @@ export default function App() {
           <div className="os-home page-fade" key="home">
             <TopBar mode={mode} />
             <div className="os-stagewrap">
-              <Stage state={auraState} activeModelId={activeModelId} />
+              <Stage
+                state={auraState}
+                activeModelId={activeModelId}
+                activity={activity}
+                listening={presence === "working"}
+              />
               <HomeStatusCard status={status} activeModelId={activeModelId} mode={mode} />
             </div>
             <ChatDock status={status} turns={turns} onSend={send} auraState={auraState} />
           </div>
         ) : (
           <div className="os-page page-fade" key={view}>
-            {renderPage()}
+            <Suspense fallback={<PageLoading />}>{renderPage()}</Suspense>
           </div>
         )}
       </main>
@@ -123,7 +146,9 @@ export default function App() {
       {/* ---- The Domain: a different workspace entirely ---- */}
       {domainOpen && (
         <div className="screen screen--domain">
-          <DomainScreen onExit={exitDomain} />
+          <Suspense fallback={<PageLoading />}>
+            <DomainScreen onExit={exitDomain} />
+          </Suspense>
         </div>
       )}
 
@@ -135,6 +160,9 @@ export default function App() {
           onDone={portalDone}
         />
       )}
+
+      {/* the pointer is a tiny black hole — lives above everything */}
+      <CursorLens />
     </div>
   );
 }

@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { api, UsageStats } from "../api";
 import PageShell from "./PageShell";
-import TasksView from "./TasksView";
+import TaskBoard from "./TaskBoard";
+import MilestonesPane from "./MilestonesPane";
+import TaskAssistant from "./TaskAssistant";
 import QuestsView from "./QuestsView";
 import type { QuestEvent } from "../types";
 
@@ -64,7 +66,9 @@ export default function TasksPage({ questEvent }: Props) {
       tagline="The backlog you think in, the quests you commit to, the progress you keep."
       storeKey="aura.page.tasks"
       tabs={[
-        { id: "project", label: "Project Tasks", body: <TasksView /> },
+        { id: "board", label: "Task Board", body: <TaskBoard /> },
+        { id: "assistant", label: "✦ AI Assistant", body: <TaskAssistant /> },
+        { id: "milestones", label: "Milestones", body: <MilestonesPane /> },
         { id: "today", label: "Today's Quests", body: <QuestsView event={questEvent} /> },
         { id: "progress", label: "Progress", body: <ProgressPane /> },
       ]}

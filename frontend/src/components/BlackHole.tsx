@@ -97,6 +97,13 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
   rotationMulRef.current = rotationMul;
   const showLabelsRef = useRef(showLabels);
   showLabelsRef.current = showLabels;
+  // Orbit-line settings (Settings → Orbit Lines) — read per-frame via ref so
+  // the sliders act live without a scene rebuild.
+  const orbitMul = useSettingsStore((st) => st.orbitMul);
+  const orbitWidthMul = useSettingsStore((st) => st.orbitWidthMul);
+  const orbitStyle = useSettingsStore((st) => st.orbitStyle);
+  const orbitCfgRef = useRef({ mul: 1, wmul: 1, style: "dashed" as string });
+  orbitCfgRef.current = { mul: orbitMul, wmul: orbitWidthMul, style: orbitStyle };
   // live geometry + planet objects, for hit-testing and drag
   const planetsRef = useRef<Array<{ id: string; a: number; x: number; y: number; curR: number; def: number }>>([]);
   const geomRef = useRef({ cx: 0, cy: 0, rMax: 1, maxR: 1, minR: 0, mul: 1 });
@@ -349,8 +356,16 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
       const w = baseW * SPIN[os] * rotationMulRef.current;
       rot = (rot + w * dt) % (Math.PI * 2);
       glow += (GLOW[os] * glowMulRef.current - glow) * Math.min(1, dt * 4);
-      pulse += dt * (os === "speaking" ? 2.6 : 0.9);
+      pulse += dt * (os === "speaking" ? 2.6 : os === "thinking" ? 1.8 : 0.9);
       const breathe = 1 + 0.015 * Math.sin(pulse); // spec: subtle pulse
+      // The life signal — layered sines at odd frequencies make a natural
+      // electric flicker that everything (ring, beam, hotspots, filaments)
+      // drinks from, so the whole core visibly LIVES instead of idling.
+      const flicker =
+        0.84 +
+        0.12 * Math.sin(pulse * 5.1) +
+        0.05 * Math.sin(pulse * 12.7 + 1.3) +
+        0.04 * Math.sin(pulse * 2.3 + 0.7);
 
       for (const f of filaments) f.a0 = (f.a0 + w * dt * f.sp * 6) % (Math.PI * 2);
 
@@ -366,16 +381,25 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
       ctx.fillStyle = backing;
       ctx.beginPath(); ctx.arc(cx, cy, R * 3.6, 0, Math.PI * 2); ctx.fill();
 
-      // Orbital guides — kept for the planet system, but whisper-quiet so
-      // the composition stays as clean as the reference.
-      for (let i = 0; i < RINGS; i++) {
-        ctx.beginPath();
-        ctx.arc(cx, cy, guideR[i], 0, Math.PI * 2);
-        ctx.strokeStyle = rgba(INNER, 0.035 + (i % 4 === 0 ? 0.02 : 0));
-        ctx.lineWidth = 1;
-        ctx.stroke();
+      // Orbital guides — styled by Settings → Orbit Lines: brightness,
+      // width and dash style are the user's, "hidden" removes them entirely.
+      const ocfg = orbitCfgRef.current;
+      const orbitsOn = ocfg.style !== "hidden" && ocfg.mul > 0.01;
+      const orbitDash: number[] =
+        ocfg.style === "solid" ? [] :
+        ocfg.style === "dotted" ? [1.5 * s, 7 * s] : [5 * s, 9 * s];
+      if (orbitsOn) {
+        ctx.setLineDash(ocfg.style === "dashed" ? [] : orbitDash); // guides stay calm
+        for (let i = 0; i < RINGS; i++) {
+          ctx.beginPath();
+          ctx.arc(cx, cy, guideR[i], 0, Math.PI * 2);
+          ctx.strokeStyle = rgba(INNER, (0.035 + (i % 4 === 0 ? 0.02 : 0)) * ocfg.mul);
+          ctx.lineWidth = 1 * ocfg.wmul;
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
       }
-      for (const n of nodes) {
+      if (orbitsOn) for (const n of nodes) {
         const a = n.a + rot * 0.25;
         const x = cx + guideR[n.ring] * Math.cos(a);
         const y = cy + guideR[n.ring] * Math.sin(a);
@@ -394,11 +418,17 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
 
       ctx.globalCompositeOperation = "lighter";
 
-      // ---- Faint concentric swirl echoes — the ghost circles of the still.
-      for (const e of echoes) {
+      // ---- Faint concentric swirl echoes — breathing, not frozen: each one
+      // slowly swells and dims on its own phase.
+      for (let ei = 0; ei < echoes.length; ei++) {
+        const e = echoes[ei];
+        const er = R * e.r * (1 + 0.025 * Math.sin(pulse * 0.7 + ei * 1.9));
         ctx.beginPath();
-        ctx.arc(cx, cy, R * e.r, 0, Math.PI * 2);
-        ctx.strokeStyle = rgba(MAIN, Math.max(0, e.al) * (0.5 + 0.6 * glow));
+        ctx.arc(cx, cy, er, 0, Math.PI * 2);
+        ctx.strokeStyle = rgba(
+          MAIN,
+          Math.max(0, e.al) * (0.5 + 0.6 * glow) * (0.6 + 0.5 * Math.sin(pulse * 1.1 + ei)),
+        );
         ctx.lineWidth = 1 * s;
         ctx.stroke();
       }
@@ -422,8 +452,11 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
           const py = cy + rr * Math.sin(ang);
           if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
         }
-        ctx.strokeStyle = rgba(f.c, f.al * (0.4 + 0.7 * glow));
-        ctx.lineWidth = f.w * s;
+        // twinkle: every filament surges and fades on its own rhythm, so the
+        // swirl constantly crackles instead of holding one exposure
+        const tw = 0.55 + 0.45 * Math.sin(pulse * (1.3 + f.sp * 5) + f.ph * 3.1);
+        ctx.strokeStyle = rgba(f.c, f.al * (0.4 + 0.7 * glow) * (0.5 + tw));
+        ctx.lineWidth = f.w * s * (0.85 + 0.3 * tw);
         ctx.stroke();
       }
 
@@ -462,12 +495,24 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
       ctx.strokeStyle = rgba(INNER, 0.7 * glow + 0.22);
       ctx.lineWidth = 4.5 * s;
       ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, Math.PI * 2); ctx.stroke();
-      // white-hot inner filament
+      // white-hot inner filament — brightness rides the flicker
       ctx.shadowColor = rgba(PHOTON, 1);
       ctx.shadowBlur = 15 * s;
-      ctx.strokeStyle = rgba(PHOTON, 0.72 + 0.28 * glow);
+      ctx.strokeStyle = rgba(PHOTON, (0.72 + 0.28 * glow) * flicker);
       ctx.lineWidth = 2.1 * s;
       ctx.beginPath(); ctx.arc(cx, cy, ringR * 0.985, 0, Math.PI * 2); ctx.stroke();
+      // shimmer arcs — three hot segments racing around the ring at
+      // different speeds/directions, so the ring is never the same twice.
+      // Thinking spins the core fast, and these whip around with it.
+      for (let si2 = 0; si2 < 3; si2++) {
+        const dir2 = si2 % 2 ? -1 : 1;
+        const sa = rot * (1.6 + si2 * 0.7) * dir2 + si2 * 2.3;
+        const alen = 0.7 + 0.35 * Math.sin(pulse * 1.7 + si2 * 2.1);
+        ctx.shadowBlur = 20 * s;
+        ctx.strokeStyle = rgba(PHOTON, (0.2 + 0.22 * Math.sin(pulse * 2.4 + si2 * 1.4)) * glow + 0.05);
+        ctx.lineWidth = 2.6 * s;
+        ctx.beginPath(); ctx.arc(cx, cy, ringR, sa, sa + alen); ctx.stroke();
+      }
       if (os === "speaking") {
         ctx.shadowBlur = 0;
         ctx.strokeStyle = rgba(CYAN, 0.18 + 0.18 * Math.sin(pulse * 2));
@@ -480,11 +525,14 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
       // the ring at the horizontal, exactly like the reference.
       for (const side of [-1, 1] as const) {
         const hx = cx + side * ringR;
-        const flick = 1 + 0.07 * Math.sin(pulse * 3.2 + side * 1.7);
+        // real flicker: two incommensurate sines + the global life signal
+        const flick =
+          (1 + 0.13 * Math.sin(pulse * 3.2 + side * 1.7) + 0.07 * Math.sin(pulse * 8.9 + side * 0.6)) *
+          (0.75 + 0.35 * flicker);
         const hr = R * 0.6 * flick;
         const g1 = ctx.createRadialGradient(hx, cy, 0, hx, cy, hr);
-        g1.addColorStop(0, rgba(WHITE, 0.9 * glow + 0.1));
-        g1.addColorStop(0.16, rgba(PHOTON, 0.55 * glow + 0.1));
+        g1.addColorStop(0, rgba(WHITE, (0.9 * glow + 0.1) * flicker));
+        g1.addColorStop(0.16, rgba(PHOTON, (0.55 * glow + 0.1) * flicker));
         g1.addColorStop(0.45, rgba(INNER, 0.22 * glow + 0.03));
         g1.addColorStop(1, rgba(MAIN, 0));
         ctx.fillStyle = g1;
@@ -493,22 +541,28 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
 
       // ---- The horizontal lens-flare beam — a razor of light across space,
       // layered from a wide violet haze down to a 1px white core.
-      const beamLen = Math.min(D * 0.46, R * 6.5);
+      // The beam breathes: length swells slowly, brightness rides the
+      // flicker, and while she SPEAKS it visibly pulses with her voice.
+      const talk = os === "speaking" ? 0.25 * Math.sin(pulse * 6) : 0;
+      const beamLen =
+        Math.min(D * 0.46, R * 6.5) * (0.9 + 0.12 * Math.sin(pulse * 0.8) + talk * 0.3);
       const beam = (h: number, a0: number, cStr: string) => {
+        const aa = a0 * flicker * (1 + talk);
         for (const side of [-1, 1] as const) {
           const hx = cx + side * ringR * 0.88;
           const g = ctx.createLinearGradient(hx, 0, hx + side * beamLen, 0);
-          g.addColorStop(0, rgba(cStr, a0 * (0.55 + 0.55 * glow)));
-          g.addColorStop(0.3, rgba(cStr, a0 * 0.4 * (0.55 + 0.55 * glow)));
+          g.addColorStop(0, rgba(cStr, aa * (0.55 + 0.55 * glow)));
+          g.addColorStop(0.3, rgba(cStr, aa * 0.4 * (0.55 + 0.55 * glow)));
           g.addColorStop(1, rgba(cStr, 0));
           ctx.fillStyle = g;
           ctx.fillRect(side === -1 ? hx - beamLen : hx, cy - h / 2, beamLen, h);
         }
       };
-      beam(30 * s, 0.09, MAIN);    // wide violet haze
-      beam(11 * s, 0.26, INNER);   // mid glow
-      beam(3.4 * s, 0.85, PHOTON); // bright blade
-      beam(1.4 * s, 1.0, WHITE);   // razor core
+      const bh = 1 + 0.18 * (flicker - 0.84) + talk; // thickness lives too
+      beam(30 * s * bh, 0.09, MAIN);    // wide violet haze
+      beam(11 * s * bh, 0.26, INNER);   // mid glow
+      beam(3.4 * s * bh, 0.85, PHOTON); // bright blade
+      beam(1.4 * s, 1.0, WHITE);        // razor core stays razor
 
       // ---- Occasional gravitational pulse — every ~9s one luminous wave
       // rolls outward from the horizon and dissolves. Subtle, not a siren.
@@ -536,18 +590,23 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
       const slotR = (si: number) =>
         Math.min(D / 2 - 28 * s, rMax * SLOT_FRACS[si] * pcfg.orbit);
 
-      // visible orbit rings — one slot per planet, brighter while editing,
-      // the hovered slot lights up cyan during a drag
-      for (let si = 0; si < SLOT_FRACS.length; si++) {
-        const rr = slotR(si);
-        const hovered = planetDragRef.current !== null && dragSlotRef.current === si;
-        ctx.setLineDash([5 * s, 9 * s]);
-        ctx.beginPath();
-        ctx.arc(cx, cy, rr, 0, Math.PI * 2);
-        ctx.strokeStyle = hovered ? rgba(CYAN, 0.65) : rgba(INNER, editMode ? 0.45 : 0.22);
-        ctx.lineWidth = hovered ? 1.8 : 1.2;
-        ctx.stroke();
-        ctx.setLineDash([]);
+      // visible orbit rings — one slot per planet. Styled by the Orbit Lines
+      // settings; edit mode overrides them (you need to SEE where to drop a
+      // planet), and the hovered slot lights up cyan during a drag.
+      if (orbitsOn || editMode) {
+        for (let si = 0; si < SLOT_FRACS.length; si++) {
+          const rr = slotR(si);
+          const hovered = planetDragRef.current !== null && dragSlotRef.current === si;
+          ctx.setLineDash(editMode ? [5 * s, 9 * s] : orbitDash);
+          ctx.beginPath();
+          ctx.arc(cx, cy, rr, 0, Math.PI * 2);
+          ctx.strokeStyle = hovered
+            ? rgba(CYAN, 0.65)
+            : rgba(INNER, editMode ? 0.45 : Math.min(0.6, 0.22 * ocfg.mul));
+          ctx.lineWidth = hovered ? 1.8 : 1.2 * (editMode ? 1 : ocfg.wmul);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
       }
 
       for (const pl of planets) {
@@ -574,11 +633,19 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
         ctx.beginPath(); ctx.arc(x, y, pr * 3, 0, Math.PI * 2); ctx.fill();
 
         // local orbit circles — the card design's faint rings + tiny dots
-        // travelling them, all in the planet's own color
-        for (let li = 0; li < pl.loc.length; li++) {
-          ctx.strokeStyle = rgba(pl.c, (0.13 - li * 0.03) * (isAct ? 1.7 : 1));
-          ctx.lineWidth = 1;
-          ctx.beginPath(); ctx.arc(x, y, pr * pl.loc[li], 0, Math.PI * 2); ctx.stroke();
+        // travelling them, all in the planet's own color. They follow the
+        // Orbit Lines setting too (dimmed, styled, or gone).
+        if (orbitsOn) {
+          ctx.setLineDash(orbitDash);
+          for (let li = 0; li < pl.loc.length; li++) {
+            ctx.strokeStyle = rgba(
+              pl.c,
+              (0.13 - li * 0.03) * (isAct ? 1.7 : 1) * Math.min(1.6, ocfg.mul),
+            );
+            ctx.lineWidth = 1 * ocfg.wmul;
+            ctx.beginPath(); ctx.arc(x, y, pr * pl.loc[li], 0, Math.PI * 2); ctx.stroke();
+          }
+          ctx.setLineDash([]);
         }
         for (const ld of pl.locDots) {
           const ang = ld.a + pulse * ld.w;

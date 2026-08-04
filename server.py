@@ -189,6 +189,12 @@ def _init_v3() -> None:
         print("[AURA bridge] Quest sink attached")
     except Exception:  # noqa: BLE001
         traceback.print_exc()
+    try:
+        from core import activity
+        activity.set_sink(lambda payload: broadcast({"type": "activity", "payload": payload}))
+        print("[AURA bridge] Activity sink attached")
+    except Exception:  # noqa: BLE001
+        traceback.print_exc()
 
 
 def _init_director() -> None:
@@ -217,13 +223,17 @@ async def health() -> dict[str, str]:
 # REST API (sidebar views)
 # ============================================================================
 def _task_dict(row: Any) -> dict[str, Any]:
-    # tasks columns: id, title, priority, status, created_at, done_at, bucket
+    # columns: id, title, priority, status, created_at, done_at, bucket,
+    #          due, project, origin
     r = list(row)
     return {
         "id": r[0], "title": r[1], "priority": r[2],
         "status": r[3], "created_at": r[4],
         "done_at": r[5] if len(r) > 5 else None,
         "bucket": (r[6] if len(r) > 6 else "now") or "now",
+        "due": r[7] if len(r) > 7 else None,
+        "project": r[8] if len(r) > 8 else None,
+        "origin": (r[9] if len(r) > 9 else "user") or "user",
     }
 
 
@@ -249,7 +259,14 @@ async def api_add_task(req: Request) -> dict[str, Any]:
     if not title:
         return {"ok": False, "error": "title required"}
     tid = store.add_task(title, body.get("priority", "medium"),
-                         body.get("bucket", "now"))
+                         body.get("bucket", "now"),
+                         due=body.get("due"), project=body.get("project"),
+                         origin=body.get("origin", "user"))
+    try:
+        from core import activity
+        activity.emit(f"Task added: {title}", "task")
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True, "id": tid}
 
 
@@ -481,8 +498,38 @@ async def api_delete_link(link_id: int) -> dict[str, Any]:
 async def api_update_task(task_id: int, req: Request) -> dict[str, Any]:
     from memory import store
     body = await req.json()
-    store.update_task(task_id, body.get("title"), body.get("priority"))
+    store.update_task(task_id, body.get("title"), body.get("priority"),
+                      due=body.get("due"), project=body.get("project"))
     return {"ok": True}
+
+
+# ── AI Task Assistant: conversation → clean, estimated tasks ────────────────
+# Both routes are READ-ONLY suggestions. Nothing is stored until the user
+# accepts a suggestion, which comes back through the normal POST /api/tasks.
+@app.post("/api/tasks/extract")
+async def api_extract_tasks(req: Request) -> dict[str, Any]:
+    from core import task_assistant
+    body = await req.json()
+    text = str(body.get("text") or "")
+    # No text supplied → read the recent conversation out of memory, which is
+    # what "turn what we just discussed into tasks" actually means.
+    if not text.strip():
+        try:
+            from memory import store
+            # rows: (role, message, created_at), oldest → newest
+            rows = store.get_recent_conversations(int(body.get("limit", 40)))
+            text = "\n".join(f"{r[0]}: {r[1]}" for r in rows if len(r) > 1)
+        except Exception:  # noqa: BLE001
+            text = ""
+    return task_assistant.extract(text, use_llm=bool(body.get("use_llm", True)))
+
+
+@app.post("/api/tasks/rewrite")
+async def api_rewrite_task(req: Request) -> dict[str, Any]:
+    from core import task_assistant
+    body = await req.json()
+    return task_assistant.rewrite(str(body.get("title") or ""),
+                                  use_llm=bool(body.get("use_llm", True)))
 
 
 # ── Usage stats: memory graph data ──────────────────────────────────────────

@@ -474,6 +474,12 @@ def build_context_prompt(query: str, intent: str, thought_context: str, comeback
     work_memory_section = ""
     try:
         from core import work_recall
+        if work_recall.is_work_question(query):
+            try:
+                from core import activity
+                activity.emit("Searching memory…", "memory")
+            except Exception:  # noqa: BLE001
+                pass
         block = work_recall.prompt_section(query)
         if block:
             work_memory_section = f"\n{block}"

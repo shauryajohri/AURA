@@ -86,6 +86,8 @@ export interface GitPreview {
   ahead?: number;
   behind?: number;
   oversized?: boolean;
+  remotes?: string[];
+  can_push?: boolean;
 }
 
 export interface GitResult {
@@ -99,6 +101,21 @@ export interface GitResult {
   remote?: string;
   pushed?: number | null;
   preview?: GitPreview;
+}
+
+export interface GitCommit {
+  sha: string;
+  author: string;
+  when: string;
+  subject: string;
+}
+
+export interface GitBranches {
+  ok: boolean;
+  error?: string;
+  branches: string[];
+  current: string;
+  protected?: string[];
 }
 
 export interface Connector {
@@ -261,6 +278,29 @@ export const domainApi = {
     j<GitResult>("/api/domain/git/publish", {
       method: "POST",
       body: JSON.stringify({ root, message, confirm: true, ...opts }),
+    }),
+
+  // ---- git panel: history, branches, staging, diffs, pull -----------------
+  gitLog: (root: string, limit = 40) =>
+    j<{ ok: boolean; commits: GitCommit[]; note?: string }>("/api/domain/git/log" + q({ root, limit })),
+  gitBranches: (root: string) =>
+    j<GitBranches>("/api/domain/git/branches" + q({ root })),
+  gitDiff: (root: string, path = "", staged = false) =>
+    j<{ ok: boolean; diff: string; error?: string }>("/api/domain/git/diff" + q({ root, path, staged })),
+  gitCheckout: (root: string, branch: string, create = false) =>
+    j<{ ok: boolean; error?: string; branch?: string }>("/api/domain/git/checkout", {
+      method: "POST",
+      body: JSON.stringify({ root, branch, create }),
+    }),
+  gitPull: (root: string, remote = "origin") =>
+    j<{ ok: boolean; error?: string; output?: string; hint?: string }>("/api/domain/git/pull", {
+      method: "POST",
+      body: JSON.stringify({ root, remote }),
+    }),
+  gitStage: (root: string, paths?: string[], unstage = false) =>
+    j<{ ok: boolean; error?: string; preview?: GitPreview }>("/api/domain/git/stage", {
+      method: "POST",
+      body: JSON.stringify({ root, paths, unstage }),
     }),
 
   // ---- connectors ---------------------------------------------------------

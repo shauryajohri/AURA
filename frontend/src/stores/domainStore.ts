@@ -12,9 +12,9 @@ import { persist } from "zustand/middleware";
 // ============================================================================
 
 export type DomainSection =
-  | "dashboard" | "projects" | "research" | "tasks" | "graph" | "code"
-  | "review" | "documents" | "notes" | "agents" | "terminal" | "history"
-  | "settings";
+  | "dashboard" | "projects" | "planning" | "research" | "tasks" | "graph" | "code"
+  | "review" | "git" | "build" | "preview" | "documents" | "notes" | "agents"
+  | "terminal" | "history" | "settings";
 
 export type ProjectStatus = "idea" | "progress" | "paused" | "completed";
 
@@ -156,8 +156,9 @@ export interface DomainLayout {
 }
 
 export const ALL_SECTIONS: DomainSection[] = [
-  "dashboard", "projects", "research", "tasks", "graph", "code", "review",
-  "documents", "notes", "agents", "terminal", "history", "settings",
+  "dashboard", "projects", "planning", "research", "tasks", "graph",
+  "code", "git", "build", "preview", "review", "terminal",
+  "documents", "notes", "agents", "history", "settings",
 ];
 
 /** Sections that existed in older builds, and where they went. Persisted
@@ -176,10 +177,14 @@ export const migrateSection = (s: unknown): DomainSection | null => {
 export const SECTION_META: Record<DomainSection, { icon: string; label: string }> = {
   dashboard: { icon: "◈", label: "Dashboard" },
   projects: { icon: "▣", label: "Projects" },
+  planning: { icon: "◫", label: "Planning" },
   research: { icon: "✧", label: "Research" },
   tasks: { icon: "☑", label: "Tasks" },
   graph: { icon: "◉", label: "Knowledge Graph" },
   code: { icon: "⌥", label: "Code" },
+  git: { icon: "⑂", label: "Git" },
+  build: { icon: "⚙", label: "Build" },
+  preview: { icon: "▢", label: "Live Preview" },
   review: { icon: "⇄", label: "Code Review" },
   documents: { icon: "≡", label: "Documentation" },
   notes: { icon: "✎", label: "Notes" },

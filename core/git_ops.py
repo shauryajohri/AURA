@@ -252,3 +252,124 @@ def commit_and_push(
     p = push(root, confirm=confirm, allow_protected=allow_protected)
     return {"ok": p.get("ok", False), "commit": c, "push": p,
             "error": p.get("error", "")}
+
+
+# ============================================================================
+# Read-side extras for the Git panel: history, branches, diffs.
+# Everything below is READ-ONLY except `checkout`, `stage`/`unstage` and
+# `pull`, which are all explicitly requested by a click in the UI.
+# ============================================================================
+
+def log(root: str, limit: int = 40) -> dict[str, Any]:
+    """Recent commits: sha, author, relative date, subject."""
+    root = os.path.abspath(root or ".")
+    if not _is_repo(root):
+        return {"ok": False, "error": "not a git repository", "commits": []}
+    # \x1f between fields, \x1e between records — safe against commit
+    # messages that contain literally any punctuation.
+    fmt = "%h\x1f%an\x1f%ar\x1f%s\x1e"
+    ok, out = _git(root, "log", f"--max-count={max(1, min(200, limit))}", f"--pretty=format:{fmt}")
+    if not ok:
+        # A repo with no commits yet isn't an error worth shouting about.
+        return {"ok": True, "commits": [], "note": out.strip()}
+    commits = []
+    for rec in out.split("\x1e"):
+        rec = rec.strip("\n")
+        if not rec:
+            continue
+        parts = rec.split("\x1f")
+        if len(parts) < 4:
+            continue
+        commits.append({"sha": parts[0], "author": parts[1], "when": parts[2], "subject": parts[3]})
+    return {"ok": True, "commits": commits}
+
+
+def branches(root: str) -> dict[str, Any]:
+    """Local branches + which one is checked out."""
+    root = os.path.abspath(root or ".")
+    if not _is_repo(root):
+        return {"ok": False, "error": "not a git repository", "branches": []}
+    ok, out = _git(root, "branch", "--format=%(refname:short)")
+    names = [b.strip() for b in (out.splitlines() if ok else []) if b.strip()]
+    ok_c, cur = _git(root, "branch", "--show-current")
+    return {
+        "ok": True,
+        "branches": names,
+        "current": cur.strip() if ok_c else "",
+        "protected": sorted(PROTECTED),
+    }
+
+
+def checkout(root: str, branch: str, create: bool = False) -> dict[str, Any]:
+    """Switch branches. Refuses when the tree is dirty — an unexpected
+    carry-over of uncommitted work between branches is how people lose it."""
+    root = os.path.abspath(root or ".")
+    branch = (branch or "").strip()
+    if not branch:
+        return {"ok": False, "error": "branch name required"}
+    pre = preview(root)
+    if not pre.get("ok"):
+        return pre
+    if not pre["clean"]:
+        return {"ok": False, "error": "commit or stash your changes before switching branches",
+                "preview": pre}
+    args = ["checkout", "-b", branch] if create else ["checkout", branch]
+    ok, out = _git(root, *args)
+    if not ok:
+        return {"ok": False, "error": out.strip()}
+    return {"ok": True, "branch": branch, "output": out.strip()}
+
+
+def pull(root: str, remote: str = "origin") -> dict[str, Any]:
+    """Fetch + fast-forward. `--ff-only` on purpose: AURA should never create
+    a surprise merge commit or drop you into a conflicted tree unasked."""
+    root = os.path.abspath(root or ".")
+    if not _is_repo(root):
+        return {"ok": False, "error": "not a git repository"}
+    ok, out = _git(root, "pull", "--ff-only", remote, timeout=180)
+    if not ok:
+        return {"ok": False, "error": out.strip(),
+                "hint": "fast-forward failed — the branches have diverged, merge manually"}
+    return {"ok": True, "output": out.strip() or "Already up to date."}
+
+
+def stage(root: str, paths: list[str] | None = None, unstage: bool = False) -> dict[str, Any]:
+    """Stage or unstage specific paths (all changes when `paths` is empty)."""
+    root = os.path.abspath(root or ".")
+    if not _is_repo(root):
+        return {"ok": False, "error": "not a git repository"}
+    if unstage:
+        args = ["restore", "--staged"] + (list(paths) if paths else ["."])
+    else:
+        args = ["add"] + (["--", *paths] if paths else ["-A"])
+    ok, out = _git(root, *args)
+    if not ok:
+        return {"ok": False, "error": out.strip()}
+    return {"ok": True, "preview": preview(root)}
+
+
+def diff(root: str, path: str = "", staged: bool = False) -> dict[str, Any]:
+    """Unified diff for one file (or the whole tree when `path` is empty)."""
+    root = os.path.abspath(root or ".")
+    if not _is_repo(root):
+        return {"ok": False, "error": "not a git repository", "diff": ""}
+    args = ["diff", "--no-color"]
+    if staged:
+        args.append("--staged")
+    if path:
+        args += ["--", path]
+    ok, out = _git(root, *args)
+    if not ok:
+        return {"ok": False, "error": out.strip(), "diff": ""}
+    # Untracked files have no diff at all; show the file so "what changed" is
+    # never mysteriously blank.
+    if not out.strip() and path:
+        full = os.path.join(root, path)
+        if os.path.isfile(full):
+            try:
+                with open(full, "r", encoding="utf-8", errors="replace") as fh:
+                    body = fh.read(60_000)
+                out = "\n".join("+" + line for line in body.splitlines()[:800])
+            except Exception:  # noqa: BLE001
+                pass
+    return {"ok": True, "diff": out[:200_000], "path": path, "staged": staged}

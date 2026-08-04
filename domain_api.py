@@ -205,6 +205,54 @@ async def git_publish(req: Request) -> dict[str, Any]:
     )
 
 
+# ── Git panel: history, branches, staging, diffs, pull ──────────────────────
+@router.get("/api/domain/git/log")
+async def git_log(root: str, limit: int = 40) -> dict[str, Any]:
+    from core import git_ops
+    return git_ops.log(root, limit)
+
+
+@router.get("/api/domain/git/branches")
+async def git_branches(root: str) -> dict[str, Any]:
+    from core import git_ops
+    return git_ops.branches(root)
+
+
+@router.get("/api/domain/git/diff")
+async def git_diff(root: str, path: str = "", staged: bool = False) -> dict[str, Any]:
+    from core import git_ops
+    return git_ops.diff(root, path, staged)
+
+
+@router.post("/api/domain/git/checkout")
+async def git_checkout(req: Request) -> dict[str, Any]:
+    from core import git_ops
+    b = await req.json()
+    return git_ops.checkout(str(b.get("root", "")), str(b.get("branch", "")),
+                            create=bool(b.get("create", False)))
+
+
+@router.post("/api/domain/git/pull")
+async def git_pull(req: Request) -> dict[str, Any]:
+    from core import git_ops
+    b = await req.json()
+    res = git_ops.pull(str(b.get("root", "")), str(b.get("remote", "origin")))
+    try:
+        from core import activity
+        activity.emit("Pulled from origin" if res.get("ok") else "Pull failed", "task")
+    except Exception:  # noqa: BLE001
+        pass
+    return res
+
+
+@router.post("/api/domain/git/stage")
+async def git_stage(req: Request) -> dict[str, Any]:
+    from core import git_ops
+    b = await req.json()
+    return git_ops.stage(str(b.get("root", "")), b.get("paths") or None,
+                         unstage=bool(b.get("unstage", False)))
+
+
 # ============================================================================
 # Code review — AURA reads a file and proposes a better version
 # ============================================================================

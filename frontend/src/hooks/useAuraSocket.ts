@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
+  ActivityEvent,
   AuraState,
   ChatTurn,
   ClientMessage,
@@ -9,6 +10,7 @@ import type {
   ServerMessage,
   V3Event,
 } from "../types";
+import { useNotifyStore } from "../stores/notifyStore";
 
 // How many live V3 events to keep in memory. The panel also fetches history
 // from /api/v3/snapshot on mount, so this is only the live tail.
@@ -60,6 +62,9 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
   // Only the latest quest event is kept — the Quests tab re-fetches the board
   // when it changes, so a full history here would just be duplicate state.
   const [questEvent, setQuestEvent] = useState<QuestEvent | null>(null);
+  // The live "what is AURA doing" line. Cleared automatically when the brain
+  // goes back to idle after an answer completes.
+  const [activity, setActivity] = useState<ActivityEvent | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -118,6 +123,12 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
       switch (msg.type) {
         case "state":
           setAuraState(msg.payload.state);
+          // Back to idle → the current activity line has played out.
+          if (msg.payload.state === "idle") setActivity(null);
+          break;
+        case "activity":
+          setActivity(msg.payload);
+          useNotifyStore.getState().add(msg.payload.kind || "info", msg.payload.text);
           break;
         case "chunk":
           appendChunk(msg.payload.text);
@@ -140,9 +151,15 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
           // NOT pushed into chat: the proactive loop already decides whether
           // a V3 line is worth speaking and sends that as a normal "push".
           setV3Events((prev) => [...prev, msg.payload].slice(-V3_BUFFER));
+          if (msg.payload.serious || msg.payload.kind === "build") {
+            useNotifyStore.getState().add(msg.payload.kind, msg.payload.text);
+          }
           break;
         case "quest":
           setQuestEvent(msg.payload);
+          if (msg.payload.kind === "complete") {
+            useNotifyStore.getState().add("quest", `Quest complete: ${msg.payload.title ?? ""}`.trim());
+          }
           break;
         case "error":
           pushMessage("[error] " + msg.payload.message, "error");
@@ -182,5 +199,5 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
     ws.send(JSON.stringify(msg));
   }, []);
 
-  return { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, send };
+  return { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, activity, send };
 }

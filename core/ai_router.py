@@ -469,10 +469,20 @@ def route(intent: str, prompt: str) -> str:
         return _ALL_LOCKED_MSG
     last = "CONNECTION_ERROR"
     for name, mid in candidates:
+        try:
+            from core import activity
+            activity.emit(f"Routing to {name}…", "route")
+        except Exception:  # noqa: BLE001
+            pass
         result = call_groq(prompt, system, intent=intent, model=mid)
         if result in ("RATE_LIMIT", "CONNECTION_ERROR"):
             last = result
             print(f"[AURA] ⚠ {name} unavailable ({result}) — falling back")
+            try:
+                from core import activity
+                activity.emit(f"{name} unavailable — falling back…", "route")
+            except Exception:  # noqa: BLE001
+                pass
             continue
         _set_last_model(mid)
         _announce_model(name, mid, intent)
@@ -1236,6 +1246,11 @@ def route_streaming(intent: str, prompt: str, system_prompt: str | None = None, 
 
     last_sentinel = "CONNECTION_ERROR"
     for name, mid in candidates:
+        try:
+            from core import activity
+            activity.emit(f"Routing to {name}…", "route")
+        except Exception:  # noqa: BLE001
+            pass
         gen = call_groq_streaming(prompt, system, intent=intent, model=mid)
         try:
             first = next(gen)
@@ -1244,6 +1259,11 @@ def route_streaming(intent: str, prompt: str, system_prompt: str | None = None, 
         if first in ("RATE_LIMIT", "CONNECTION_ERROR"):
             last_sentinel = first
             print(f"[AURA] ⚠ {name} unavailable ({first}) — falling back")
+            try:
+                from core import activity
+                activity.emit(f"{name} unavailable — falling back…", "route")
+            except Exception:  # noqa: BLE001
+                pass
             continue
         _set_last_model(mid)
         _announce_model(name, mid, intent)

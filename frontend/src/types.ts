@@ -43,6 +43,13 @@ export interface QuestEvent {
   available_minutes?: number;
 }
 
+// A live "what AURA is doing right now" line (core/activity.py).
+export interface ActivityEvent {
+  text: string;
+  kind: "info" | "route" | "memory" | "task" | "done" | string;
+  ts: number;
+}
+
 // Server -> Client
 export type ServerMessage =
   | { type: "state"; payload: { state: AuraState } }
@@ -53,6 +60,7 @@ export type ServerMessage =
   | { type: "mode"; payload: { mode: string } }
   | { type: "v3"; payload: V3Event }
   | { type: "quest"; payload: QuestEvent }
+  | { type: "activity"; payload: ActivityEvent }
   | { type: "error"; payload: { message: string } }
   | { type: "pong" };
 

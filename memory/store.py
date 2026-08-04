@@ -290,43 +290,62 @@ def init_tasks():
 
 
 def _ensure_task_columns(conn):
-    """Add the `bucket` column to existing installs.
+    """Add later columns to existing installs.
 
-    Tasks are the backlog — things to do now or later — so they need a place
-    on that axis. Priority already existed but answers a different question
-    (how important), not (when).
+    `bucket`: tasks are the backlog — things to do now or later — so they need
+    a place on that axis. Priority already existed but answers a different
+    question (how important), not (when).
+
+    `due` / `project` / `origin`: a task manager needs deadlines and a home
+    project, and AURA-suggested tasks must be distinguishable from ones you
+    typed yourself (origin: "user" | "aura").
     """
     try:
         have = {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}
-        if have and "bucket" not in have:
-            conn.execute("ALTER TABLE tasks ADD COLUMN bucket TEXT DEFAULT 'now'")
+        if not have:
+            return
+        adds = {
+            "bucket": "TEXT DEFAULT 'now'",
+            "due": "TEXT",
+            "project": "TEXT",
+            "origin": "TEXT DEFAULT 'user'",
+        }
+        changed = False
+        for col, decl in adds.items():
+            if col not in have:
+                conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {decl}")
+                changed = True
+        if changed:
             conn.commit()
     except Exception:  # noqa: BLE001
         pass
 
 
-def add_task(title: str, priority: str = "medium", bucket: str = "now") -> int:
+def add_task(title: str, priority: str = "medium", bucket: str = "now",
+             due: str = None, project: str = None, origin: str = "user") -> int:
     import time
     conn = _connect()
     _ensure_task_columns(conn)
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO tasks (title, priority, status, created_at, bucket)
-        VALUES (?, ?, 'pending', ?, ?)
+        INSERT INTO tasks (title, priority, status, created_at, bucket, due, project, origin)
+        VALUES (?, ?, 'pending', ?, ?, ?, ?, ?)
     ''', (title, priority, time.strftime("%Y-%m-%dT%H:%M:%S"),
-          bucket if bucket in ("now", "later") else "now"))
+          bucket if bucket in ("now", "later") else "now",
+          due or None, project or None,
+          origin if origin in ("user", "aura") else "user"))
     task_id = cursor.lastrowid
     conn.commit()
     conn.close()
     return task_id
 
 def get_tasks(status: str = None) -> list:
-    """(id, title, priority, status, created_at, done_at, bucket)."""
+    """(id, title, priority, status, created_at, done_at, bucket, due, project, origin)."""
     conn = _connect()
     _ensure_task_columns(conn)
     cursor = conn.cursor()
     cols = ("id, title, priority, status, created_at, done_at, "
-            "COALESCE(bucket, 'now')")
+            "COALESCE(bucket, 'now'), due, project, COALESCE(origin, 'user')")
     if status:
         cursor.execute(f'SELECT {cols} FROM tasks WHERE status=? ORDER BY created_at', (status,))
     else:
@@ -711,13 +730,21 @@ def delete_link(link_id: int):
 
 # ── Task edit (the Sanctuary card edits titles in place) ─────────────────────
 
-def update_task(task_id: int, title: str = None, priority: str = None):
+def update_task(task_id: int, title: str = None, priority: str = None,
+                due: str = None, project: str = None):
+    """Patch a task. `due`/`project` accept "" to CLEAR the field (None means
+    "don't touch"), which is what the UI's clear buttons send."""
     conn = _connect()
     try:
+        _ensure_task_columns(conn)
         if title is not None and title.strip():
             conn.execute('UPDATE tasks SET title=? WHERE id=?', (title.strip(), task_id))
         if priority is not None:
             conn.execute('UPDATE tasks SET priority=? WHERE id=?', (priority, task_id))
+        if due is not None:
+            conn.execute('UPDATE tasks SET due=? WHERE id=?', (due.strip() or None, task_id))
+        if project is not None:
+            conn.execute('UPDATE tasks SET project=? WHERE id=?', (project.strip() or None, task_id))
         conn.commit()
     finally:
         conn.close()

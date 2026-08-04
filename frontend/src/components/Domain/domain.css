@@ -2235,3 +2235,227 @@
   .dapps__body { grid-template-columns: 200px 1fr; }
   .dapp__ppt { grid-template-columns: 130px 1fr; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Git · Build · Preview — the developer panels
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.dgit, .dbuild, .dprev {
+  display: flex; flex-direction: column; gap: 12px;
+  height: 100%; min-height: 0; padding: 2px;
+}
+
+.dgit__head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+}
+.dgit__where { display: flex; flex-direction: column; min-width: 0; }
+.dgit__branch {
+  font-family: var(--font-display); font-size: 14px; letter-spacing: 1px;
+  color: var(--daccent, #b18bff); display: flex; align-items: center; gap: 8px;
+}
+.dgit__prot {
+  font-style: normal; font-size: 8.5px; letter-spacing: 1px; text-transform: uppercase;
+  color: #ffb4b4; background: rgba(255, 90, 90, 0.14);
+  border: 1px solid rgba(255, 90, 90, 0.35); border-radius: 6px; padding: 2px 7px;
+}
+.dgit__root {
+  font-size: 10.5px; color: var(--muted, #8b8fca);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 420px;
+}
+.dgit__counts { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted, #8b8fca); }
+
+.dgit__btn {
+  padding: 7px 15px; border-radius: 10px; font-size: 12px;
+  border: 1px solid rgba(150, 125, 255, 0.28);
+  background: rgba(10, 12, 26, 0.5); color: #eceafe;
+  transition: all 0.2s ease;
+}
+.dgit__btn:hover:not(:disabled) { border-color: rgba(160, 130, 255, 0.6); transform: translateY(-1px); }
+.dgit__btn:disabled { opacity: 0.4; }
+.dgit__btn--primary {
+  background: linear-gradient(135deg, rgba(139, 92, 255, 0.9), rgba(56, 225, 255, 0.75));
+  border-color: transparent; color: #fff;
+}
+.dgit__mini {
+  background: none; border: 1px solid rgba(150, 125, 255, 0.22); border-radius: 7px;
+  color: var(--muted, #8b8fca); font-size: 10.5px; padding: 2px 8px;
+}
+.dgit__mini:hover:not(:disabled) { color: #eceafe; border-color: rgba(160, 130, 255, 0.5); }
+
+.dgit__err, .dgit__note {
+  padding: 9px 14px; border-radius: 10px; font-size: 12px; line-height: 1.5;
+  white-space: pre-wrap; word-break: break-word;
+}
+.dgit__err { background: rgba(255, 90, 90, 0.12); border: 1px solid rgba(255, 90, 90, 0.35); color: #ffb4b4; }
+.dgit__note { background: rgba(53, 224, 143, 0.1); border: 1px solid rgba(53, 224, 143, 0.3); color: #8ff0c0; }
+
+.dgit__grid {
+  flex: 1; min-height: 0;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+}
+.dgit__col {
+  display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow-y: auto;
+  border: 1px solid rgba(150, 125, 255, 0.2); border-radius: var(--dradius, 14px);
+  background: rgba(12, 14, 30, 0.4); backdrop-filter: var(--dglass, blur(16px));
+  padding: 14px;
+}
+.dgit__title {
+  margin: 0; font-family: var(--font-display); font-size: 11px;
+  letter-spacing: 2px; text-transform: uppercase; color: var(--muted, #8b8fca);
+}
+.dgit__sub {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 10px; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--muted, #8b8fca); margin-top: 6px;
+}
+.dgit__file { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 3px 0; }
+.dgit__st { width: 14px; text-align: center; font-weight: 700; flex: 0 0 auto; }
+.dgit__st--modified { color: #f5a623; }
+.dgit__st--added, .dgit__st--untracked { color: #35e08f; }
+.dgit__st--deleted { color: #ff8080; }
+.dgit__st--renamed { color: #38e1ff; }
+.dgit__path {
+  flex: 1; min-width: 0; text-align: left; background: none; border: none;
+  color: #eceafe; font-size: 12px; font-family: inherit;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dgit__path:hover { color: #38e1ff; text-decoration: underline; }
+.dgit__msg {
+  margin-top: 8px; width: 100%; resize: vertical;
+  background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(150, 125, 255, 0.28);
+  border-radius: 10px; padding: 10px 12px; color: #eceafe; font-size: 12.5px;
+  font-family: inherit; outline: none;
+}
+.dgit__msg:focus { border-color: rgba(160, 130, 255, 0.6); }
+.dgit__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.dgit__branches { display: flex; gap: 6px; flex-wrap: wrap; }
+.dgit__branchbtn {
+  padding: 5px 12px; border-radius: 999px; font-size: 11px;
+  border: 1px solid rgba(150, 125, 255, 0.25);
+  background: rgba(10, 12, 26, 0.5); color: var(--muted, #8b8fca);
+}
+.dgit__branchbtn:hover:not(:disabled) { color: #eceafe; }
+.dgit__branchbtn--on {
+  color: #fff; background: rgba(139, 92, 255, 0.28);
+  border-color: rgba(160, 130, 255, 0.6); cursor: default;
+}
+.dgit__newbranch { display: flex; gap: 6px; }
+.dgit__newbranch input {
+  flex: 1; min-width: 0; background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(150, 125, 255, 0.25); border-radius: 8px;
+  padding: 5px 10px; color: #eceafe; font-size: 11.5px; outline: none;
+}
+.dgit__log { display: flex; flex-direction: column; gap: 6px; }
+.dgit__commit {
+  display: grid; grid-template-columns: auto 1fr; gap: 4px 9px; align-items: baseline;
+  padding: 7px 9px; border-radius: 9px; background: rgba(0, 0, 0, 0.22);
+}
+.dgit__commit code { color: #38e1ff; font-size: 10.5px; }
+.dgit__subject { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dgit__meta { grid-column: 2; font-size: 9.5px; color: var(--muted, #8b8fca); }
+
+.dgit__diffwrap {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(2, 2, 10, 0.72); backdrop-filter: blur(6px);
+  display: grid; place-items: center; padding: 40px;
+}
+.dgit__diff {
+  width: min(900px, 100%); max-height: 80vh; display: flex; flex-direction: column;
+  border: 1px solid rgba(150, 125, 255, 0.35); border-radius: 16px;
+  background: rgba(10, 12, 26, 0.96); overflow: hidden;
+}
+.dgit__diff header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 16px; border-bottom: 1px solid rgba(150, 125, 255, 0.2); font-size: 12.5px;
+}
+.dgit__diff header button { background: none; border: none; color: var(--muted, #8b8fca); font-size: 14px; }
+.dgit__diff pre {
+  margin: 0; padding: 12px 0; overflow: auto;
+  font-family: "JetBrains Mono", Consolas, monospace; font-size: 11.5px; line-height: 1.55;
+}
+.dl { padding: 0 16px; white-space: pre-wrap; word-break: break-word; }
+.dl--add { background: rgba(53, 224, 143, 0.1); color: #8ff0c0; }
+.dl--del { background: rgba(255, 90, 90, 0.1); color: #ffb4b4; }
+.dl--hunk { color: #38e1ff; background: rgba(56, 225, 255, 0.07); }
+
+/* ---- Build console ---- */
+.dbuild__presets { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.dbuild__cmd {
+  display: flex; align-items: center; gap: 8px;
+  border: 1px solid rgba(150, 125, 255, 0.28); border-radius: 12px;
+  background: rgba(0, 0, 0, 0.4); padding: 6px 12px;
+}
+.dbuild__prompt { color: #38e1ff; font-family: "JetBrains Mono", monospace; }
+.dbuild__cmd input {
+  flex: 1; min-width: 0; background: none; border: none; outline: none;
+  color: #eceafe; font-family: "JetBrains Mono", Consolas, monospace; font-size: 12.5px;
+}
+.dbuild__tabs { display: flex; align-items: center; gap: 8px; }
+.dbuild__count {
+  font-style: normal; margin-left: 6px; padding: 1px 6px; border-radius: 999px;
+  background: rgba(255, 90, 90, 0.2); color: #ffb4b4; font-size: 10px;
+}
+.dbuild__result { margin-left: auto; font-size: 11px; }
+.dbuild__result--ok { color: #35e08f; }
+.dbuild__result--fail { color: #ff8080; }
+.dbuild__out {
+  flex: 1; min-height: 0; overflow: auto; margin: 0;
+  border: 1px solid rgba(150, 125, 255, 0.2); border-radius: var(--dradius, 14px);
+  background: rgba(4, 5, 14, 0.7); padding: 14px;
+  font-family: "JetBrains Mono", Consolas, monospace; font-size: 11.5px;
+  line-height: 1.6; white-space: pre-wrap; word-break: break-word; color: #cfd3f5;
+}
+.dbuild__block { padding-bottom: 14px; margin-bottom: 12px; border-bottom: 1px solid rgba(150, 125, 255, 0.12); }
+.dbuild__blockhead { color: #eceafe; margin-bottom: 6px; display: flex; gap: 8px; align-items: baseline; }
+.dbuild__blockhead em { margin-left: auto; font-style: normal; font-size: 9.5px; color: var(--muted, #8b8fca); }
+.dbuild__problems {
+  flex: 1; min-height: 0; overflow: auto;
+  display: flex; flex-direction: column; gap: 5px;
+}
+.dbuild__prob {
+  display: flex; align-items: baseline; gap: 10px; padding: 9px 12px;
+  border-radius: 10px; background: rgba(0, 0, 0, 0.28);
+  border-left: 2px solid transparent; font-size: 12px;
+}
+.dbuild__prob--error { border-left-color: #ff5a5a; }
+.dbuild__prob--warning { border-left-color: #f5a623; }
+.dbuild__sev { flex: 0 0 auto; }
+.dbuild__prob--error .dbuild__sev { color: #ff8080; }
+.dbuild__prob--warning .dbuild__sev { color: #f5a623; }
+.dbuild__file { color: #38e1ff; font-family: "JetBrains Mono", monospace; font-size: 11px; flex: 0 0 auto; }
+.dbuild__file em { font-style: normal; color: var(--muted, #8b8fca); }
+.dbuild__msg { flex: 1; min-width: 0; line-height: 1.5; }
+
+/* ---- Live preview ---- */
+.dprev__bar { display: flex; gap: 8px; flex: 1; min-width: 260px; }
+.dprev__url {
+  flex: 1; min-width: 0; background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(150, 125, 255, 0.28); border-radius: 10px;
+  padding: 8px 14px; color: #eceafe; font-size: 12.5px;
+  font-family: "JetBrains Mono", Consolas, monospace; outline: none;
+}
+.dprev__url:focus { border-color: rgba(160, 130, 255, 0.6); }
+.dprev__tools { display: flex; gap: 6px; align-items: center; }
+.dprev__auto {
+  background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(150, 125, 255, 0.25);
+  border-radius: 9px; color: var(--muted, #8b8fca); font-size: 11px;
+  padding: 6px 9px; outline: none; font-family: inherit;
+}
+.dprev__stage {
+  flex: 1; min-height: 0; display: flex;
+  border: 1px solid rgba(150, 125, 255, 0.2); border-radius: var(--dradius, 14px);
+  background: #fff; overflow: auto;
+}
+.dprev__stage--framed { background: rgba(4, 5, 14, 0.6); align-items: center; justify-content: center; padding: 18px; }
+.dprev__frame { flex: 1; border: none; background: #fff; }
+.dprev__stage--framed .dprev__frame {
+  flex: 0 0 auto; border-radius: 10px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(150, 125, 255, 0.3);
+}
+.dprev__hint { margin: 0; font-size: 10.5px; color: var(--muted, #8b8fca); }
+
+@media (max-width: 1100px) {
+  .dgit__grid { grid-template-columns: 1fr; }
+}

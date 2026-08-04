@@ -12,22 +12,55 @@ import MicCheck from "../MicCheck";
 // Everything edits a DRAFT: Save commits, ✕/Cancel discards.
 // ============================================================================
 
-export type SettingsCategory = "blackhole" | "planets" | "voice" | "autochat" | "layout";
+export type SettingsCategory =
+  | "general" | "blackhole" | "planets" | "orbits" | "animations" | "wallpaper"
+  | "voice" | "autochat" | "privacy" | "behavior" | "keys" | "developer"
+  | "experimental" | "layout";
 
 export const CATEGORY_META: Record<SettingsCategory, { icon: string; title: string; desc: string }> = {
+  general: { icon: "▣", title: "General", desc: "Startup and window behaviour" },
   blackhole: { icon: "◉", title: "Blackhole", desc: "The core — glow, particles, rotation" },
   planets: { icon: "◍", title: "Planets", desc: "The constellation — orbits, rings, labels" },
-  voice: { icon: "♪", title: "Voice", desc: "How AURA speaks — and how she hears you" },
+  orbits: { icon: "◌", title: "Orbit Lines", desc: "The rings around the core — style, brightness, width" },
+  animations: { icon: "≈", title: "Animations", desc: "Motion intensity across the whole OS" },
+  wallpaper: { icon: "❖", title: "Wallpaper", desc: "The living cosmos behind everything" },
+  voice: { icon: "♪", title: "Voice", desc: "Mic, speaker, wake word and sensitivity" },
   autochat: { icon: "✦", title: "Auto-chat", desc: "How chatty AURA is on her own" },
+  privacy: { icon: "⛨", title: "Privacy", desc: "What AURA may see and store" },
+  behavior: { icon: "◎", title: "Behavior", desc: "When she speaks up, when she stays quiet" },
+  keys: { icon: "⚿", title: "API Keys", desc: "Which providers are connected" },
+  developer: { icon: "⌥", title: "Developer", desc: "Logs, intents, diagnostics" },
+  experimental: { icon: "⚗", title: "Experimental", desc: "Unfinished features — here be dragons" },
   layout: { icon: "▦", title: "Layout", desc: "Size & position of your sanctuary cards" },
 };
 
-const KEYS: Record<Exclude<SettingsCategory, "layout">, string[]> = {
+const KEYS: Record<Exclude<SettingsCategory, "layout" | "keys">, string[]> = {
+  general: ["general.launch_on_boot", "general.start_minimized"],
   blackhole: ["blackhole.glow", "blackhole.particles", "blackhole.rotation"],
   planets: ["planets.orbit_speed", "planets.rings", "planets.labels"],
-  voice: ["voice.enabled", "voice.rate"],
+  orbits: ["orbits.style", "orbits.opacity", "orbits.width"],
+  animations: ["anim.enabled", "anim.intensity", "anim.reduced_motion"],
+  wallpaper: ["wallpaper.video", "wallpaper.dim"],
+  voice: ["voice.enabled", "voice.rate", "voice.sensitivity", "voice.wake_word", "voice.noise_suppression"],
   autochat: ["autochat.enabled", "autochat.frequency"],
+  privacy: ["privacy.screen_reading", "privacy.store_conversations"],
+  behavior: ["behavior.proactive", "behavior.interrupt_work"],
+  developer: ["dev.verbose_logs", "dev.show_intents"],
+  experimental: ["experimental.plugins", "experimental.cloud_sync"],
 };
+
+// Providers AURA can talk to. Keys live in .env on the machine — this panel
+// only reports what's wired, it never displays or edits secrets.
+const PROVIDERS = [
+  { name: "Groq", env: "GROQ_API_KEY", note: "Llama 3.3 / 3.1 — the always-on fallback" },
+  { name: "OpenRouter", env: "OPENROUTER_API_KEY", note: "Laguna, Nemotron, Gemma" },
+  { name: "OpenAI", env: "OPENAI_API_KEY", note: "GPT-4o" },
+  { name: "Anthropic", env: "ANTHROPIC_API_KEY", note: "Claude 3.5" },
+  { name: "Google", env: "GOOGLE_API_KEY", note: "Gemini 1.5 Pro" },
+  { name: "xAI", env: "XAI_API_KEY", note: "Grok 2" },
+];
+
+const ORBIT_STYLES = ["dashed", "solid", "dotted", "hidden"] as const;
 
 interface Props {
   category: SettingsCategory;
@@ -53,7 +86,7 @@ export default function SettingsOverlay({
   }));
   const [dirty, setDirty] = useState(false);
 
-  const set = (k: string, v: number | boolean) => {
+  const set = (k: string, v: number | boolean | string) => {
     setDraft((d) => ({ ...d, [k]: v }));
     setDirty(true);
   };
@@ -61,7 +94,8 @@ export default function SettingsOverlay({
   const save = () => {
     if (category === "layout") {
       onSaveLayout({ ...layoutDraft, preset: "custom" });
-    } else {
+    } else if (category !== "keys") {
+      // "keys" is read-only (secrets live in .env) — nothing to persist.
       const patch: Settings = {};
       for (const k of KEYS[category]) {
         if (draft[k] !== settings[k]) patch[k] = draft[k];
@@ -201,6 +235,38 @@ export default function SettingsOverlay({
           </div>
         );
       }
+      case "orbits": {
+        const style = String(draft["orbits.style"] ?? "dashed");
+        const op = n("orbits.opacity", 55) / 100;
+        const wd = 0.4 + (n("orbits.width", 50) / 100) * 2.1;
+        const dash =
+          style === "dashed" ? "6, 9" : style === "dotted" ? "1.5, 7" : "none";
+        return (
+          <div className="setov__stage">
+            <svg viewBox="0 0 260 200" className="setov__orbitsvg" aria-hidden="true">
+              <circle cx="130" cy="100" r="20" fill="#000" stroke="rgba(243,217,255,0.9)" strokeWidth="1.6" />
+              {style !== "hidden" &&
+                [38, 58, 78, 96].map((r, i) => (
+                  <circle
+                    key={r}
+                    cx="130" cy="100" r={r}
+                    fill="none"
+                    stroke={`rgba(167,109,255,${Math.max(0.05, (0.5 - i * 0.08) * op * 1.8)})`}
+                    strokeWidth={wd}
+                    strokeDasharray={dash === "none" ? undefined : dash}
+                  />
+                ))}
+              {style === "hidden" && (
+                <text x="130" y="165" textAnchor="middle" fill="rgba(139,143,202,0.9)" fontSize="10">
+                  orbit lines hidden — planets still orbit
+                </text>
+              )}
+              <circle cx="188" cy="100" r="5" fill="#6C6BFF" />
+              <circle cx="130" cy="42" r="4" fill="#38E1FF" />
+            </svg>
+          </div>
+        );
+      }
       case "voice": {
         const rate = n("voice.rate");
         return (
@@ -227,6 +293,38 @@ export default function SettingsOverlay({
           </div>
         );
       }
+      case "keys":
+        return (
+          <div className="setov__stage setov__stage--short">
+            <div className="keys">
+              {PROVIDERS.map((p) => (
+                <div key={p.env} className="keys__row">
+                  <span className="keys__name">{p.name}</span>
+                  <code className="keys__env">{p.env}</code>
+                  <span className="keys__note">{p.note}</span>
+                </div>
+              ))}
+            </div>
+            <p className="setov__hint">
+              Keys are read from <code>.env</code> next to server.py — AURA never
+              shows or stores them in the interface. Add a key there and restart
+              the brain to light up that provider.
+            </p>
+          </div>
+        );
+      case "general":
+      case "animations":
+      case "wallpaper":
+      case "privacy":
+      case "behavior":
+      case "developer":
+      case "experimental":
+        return (
+          <div className="setov__stage setov__stage--short">
+            <div className="setov__genicon">{meta.icon}</div>
+            <p className="setov__hint">{meta.desc}</p>
+          </div>
+        );
       case "layout":
         return (
           <div className="setov__minimap">
@@ -251,6 +349,7 @@ export default function SettingsOverlay({
   const label = (k: string) => k.split(".")[1].replace(/_/g, " ");
 
   const controls = () => {
+    if (category === "keys") return null;
     if (category === "layout") {
       return (
         <div className="setov__cards">
@@ -305,7 +404,19 @@ export default function SettingsOverlay({
           return (
             <div key={k} className="setov__row">
               <span className="setov__label">{label(k)}</span>
-              {typeof v === "boolean" ? (
+              {k === "orbits.style" ? (
+                <span className="setov__stylepick">
+                  {ORBIT_STYLES.map((st) => (
+                    <button
+                      key={st}
+                      className={"setov__stylebtn" + (String(v ?? "dashed") === st ? " setov__stylebtn--on" : "")}
+                      onClick={() => set(k, st)}
+                    >
+                      {st}
+                    </button>
+                  ))}
+                </span>
+              ) : typeof v === "boolean" ? (
                 <button className={"san-toggle" + (v ? " san-toggle--on" : "")} onClick={() => set(k, !v)}>
                   <span className="san-toggle__knob" />
                 </button>

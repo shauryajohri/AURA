@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
 import type { AuraState } from "../types";
-import { journey } from "./Home/ScrollController";
 
 interface Props {
   state: AuraState;
@@ -30,6 +29,8 @@ interface P {
   phase: number;
 }
 interface Ring { r: number; v: number; alpha: number; }
+// A shooting star: one bright streak crossing part of the sky, then gone.
+interface Shot { x: number; y: number; vx: number; vy: number; life: number; max: number; }
 // Decorative comets — pure eye-candy, they orbit and do nothing else.
 interface Comet {
   ox: number; oy: number;   // orbit center (fraction of screen)
@@ -39,9 +40,11 @@ interface Comet {
   color: string; size: number;
 }
 
+// Monochrome violet dust — matched to the new core. Mostly deep purples and
+// pale lavender, white for the bright ones, the rare cyan as an accent.
 const COLORS = [
-  "#6a8cff", "#8b5cff", "#b06bff", "#ff5bd0",
-  "#38e1ff", "#ffffff", "#ffd27a", "#7aa8ff",
+  "#8b5cff", "#7d3cff", "#b18bff", "#d9c8ff",
+  "#a76dff", "#ffffff", "#ffffff", "#38e1ff",
 ];
 
 const TEMPO: Record<string, number> = { idle: 1, listening: 1.2, thinking: 2.2, speaking: 1.5 };
@@ -62,6 +65,8 @@ export default function ParticleField({ state }: Props) {
     let ps: P[] = [];
     let rings: Ring[] = [];
     let comets: Comet[] = [];
+    let shots: Shot[] = [];
+    let nextShot = performance.now() + rand(4000, 9000);
     let lastRing = 0;
     const mouse = { x: -9999, y: -9999 };
 
@@ -97,7 +102,7 @@ export default function ParticleField({ state }: Props) {
       const n = Math.min(2400, Math.round((W * H) / 900));
       ps = Array.from({ length: n }, () => spawn(false));
       rings = [];
-      const cometColors = ["200,230,255", "180,150,255", "255,200,150"];
+      const cometColors = ["216,196,255", "165,110,255", "139,92,255"];
       comets = Array.from({ length: 3 }, (_, i) => ({
         ox: rand(0.25, 0.75), oy: rand(0.25, 0.75),
         rx: rand(0.35, 0.65), ry: rand(0.18, 0.4),
@@ -110,16 +115,8 @@ export default function ParticleField({ state }: Props) {
     };
 
     let prev = performance.now();
-    let sleeping = false;
     const draw = (t: number) => {
       raf = requestAnimationFrame(draw);
-      // journey has left the universe → stop burning CPU on invisible particles
-      if (journey.p > 0.55) {
-        if (!sleeping) { ctx.clearRect(0, 0, W, H); sleeping = true; }
-        prev = t;
-        return;
-      }
-      sleeping = false;
       const dt = Math.min(50, t - prev); prev = t;
 
       const st = stateRef.current as string;
@@ -143,9 +140,45 @@ export default function ParticleField({ state }: Props) {
         rg.alpha *= Math.pow(0.985, step);
         if (rg.alpha < 0.01) { rings.splice(i, 1); continue; }
         ctx.globalAlpha = rg.alpha;
-        ctx.strokeStyle = "rgba(160,190,255,1)";
+        ctx.strokeStyle = "rgba(196,166,255,1)";
         ctx.lineWidth = 1.4;
         ctx.beginPath(); ctx.arc(cx, cy, rg.r, 0, Math.PI * 2); ctx.stroke();
+      }
+
+      /* occasional shooting star — a violet-white streak, every few seconds */
+      if (t > nextShot) {
+        nextShot = t + rand(5000, 13000);
+        const fromLeft = Math.random() < 0.5;
+        const sp2 = rand(0.55, 0.95);
+        shots.push({
+          x: fromLeft ? -30 : W + 30,
+          y: rand(H * 0.06, H * 0.55),
+          vx: (fromLeft ? 1 : -1) * sp2,
+          vy: rand(0.08, 0.28),
+          life: 0,
+          max: rand(1400, 2200),
+        });
+      }
+      for (let i = shots.length - 1; i >= 0; i--) {
+        const sh = shots[i];
+        sh.life += dt;
+        sh.x += sh.vx * dt; sh.y += sh.vy * dt;
+        if (sh.life > sh.max || sh.x < -80 || sh.x > W + 80) { shots.splice(i, 1); continue; }
+        const fade = Math.sin(Math.PI * Math.min(1, sh.life / sh.max)); // in → out
+        const tail = 90;
+        const gsh = ctx.createLinearGradient(sh.x, sh.y, sh.x - sh.vx * tail, sh.y - sh.vy * tail);
+        gsh.addColorStop(0, `rgba(245,238,255,${0.85 * fade})`);
+        gsh.addColorStop(0.35, `rgba(177,139,255,${0.4 * fade})`);
+        gsh.addColorStop(1, "rgba(125,60,255,0)");
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = gsh;
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(sh.x, sh.y);
+        ctx.lineTo(sh.x - sh.vx * tail, sh.y - sh.vy * tail);
+        ctx.stroke();
+        ctx.fillStyle = `rgba(255,252,255,${0.9 * fade})`;
+        ctx.beginPath(); ctx.arc(sh.x, sh.y, 1.6, 0, Math.PI * 2); ctx.fill();
       }
 
       for (const p of ps) {

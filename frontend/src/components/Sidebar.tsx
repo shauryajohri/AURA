@@ -22,6 +22,7 @@ const NAV: NavItem[] = [
   { id: "tasks", label: "Tasks", icon: "✓", hint: "Today · projects · quests" },
   { id: "models", label: "Models", icon: "◈", hint: "Planets · routing · orbits" },
   { id: "settings", label: "Settings", icon: "⚙", hint: "Appearance · voice · keys" },
+  { id: "labs", label: "Labs", icon: "⚗", hint: "What's coming next" },
 ];
 
 interface Props {

@@ -28,10 +28,34 @@ const DEFAULTS: Settings = {
   "planets.orbit_speed": 50,
   "planets.rings": true,
   "planets.labels": true,
+  "orbits.opacity": 55,
+  "orbits.width": 50,
+  "orbits.style": "dashed",
   "voice.enabled": true,
   "voice.rate": 55,
+  "voice.sensitivity": 55,
+  "voice.wake_word": true,
+  "voice.noise_suppression": true,
   "autochat.enabled": true,
   "autochat.frequency": 40,
+  // General / Appearance
+  "general.start_minimized": false,
+  "general.launch_on_boot": false,
+  "anim.enabled": true,
+  "anim.intensity": 70,
+  "anim.reduced_motion": false,
+  "wallpaper.video": true,
+  "wallpaper.dim": 30,
+  // Privacy & behaviour
+  "privacy.screen_reading": true,
+  "privacy.store_conversations": true,
+  "behavior.proactive": true,
+  "behavior.interrupt_work": false,
+  // Developer / experimental
+  "dev.verbose_logs": false,
+  "dev.show_intents": false,
+  "experimental.plugins": false,
+  "experimental.cloud_sync": false,
 };
 
 const num = (s: Settings, k: string, fallback: number): number => {
@@ -42,6 +66,13 @@ const bool = (s: Settings, k: string, fallback: boolean): boolean => {
   const v = s[k];
   return typeof v === "boolean" ? v : fallback;
 };
+const str = (s: Settings, k: string, fallback: string): string => {
+  const v = s[k];
+  return typeof v === "string" ? v : fallback;
+};
+
+export type OrbitStyle = "dashed" | "solid" | "dotted" | "hidden";
+const ORBIT_STYLES: OrbitStyle[] = ["dashed", "solid", "dotted", "hidden"];
 
 interface SettingsStore {
   settings: Settings;
@@ -54,6 +85,12 @@ interface SettingsStore {
   rotationMul: number;
   /** Whether planets show their name/role labels. */
   showLabels: boolean;
+  /** Orbit-line brightness multiplier (0–2.5; 1 at the default slider). */
+  orbitMul: number;
+  /** Orbit-line width multiplier (0.4–2.5). */
+  orbitWidthMul: number;
+  /** How orbit lines are drawn. "hidden" removes them (edit mode still shows slots). */
+  orbitStyle: OrbitStyle;
 
   load: () => Promise<void>;
   /** Save a partial change AND apply it to the visuals immediately. */
@@ -67,10 +104,14 @@ const toMul = (pct: number, min: number, max: number, mid: number) =>
     : 1 + ((pct - mid) / (100 - mid)) * (max - 1);
 
 function derive(s: Settings) {
+  const style = str(s, "orbits.style", "dashed") as OrbitStyle;
   return {
     density: toMul(num(s, "blackhole.particles", 60), 0.15, 1.6, 60),
     rotationMul: toMul(num(s, "blackhole.rotation", 50), 0.2, 2.0, 50),
     showLabels: bool(s, "planets.labels", true),
+    orbitMul: toMul(num(s, "orbits.opacity", 55), 0, 2.5, 55),
+    orbitWidthMul: toMul(num(s, "orbits.width", 50), 0.4, 2.5, 50),
+    orbitStyle: ORBIT_STYLES.includes(style) ? style : "dashed",
   };
 }
 

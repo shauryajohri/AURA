@@ -1,5 +1,6 @@
 import PageShell from "./PageShell";
 import ModelsView from "./ModelsView";
+import ModelSpecs from "./ModelSpecs";
 import SkillsView from "./SkillsView";
 import IntelligenceView from "./IntelligenceView";
 import { usePlanetStore } from "../stores/planetStore";
@@ -56,15 +57,17 @@ function OrbitEditorPane({ onGoHome }: { onGoHome: () => void }) {
 interface Props {
   v3Events: V3Event[];
   onGoHome: () => void;
+  activeModelId?: string | null;
 }
 
-export default function ModelsPage({ v3Events, onGoHome }: Props) {
+export default function ModelsPage({ v3Events, onGoHome, activeModelId = null }: Props) {
   return (
     <PageShell
       title="Models"
       tagline="Each model is a planet with its own nature — routing is gravity."
       storeKey="aura.page.models"
       tabs={[
+        { id: "specs", label: "Specifications", body: <ModelSpecs activeModelId={activeModelId} /> },
         { id: "planets", label: "Planet Management", body: <ModelsView /> },
         { id: "orbits", label: "Orbit Editor", body: <OrbitEditorPane onGoHome={onGoHome} /> },
         { id: "performance", label: "Performance", body: <IntelligenceView events={v3Events} /> },

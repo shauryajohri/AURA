@@ -5,8 +5,16 @@ import { Layout, DEFAULT_LAYOUT } from "../components/Home/layoutTypes";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useSettingsStore } from "../stores/settingsStore";
 
-// Screen-1 settings — the same menu → focused editor flow as the Sanctuary.
-// Pick a category, edit it with a live preview, save, and you're back here.
+// Settings — a menu → focused editor flow. Pick a category, edit it with a
+// live preview, save, and you're back here. Grouped into sections so fourteen
+// categories still feel calm rather than like a wall of buttons.
+
+const SECTIONS: Array<{ title: string; cats: SettingsCategory[] }> = [
+  { title: "System", cats: ["general", "keys", "privacy", "behavior"] },
+  { title: "Appearance", cats: ["blackhole", "planets", "orbits", "animations", "wallpaper", "layout"] },
+  { title: "Voice & Personality", cats: ["voice", "autochat"] },
+  { title: "Advanced", cats: ["developer", "experimental"] },
+];
 
 export default function SettingsView() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -27,23 +35,28 @@ export default function SettingsView() {
         <p>Tune AURA's world. Each area opens with a live preview.</p>
       </div>
 
-      <div className="setview__menu">
-        {(Object.keys(CATEGORY_META) as SettingsCategory[]).map((cat) => (
-          <button
-            key={cat}
-            className="san-setopt setview__opt"
-            onClick={() => setFocus(cat)}
-            disabled={!settings && cat !== "layout"}
-          >
-            <span className="san-setopt__icon">{CATEGORY_META[cat].icon}</span>
-            <span className="san-setopt__meta">
-              <span className="san-setopt__name">{CATEGORY_META[cat].title}</span>
-              <span className="san-setopt__desc">{CATEGORY_META[cat].desc}</span>
-            </span>
-            <span className="san-setopt__go">→</span>
-          </button>
-        ))}
-      </div>
+      {SECTIONS.map((sec) => (
+        <section key={sec.title} className="setview__section">
+          <h3 className="memtl__title">{sec.title}</h3>
+          <div className="setview__menu">
+            {sec.cats.map((cat) => (
+              <button
+                key={cat}
+                className="san-setopt setview__opt"
+                onClick={() => setFocus(cat)}
+                disabled={!settings && cat !== "layout" && cat !== "keys"}
+              >
+                <span className="san-setopt__icon">{CATEGORY_META[cat].icon}</span>
+                <span className="san-setopt__meta">
+                  <span className="san-setopt__name">{CATEGORY_META[cat].title}</span>
+                  <span className="san-setopt__desc">{CATEGORY_META[cat].desc}</span>
+                </span>
+                <span className="san-setopt__go">→</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      ))}
 
       {!settings && (
         <div className="setview__note">

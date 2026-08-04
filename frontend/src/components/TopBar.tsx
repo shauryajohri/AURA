@@ -2,7 +2,22 @@ import { useState } from "react";
 import { useClock } from "../hooks/useClock";
 import { useCoreStore } from "../stores/coreStore";
 import { usePlanetStore } from "../stores/planetStore";
+import { useNotifyStore } from "../stores/notifyStore";
 import { MODELS } from "../data/models";
+
+const KIND_ICON: Record<string, string> = {
+  route: "◈", memory: "❋", task: "✓", quest: "❖", build: "⚙", done: "●", info: "◎",
+};
+
+function timeAgo(ts: number): string {
+  const s = Math.max(1, Math.round((Date.now() - ts) / 1000));
+  if (s < 60) return s + "s ago";
+  const m = Math.round(s / 60);
+  if (m < 60) return m + "m ago";
+  const h = Math.round(m / 60);
+  if (h < 24) return h + "h ago";
+  return Math.round(h / 24) + "d ago";
+}
 
 const USER = "Shaurya";
 
@@ -39,6 +54,12 @@ export default function TopBar({ mode = "CHAT" }: Props) {
   const pResetSpec = usePlanetStore((s) => s.resetSpec);
   const pMeta = usePlanetStore((s) => s.meta);
   const pSetMeta = usePlanetStore((s) => s.setMeta);
+
+  const notices = useNotifyStore((s) => s.notices);
+  const bellOpen = useNotifyStore((s) => s.open);
+  const setBellOpen = useNotifyStore((s) => s.setOpen);
+  const clearNotices = useNotifyStore((s) => s.clear);
+  const unread = notices.filter((n) => !n.read).length;
 
   return (
     <header className="topbar">
@@ -222,6 +243,40 @@ export default function TopBar({ mode = "CHAT" }: Props) {
                     </button>
                   </>
                 )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="coremenu-wrap">
+          <button
+            className={"bell" + (bellOpen ? " bell--open" : "")}
+            onClick={() => setBellOpen(!bellOpen)}
+            title="Notifications"
+          >
+            {"🔔"}
+            {unread > 0 && <span className="bell__badge">{unread > 9 ? "9+" : unread}</span>}
+          </button>
+
+          {bellOpen && (
+            <div className="coremenu bellmenu">
+              <div className="coremenu__head">
+                <span>NOTIFICATIONS</span>
+                {notices.length > 0 && (
+                  <button className="bellmenu__clear" onClick={clearNotices}>clear</button>
+                )}
+              </div>
+              <div className="bellmenu__list">
+                {notices.length === 0 && (
+                  <p className="bellmenu__empty">All quiet — AURA will log what she does here.</p>
+                )}
+                {notices.slice(0, 30).map((n) => (
+                  <div key={n.id} className={"bellmenu__row" + (n.read ? "" : " bellmenu__row--new")}>
+                    <span className="bellmenu__icon">{KIND_ICON[n.kind] ?? "◎"}</span>
+                    <span className="bellmenu__text">{n.text}</span>
+                    <span className="bellmenu__when">{timeAgo(n.ts)}</span>
+                  </div>
+                ))}
               </div>
             </div>
           )}

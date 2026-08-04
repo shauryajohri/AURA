@@ -703,6 +703,13 @@ async def gh_repos(limit: int = 100) -> dict[str, Any]:
     return github_import.list_repos(limit)
 
 
+@router.get("/api/domain/github/pulls")
+async def gh_pulls(full_name: str, state: str = "open", limit: int = 30) -> dict[str, Any]:
+    """Pull requests for one repo. Read-only — merging happens on GitHub."""
+    from core.domain import github_import
+    return github_import.list_pulls(full_name, state, limit)
+
+
 @router.post("/api/domain/github/import")
 async def gh_import(req: Request) -> dict[str, Any]:
     """Clone the chosen repo locally and build its project graph. Body:

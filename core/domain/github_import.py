@@ -169,3 +169,46 @@ def import_repo(full_name: str, clone_url: str = "", name: str = "",
         meta={"github_full_name": full_name})
     return {"ok": True, "cloned_to": cl["path"], "updated": cl.get("updated", False),
             **built}
+
+
+# ── pull requests ────────────────────────────────────────────────────────────
+# Read-only on purpose. AURA lists and opens PRs; merging stays a deliberate
+# act the user performs on GitHub, where the checks and review UI live.
+
+def list_pulls(full_name: str, state: str = "open", limit: int = 30) -> dict[str, Any]:
+    """Open (or recent) pull requests for one repo."""
+    full_name = (full_name or "").strip().strip("/")
+    if not full_name:
+        return {"ok": False, "error": "full_name required", "pulls": []}
+    if not is_connected():
+        return {"ok": False, "connected": False, "pulls": [],
+                "error": "GitHub not connected — authorise it first"}
+    if state not in ("open", "closed", "all"):
+        state = "open"
+    from core import connectors
+    try:
+        data = connectors._get(
+            f"https://api.github.com/repos/{full_name}/pulls"
+            f"?state={state}&sort=updated&direction=desc&per_page={min(limit, 100)}",
+            "github",
+        )
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "connected": True, "pulls": [], "error": f"GitHub API failed: {e}"}
+
+    pulls = []
+    for p in (data or []):
+        if not isinstance(p, dict):
+            continue
+        pulls.append({
+            "number": p.get("number"),
+            "title": p.get("title") or "",
+            "state": p.get("state") or "",
+            "draft": bool(p.get("draft")),
+            "author": ((p.get("user") or {}).get("login")) or "",
+            "head": ((p.get("head") or {}).get("ref")) or "",
+            "base": ((p.get("base") or {}).get("ref")) or "",
+            "url": p.get("html_url") or "",
+            "updated_at": p.get("updated_at") or "",
+            "comments": p.get("comments", 0),
+        })
+    return {"ok": True, "connected": True, "pulls": pulls}

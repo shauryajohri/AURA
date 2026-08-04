@@ -16,6 +16,7 @@ import CodePane from "./views/CodePane";
 import CodeReviewView from "./views/CodeReviewView";
 import PlanningBoard from "./views/PlanningBoard";
 import GitView from "./views/GitView";
+import GitHubView from "./views/GitHubView";
 import BuildView from "./views/BuildView";
 import PreviewView from "./views/PreviewView";
 import DocumentationView from "./views/DocumentationView";
@@ -57,6 +58,7 @@ export default function DomainScreen({ onExit }: Props) {
       case "planning": return <PlanningBoard />;
       case "code": return <CodePane />;
       case "git": return <GitView />;
+      case "github": return <GitHubView />;
       case "build": return <BuildView />;
       case "preview": return <PreviewView />;
       case "review": return <CodeReviewView />;

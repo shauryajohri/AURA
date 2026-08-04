@@ -103,6 +103,31 @@ export interface GitResult {
   preview?: GitPreview;
 }
 
+export interface GitHubRepo {
+  name: string;
+  full_name: string;
+  private: boolean;
+  description: string;
+  language: string;
+  default_branch: string;
+  updated_at: string;
+  clone_url: string;
+  html_url: string;
+}
+
+export interface PullRequest {
+  number: number;
+  title: string;
+  state: string;
+  draft: boolean;
+  author: string;
+  head: string;
+  base: string;
+  url: string;
+  updated_at: string;
+  comments: number;
+}
+
 export interface GitCommit {
   sha: string;
   author: string;
@@ -279,6 +304,23 @@ export const domainApi = {
       method: "POST",
       body: JSON.stringify({ root, message, confirm: true, ...opts }),
     }),
+
+  // ---- GitHub: account, repos, pull requests, import ----------------------
+  ghStatus: () =>
+    j<{ ok: boolean; connected: boolean; account: string }>("/api/domain/github/status"),
+  ghRepos: (limit = 100) =>
+    j<{ ok: boolean; connected?: boolean; error?: string; account?: string; repos?: GitHubRepo[] }>(
+      "/api/domain/github/repos" + q({ limit }),
+    ),
+  ghPulls: (full_name: string, state = "open", limit = 30) =>
+    j<{ ok: boolean; connected?: boolean; error?: string; pulls: PullRequest[] }>(
+      "/api/domain/github/pulls" + q({ full_name, state, limit }),
+    ),
+  ghImport: (full_name: string, clone_url?: string, branch?: string) =>
+    j<{ ok: boolean; error?: string; cloned_to?: string; updated?: boolean }>(
+      "/api/domain/github/import",
+      { method: "POST", body: JSON.stringify({ full_name, clone_url, branch }) },
+    ),
 
   // ---- git panel: history, branches, staging, diffs, pull -----------------
   gitLog: (root: string, limit = 40) =>

@@ -13,8 +13,8 @@ import { persist } from "zustand/middleware";
 
 export type DomainSection =
   | "dashboard" | "projects" | "planning" | "research" | "tasks" | "graph" | "code"
-  | "review" | "git" | "build" | "preview" | "documents" | "notes" | "agents"
-  | "terminal" | "history" | "settings";
+  | "review" | "git" | "github" | "build" | "preview" | "documents" | "notes"
+  | "agents" | "terminal" | "history" | "settings";
 
 export type ProjectStatus = "idea" | "progress" | "paused" | "completed";
 
@@ -157,7 +157,7 @@ export interface DomainLayout {
 
 export const ALL_SECTIONS: DomainSection[] = [
   "dashboard", "projects", "planning", "research", "tasks", "graph",
-  "code", "git", "build", "preview", "review", "terminal",
+  "code", "git", "github", "build", "preview", "review", "terminal",
   "documents", "notes", "agents", "history", "settings",
 ];
 
@@ -183,6 +183,7 @@ export const SECTION_META: Record<DomainSection, { icon: string; label: string }
   graph: { icon: "◉", label: "Knowledge Graph" },
   code: { icon: "⌥", label: "Code" },
   git: { icon: "⑂", label: "Git" },
+  github: { icon: "◧", label: "GitHub" },
   build: { icon: "⚙", label: "Build" },
   preview: { icon: "▢", label: "Live Preview" },
   review: { icon: "⇄", label: "Code Review" },

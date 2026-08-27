@@ -1625,6 +1625,261 @@ def get_quest_streak(quest_id: int, target_minutes: int = None) -> int:
     return streak
 
 
+
+# ── Rooms: a home for chats ─────────────────────────────────────────────────
+# Chats gave the conversation boundaries. Rooms give those boundaries a
+# SUBJECT: "Japanese Study" holds the hiragana chat and the kanji chat, and
+# every chat inside it inherits the room's brief. That is the part a flat list
+# can't express — a chat titled from its first message tells AURA nothing
+# about how to behave, while a room can say "teach, don't just answer".
+#
+# Built on top of chat_sessions rather than replacing it: a room is a parent
+# row, and chat_sessions gains a nullable room_id. A chat with no room behaves
+# exactly as it always has, so nothing that exists today changes.
+
+_ROOMS_DDL = """
+    CREATE TABLE IF NOT EXISTS chat_rooms (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        name         TEXT NOT NULL,
+        icon         TEXT DEFAULT '◈',
+        accent       TEXT DEFAULT '#6C6BFF',
+        topic        TEXT DEFAULT '',
+        keywords     TEXT DEFAULT '',
+        system_hint  TEXT DEFAULT '',
+        auto_switch  INTEGER DEFAULT 1,
+        position     INTEGER DEFAULT 0,
+        created_at   TEXT
+    )
+"""
+
+SEED_ROOMS = [
+    {"name": "Coding", "icon": "⌥", "accent": "#38E1FF",
+     "topic": "Software work — bugs, design, reviews, shipping.",
+     "keywords": ("code,coding,bug,error,exception,stacktrace,traceback,debug,compile,"
+                  "function,class,refactor,api,endpoint,database,sql,query,python,"
+                  "javascript,typescript,react,node,rust,golang,java,git,commit,merge,"
+                  "branch,build,deploy,test,lint,regex,async,docker"),
+     "system_hint": "This is the Coding room. Stay technical and concrete."},
+    {"name": "Japanese Study", "icon": "あ", "accent": "#FF6BA8",
+     "topic": "Japanese practice — grammar, kanji, vocab, reading.",
+     "keywords": ("japanese,japan,kanji,hiragana,katakana,romaji,jlpt,n5,n4,n3,n2,n1,"
+                  "particle,grammar,vocab,vocabulary,genki,wanikani,anki,furigana,keigo,"
+                  "conjugation,conjugate,nihongo,sensei,onyomi,kunyomi,radical"),
+     "system_hint": ("This is the Japanese Study room. Teach, don't just answer: give "
+                     "the Japanese, the reading, and a short gloss.")},
+    {"name": "Personal", "icon": "❋", "accent": "#9B8CFF",
+     "topic": "Life, mood, plans — the off-the-clock room.",
+     "keywords": ("tired,feeling,mood,sleep,family,friend,weekend,movie,music,food,gym,"
+                  "workout,anxious,stressed,happy,bored,holiday,birthday"),
+     "system_hint": ("This is the Personal room. Talk like a friend, not a tool. Never "
+                     "steer the conversation back to work.")},
+]
+
+
+def _ensure_room_tables(conn) -> None:
+    """Create chat_rooms and add chat_sessions.room_id. Idempotent."""
+    try:
+        conn.execute(_ROOMS_DDL)
+        have = {r[1] for r in conn.execute("PRAGMA table_info(chat_sessions)")}
+        if "room_id" not in have:
+            conn.execute("ALTER TABLE chat_sessions ADD COLUMN room_id INTEGER")
+        if not conn.execute("SELECT COUNT(*) FROM chat_rooms").fetchone()[0]:
+            now = datetime.datetime.now().isoformat()
+            for pos, r in enumerate(SEED_ROOMS):
+                conn.execute(
+                    "INSERT INTO chat_rooms (name, icon, accent, topic, keywords, "
+                    "system_hint, auto_switch, position, created_at) "
+                    "VALUES (?,?,?,?,?,?,1,?,?)",
+                    (r["name"], r["icon"], r["accent"], r["topic"], r["keywords"],
+                     r["system_hint"], pos, now))
+        conn.commit()
+    except Exception:  # noqa: BLE001 - never let a migration take the app down
+        pass
+
+
+def _room_row(r) -> dict:
+    return {
+        "id": r[0], "name": r[1], "icon": r[2], "accent": r[3], "topic": r[4],
+        "keywords": [k.strip() for k in (r[5] or "").split(",") if k.strip()],
+        "system_hint": r[6], "auto_switch": bool(r[7]), "position": r[8],
+        "created_at": r[9],
+    }
+
+
+_ROOM_COLS = ("id, name, icon, accent, topic, keywords, system_hint, "
+              "auto_switch, position, created_at")
+
+
+def list_rooms() -> list:
+    """Every room, each with the number of chats inside it."""
+    conn = _connect()
+    try:
+        _ensure_chat_tables(conn)
+        _ensure_room_tables(conn)
+        rows = conn.execute(
+            f"SELECT {_ROOM_COLS} FROM chat_rooms ORDER BY position ASC, id ASC").fetchall()
+        counts = dict(conn.execute(
+            "SELECT room_id, COUNT(*) FROM chat_sessions WHERE room_id IS NOT NULL "
+            "GROUP BY room_id").fetchall())
+        out = []
+        for r in rows:
+            room = _room_row(r)
+            room["chats"] = counts.get(room["id"], 0)
+            out.append(room)
+        return out
+    finally:
+        conn.close()
+
+
+def get_room(room_id: int) -> dict | None:
+    if not room_id:
+        return None
+    conn = _connect()
+    try:
+        _ensure_room_tables(conn)
+        r = conn.execute(f"SELECT {_ROOM_COLS} FROM chat_rooms WHERE id=?",
+                         (int(room_id),)).fetchone()
+        return _room_row(r) if r else None
+    finally:
+        conn.close()
+
+
+def create_room(name: str, icon: str = "◈", accent: str = "#6C6BFF",
+                topic: str = "", keywords: str = "", system_hint: str = "",
+                auto_switch: bool = True) -> int:
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("a room needs a name")
+    if isinstance(keywords, (list, tuple)):
+        keywords = ",".join(str(k).strip() for k in keywords if str(k).strip())
+    conn = _connect()
+    try:
+        _ensure_room_tables(conn)
+        pos = conn.execute("SELECT COALESCE(MAX(position),0)+1 FROM chat_rooms").fetchone()[0]
+        cur = conn.execute(
+            "INSERT INTO chat_rooms (name, icon, accent, topic, keywords, system_hint, "
+            "auto_switch, position, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (name, icon, accent, topic, keywords, system_hint,
+             int(bool(auto_switch)), pos, datetime.datetime.now().isoformat()))
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+_ROOM_EDITABLE = {"name", "icon", "accent", "topic", "keywords", "system_hint",
+                  "auto_switch", "position"}
+
+
+def update_room(room_id: int, **patch) -> bool:
+    fields, values = [], []
+    for k, v in patch.items():
+        if k not in _ROOM_EDITABLE:
+            continue
+        if k == "keywords" and isinstance(v, (list, tuple)):
+            v = ",".join(str(x).strip() for x in v if str(x).strip())
+        if k == "auto_switch":
+            v = int(bool(v))
+        fields.append(f"{k}=?")
+        values.append(v)
+    if not fields:
+        return False
+    values.append(int(room_id))
+    conn = _connect()
+    try:
+        _ensure_room_tables(conn)
+        conn.execute(f"UPDATE chat_rooms SET {', '.join(fields)} WHERE id=?", values)
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def delete_room(room_id: int) -> bool:
+    """Remove a room. Its chats survive, unfiled — deleting a folder should
+    never delete the conversations inside it."""
+    conn = _connect()
+    try:
+        _ensure_room_tables(conn)
+        conn.execute("UPDATE chat_sessions SET room_id=NULL WHERE room_id=?", (int(room_id),))
+        conn.execute("DELETE FROM chat_rooms WHERE id=?", (int(room_id),))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def set_session_room(session_id: int, room_id: int | None) -> bool:
+    conn = _connect()
+    try:
+        _ensure_chat_tables(conn)
+        _ensure_room_tables(conn)
+        conn.execute("UPDATE chat_sessions SET room_id=? WHERE id=?",
+                     (int(room_id) if room_id else None, int(session_id)))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def session_room(session_id: int) -> dict | None:
+    """The room a chat belongs to, or None when it is unfiled."""
+    conn = _connect()
+    try:
+        _ensure_chat_tables(conn)
+        _ensure_room_tables(conn)
+        row = conn.execute("SELECT room_id FROM chat_sessions WHERE id=?",
+                           (int(session_id),)).fetchone()
+    finally:
+        conn.close()
+    return get_room(row[0]) if row and row[0] else None
+
+
+def active_room() -> dict | None:
+    """The room the conversation is currently inside."""
+    try:
+        return session_room(active_session_id())
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def room_sessions(room_id: int, limit: int = 60) -> list:
+    """The chats filed under one room, newest first."""
+    ids = {s["id"] for s in _sessions_in_room(room_id, limit)}
+    return [s for s in list_chat_sessions(200) if s["id"] in ids]
+
+
+def _sessions_in_room(room_id: int, limit: int = 60) -> list:
+    conn = _connect()
+    try:
+        _ensure_chat_tables(conn)
+        _ensure_room_tables(conn)
+        rows = conn.execute(
+            "SELECT id FROM chat_sessions WHERE room_id=? "
+            "ORDER BY updated_at DESC, id DESC LIMIT ?", (int(room_id), limit)).fetchall()
+        return [{"id": r[0]} for r in rows]
+    finally:
+        conn.close()
+
+
+def enter_room(room_id: int) -> int:
+    """Make a room active by opening its most recent chat.
+
+    A room is not itself a conversation — messages always live in a chat —
+    so entering one means resuming where you left off in it, or starting a
+    fresh chat there when it is empty.
+    """
+    existing = _sessions_in_room(room_id, 1)
+    if existing:
+        sid = existing[0]["id"]
+        set_active_chat_session(sid)
+        return sid
+    sid = create_chat_session()
+    set_session_room(sid, room_id)
+    set_active_chat_session(sid)
+    return sid
+
+
 init_db()
 init_tasks()
 init_quests()

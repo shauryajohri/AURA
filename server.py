@@ -566,6 +566,87 @@ async def api_save_settings(req: Request) -> dict[str, Any]:
     return {"ok": True, "settings": store.get_settings()}
 
 
+
+# ── Rooms: what a chat is ABOUT ─────────────────────────────────────────────
+# A chat is a boundary; a room is a subject. Rooms hold chats, and every chat
+# in a room inherits the room's brief — which is the part a title taken from
+# the first message can never carry.
+@app.get("/api/rooms")
+async def api_rooms() -> dict[str, Any]:
+    from memory import store
+    active = store.active_room()
+    return {"rooms": store.list_rooms(), "active": active["id"] if active else None}
+
+
+@app.post("/api/rooms")
+async def api_room_new(req: Request) -> dict[str, Any]:
+    from memory import store
+    body = await req.json()
+    try:
+        rid = store.create_room(
+            name=str(body.get("name") or ""),
+            icon=str(body.get("icon") or "◈"),
+            accent=str(body.get("accent") or "#6C6BFF"),
+            topic=str(body.get("topic") or ""),
+            keywords=body.get("keywords") or "",
+            system_hint=str(body.get("system_hint") or ""),
+            auto_switch=bool(body.get("auto_switch", True)),
+        )
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, "id": rid, "rooms": store.list_rooms()}
+
+
+@app.patch("/api/rooms/{room_id}")
+async def api_room_update(room_id: int, req: Request) -> dict[str, Any]:
+    from memory import store
+    body = await req.json()
+    store.update_room(room_id, **body)
+    return {"ok": True, "rooms": store.list_rooms()}
+
+
+@app.delete("/api/rooms/{room_id}")
+async def api_room_delete(room_id: int) -> dict[str, Any]:
+    """The room goes; its chats stay, unfiled. Deleting a folder must never
+    delete the conversations inside it."""
+    from memory import store
+    store.delete_room(room_id)
+    return {"ok": True, "rooms": store.list_rooms(), "chats": store.list_chat_sessions()}
+
+
+@app.get("/api/rooms/{room_id}/chats")
+async def api_room_chats(room_id: int) -> dict[str, Any]:
+    from memory import store
+    return {"chats": store.room_sessions(room_id)}
+
+
+@app.post("/api/rooms/{room_id}/enter")
+async def api_room_enter(room_id: int) -> dict[str, Any]:
+    """Entering a room resumes its most recent chat, or starts one there."""
+    from memory import store
+    if not store.get_room(room_id):
+        return {"ok": False, "error": "no such room"}
+    sid = store.enter_room(room_id)
+    try:
+        from core import brain
+        brain.reset_history()
+    except Exception:  # noqa: BLE001
+        pass
+    rows = store.get_session_messages(sid)
+    broadcast({"type": "room", "payload": {"room_id": room_id, "chat_id": sid, "auto": False, "note": ""}})
+    return {"ok": True, "room_id": room_id, "active": sid,
+            "messages": [{"role": r, "text": m, "created_at": t} for r, m, t in rows]}
+
+
+@app.post("/api/chats/{chat_id}/room")
+async def api_chat_set_room(chat_id: int, req: Request) -> dict[str, Any]:
+    """File a chat into a room (or out of one with room_id: null)."""
+    from memory import store
+    body = await req.json()
+    store.set_session_room(chat_id, body.get("room_id"))
+    return {"ok": True, "rooms": store.list_rooms(), "chats": store.list_chat_sessions()}
+
+
 # ── Chats: named conversation sessions ──────────────────────────────────────
 # One endless message stream had no boundaries, so "recent conversation" meant
 # "the last N rows" and turns from weeks ago could pass for the live chat.
@@ -1101,8 +1182,40 @@ def _log_reasoning(text: str, directive, kind: str) -> None:
         pass  # logging must never break dispatch
 
 
+def _route_room(text: str) -> None:
+    """Move the conversation to the right room before the turn is processed.
+
+    Order matters: the room decides which brief the prompt carries, so a
+    switch applied afterwards would answer in the new room using the old
+    room's instructions. Failure here is never fatal — a router that cannot
+    decide leaves you exactly where you were.
+    """
+    try:
+        from core import room_router
+        from memory import store
+
+        d = room_router.route(text)
+        if not d.get("switch"):
+            return
+        sid = store.enter_room(d["room_id"])
+        try:
+            from core import brain
+            brain.reset_history()
+        except Exception:  # noqa: BLE001
+            pass
+        broadcast({"type": "room", "payload": {
+            "room_id": d["room_id"], "chat_id": sid,
+            "from_room_id": d.get("from_room_id"),
+            "auto": True, "note": d.get("note", ""),
+        }})
+    except Exception as e:  # noqa: BLE001
+        print(f"[AURA bridge] room routing skipped: {e}")
+
+
 async def _dispatch(ws: WebSocket, text: str) -> None:
     """Route one user message through the Director, then act on the directive."""
+    _route_room(text)
+
     if DIRECTOR is None:
         # Fallback: raw brain if the Director failed to init.
         await _run_streaming(ws, lambda oc, occ: process_streaming(text, on_chunk=oc, on_code=occ))

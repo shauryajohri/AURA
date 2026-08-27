@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Settings } from "../../api";
 import { Layout, ColId, Size, CARD_TITLES, DEFAULT_LAYOUT } from "./layoutTypes";
 import MicCheck from "../MicCheck";
+import VoicePicker from "./VoicePicker";
 
 // ============================================================================
 // Focused settings editors. Clicking "Blackhole" in the settings card doesn't
@@ -24,7 +25,7 @@ export const CATEGORY_META: Record<SettingsCategory, { icon: string; title: stri
   orbits: { icon: "◌", title: "Orbit Lines", desc: "The rings around the core — style, brightness, width" },
   animations: { icon: "≈", title: "Animations", desc: "Motion intensity across the whole OS" },
   wallpaper: { icon: "❖", title: "Wallpaper", desc: "The living cosmos behind everything" },
-  voice: { icon: "♪", title: "Voice", desc: "Mic, speaker, wake word and sensitivity" },
+  voice: { icon: "♪", title: "Voice", desc: "Which voice she speaks with, plus mic and wake word" },
   autochat: { icon: "✦", title: "Auto-chat", desc: "How chatty AURA is on her own" },
   privacy: { icon: "⛨", title: "Privacy", desc: "What AURA may see and store" },
   behavior: { icon: "◎", title: "Behavior", desc: "When she speaks up, when she stays quiet" },
@@ -41,7 +42,10 @@ const KEYS: Record<Exclude<SettingsCategory, "layout" | "keys">, string[]> = {
   orbits: ["orbits.style", "orbits.opacity", "orbits.width"],
   animations: ["anim.enabled", "anim.intensity", "anim.reduced_motion"],
   wallpaper: ["wallpaper.video", "wallpaper.dim"],
-  voice: ["voice.enabled", "voice.rate", "voice.sensitivity", "voice.wake_word", "voice.noise_suppression"],
+  // voice.name is edited by VoicePicker rather than by the generic control
+  // rows, but it must be listed here or save() would never put it in the patch.
+  voice: ["voice.enabled", "voice.name", "voice.rate", "voice.sensitivity",
+          "voice.wake_word", "voice.noise_suppression"],
   autochat: ["autochat.enabled", "autochat.frequency"],
   privacy: ["privacy.screen_reading", "privacy.store_conversations"],
   behavior: ["behavior.proactive", "behavior.interrupt_work"],
@@ -52,7 +56,7 @@ const KEYS: Record<Exclude<SettingsCategory, "layout" | "keys">, string[]> = {
 // Providers AURA can talk to. Keys live in .env on the machine — this panel
 // only reports what's wired, it never displays or edits secrets.
 const PROVIDERS = [
-  { name: "Groq", env: "GROQ_API_KEY", note: "Llama 3.3 / 3.1 — the always-on fallback" },
+  { name: "Groq", env: "GROQ_API_KEY", note: "GPT-OSS 120B / 20B — the always-on fallback" },
   { name: "OpenRouter", env: "OPENROUTER_API_KEY", note: "Laguna, Nemotron, Gemma" },
   { name: "OpenAI", env: "OPENAI_API_KEY", note: "GPT-4o" },
   { name: "Anthropic", env: "ANTHROPIC_API_KEY", note: "Claude 3.5" },
@@ -399,7 +403,7 @@ export default function SettingsOverlay({
     }
     return (
       <div className="setov__controls">
-        {KEYS[category].map((k) => {
+        {KEYS[category].filter((k) => k !== "voice.name").map((k) => {
           const v = draft[k];
           return (
             <div key={k} className="setov__row">
@@ -451,6 +455,12 @@ export default function SettingsOverlay({
         </header>
 
         {preview()}
+        {category === "voice" && (
+          <VoicePicker
+            value={String(draft["voice.name"] ?? "")}
+            onChange={(id) => set("voice.name", id)}
+          />
+        )}
         {controls()}
         {/* Output above (how AURA speaks), input below (how she hears you).
             Not part of the draft — it touches hardware, not settings. */}

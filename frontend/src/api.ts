@@ -91,6 +91,36 @@ export interface NatureInfo {
 
 export type Settings = Record<string, number | boolean | string>;
 
+/** One saved conversation. Mirrors memory/store.list_chat_sessions(). */
+export interface Chat {
+  id: number;
+  /** Never empty — auto-named from the first message until renamed. */
+  title: string;
+  created_at: string | null;
+  updated_at: string | null;
+  message_count: number;
+  /** true once the title was set explicitly rather than derived. */
+  named: boolean;
+}
+
+export interface ChatMessage {
+  role: string;
+  text: string;
+  created_at: string | null;
+}
+
+/** One voice AURA can speak with. Mirrors modules/voice_output.VOICES. */
+export interface Voice {
+  /** The edge-tts short name, e.g. "en-US-AvaMultilingualNeural". */
+  id: string;
+  /** Short human name shown in the picker, e.g. "Ava". */
+  name: string;
+  gender: "male" | "female";
+  accent: string;
+  /** One line on how it sounds. */
+  character: string;
+}
+
 // ── Quests ─────────────────────────────────────────────────────────────────
 export interface Quest {
   id: number;
@@ -360,6 +390,52 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ audio: wavBase64 }),
     }),
+
+  // Chats — named conversation sessions. Activating one moves AURA's context
+  // to it, so the reply you get next is informed by THAT conversation.
+  getChats: () => j<{ chats: Chat[]; active: number }>("/api/chats"),
+  newChat: (title?: string) =>
+    j<{ ok: boolean; id: number; chats: Chat[] }>("/api/chats", {
+      method: "POST",
+      body: JSON.stringify({ title }),
+    }),
+  openChat: (id: number) =>
+    j<{ ok: boolean; active: number; messages: ChatMessage[]; error?: string }>(
+      `/api/chats/${id}/activate`, { method: "POST" }),
+  renameChat: (id: number, title: string) =>
+    j<{ ok: boolean; chats: Chat[]; error?: string }>(`/api/chats/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    }),
+  deleteChat: (id: number) =>
+    j<{ ok: boolean; chats: Chat[]; active: number }>(`/api/chats/${id}`, {
+      method: "DELETE",
+    }),
+
+  // Voice — which voice AURA speaks with. The roster is served by the backend
+  // (modules/voice_output.VOICES) so the picker can never drift from what the
+  // speaking code actually supports.
+  getVoices: () =>
+    j<{ voices: Voice[]; selected: string; preview_line: string }>("/api/voice/voices"),
+
+  /** Render a sample of one voice. Returns an object URL the caller must
+   *  revoke when done — the response is raw mp3, not JSON. */
+  previewVoice: async (voice: string, text?: string): Promise<string> => {
+    const res = await fetch(BASE + "/api/voice/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ voice, text }),
+    });
+    if (!res.ok) {
+      let msg = `preview failed (${res.status})`;
+      try {
+        const body = await res.json();
+        if (body?.error) msg = body.error;
+      } catch { /* non-JSON error body — keep the status message */ }
+      throw new Error(msg);
+    }
+    return URL.createObjectURL(await res.blob());
+  },
 
   // App settings
   getSettings: () => j<{ settings: Settings }>("/api/settings").then((r) => r.settings),

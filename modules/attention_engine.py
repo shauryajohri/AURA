@@ -192,7 +192,11 @@ def _extract_filename(app: str) -> str:
 
 
 def _time_of_day() -> str:
+    """`h < 12` used to mean "morning", so AURA opened with "Morning." at
+    2:46 AM. The small hours are their own bucket now."""
     h = datetime.datetime.now().hour
+    if h < 5:
+        return "late_night"
     if h < 12:
         return "morning"
     if h < 17:
@@ -200,6 +204,21 @@ def _time_of_day() -> str:
     if h < 21:
         return "evening"
     return "night"
+
+
+# "late_night" is a good bucket key but a poor thing to hand an LLM — the
+# prompts read "It is late_night". These are what the model actually sees.
+_TIME_PHRASE = {
+    "late_night": "the middle of the night (past midnight, before 5am)",
+    "morning":    "morning",
+    "afternoon":  "afternoon",
+    "evening":    "evening",
+    "night":      "night",
+}
+
+
+def _time_phrase(env: dict) -> str:
+    return _TIME_PHRASE.get(env.get("time_of_day", ""), "day")
 
 
 def _detect_environment() -> dict:
@@ -303,7 +322,7 @@ def _llm_generate(stage: int, silence_seconds: float, env: dict) -> list | None:
         stage_name, num_lines, tone = stage_map.get(stage, ("curious", 1, "light"))
 
         prompt = ATTENTION_PROMPT.format(
-            time_of_day=env.get("time_of_day", "day"),
+            time_of_day=_time_phrase(env),
             app=env.get("app", "unknown"),
             filename=env.get("filename") or "unknown",
             activity=env.get("activity", "unknown"),
@@ -333,7 +352,7 @@ def _llm_presence(env: dict) -> list | None:
         from core.ai_router import call_groq, GROQ_MODEL_LIGHT
         trust = _get_trust()
         prompt = PRESENCE_PROMPT.format(
-            time_of_day=env.get("time_of_day", "day"),
+            time_of_day=_time_phrase(env),
             app=env.get("app", "unknown"),
             last_summary=_last_session_summary(),
             relationship=_relationship_word(trust),
@@ -350,10 +369,11 @@ def _llm_presence(env: dict) -> list | None:
 def _fallback_presence(env: dict) -> list:
     tod = env.get("time_of_day", "day")
     base = {
-        "morning":   ["Morning.", "Back at it?"],
-        "afternoon": ["Back at it?", "Afternoon."],
-        "evening":   ["Evening.", "Still going?"],
-        "night":     ["Late one tonight?", "Still up?"],
+        "morning":    ["Morning.", "Back at it?"],
+        "afternoon":  ["Back at it?", "Afternoon."],
+        "evening":    ["Evening.", "Still going?"],
+        "night":      ["Late one tonight?", "Still up?"],
+        "late_night": ["Still up?", "This is late, even for you."],
     }.get(tod, ["Back at it?"])
     line = random.choice(base)
     if env.get("activity") == "coding":

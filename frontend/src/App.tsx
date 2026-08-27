@@ -52,8 +52,8 @@ const LEGACY: Record<string, string> = {
 const PAGES = ["home", "memory", "tasks", "models", "settings", "labs"];
 
 export default function App() {
-  const { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, activity, send } =
-    useAuraSocket();
+  const { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, activity, send,
+          loadTurns, clearTurns } = useAuraSocket();
   const [collapsed, setCollapsed] = useLocalStorage<boolean>("aura.sidebarMin", false);
   const [rawView, setView] = useLocalStorage<string>("aura.view", "home");
   const view = PAGES.includes(rawView) ? rawView : LEGACY[rawView] ?? "home";
@@ -134,7 +134,8 @@ export default function App() {
               />
               <HomeStatusCard status={status} activeModelId={activeModelId} mode={mode} />
             </div>
-            <ChatDock status={status} turns={turns} onSend={send} auraState={auraState} />
+            <ChatDock status={status} turns={turns} onSend={send} auraState={auraState}
+                      onLoadTurns={loadTurns} onClearTurns={clearTurns} />
           </div>
         ) : (
           <div className="os-page page-fade" key={view}>

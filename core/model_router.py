@@ -21,8 +21,9 @@ class ModelSelection:
 # (ui/cosmos_panel.PLANETS) and the lock keys (core/model_lock), so a locked
 # planet in the UI maps to a model the router will actually skip.
 #
-# Provider is inferred from the id: an OpenRouter id contains a "/",
-# a Groq id does not.
+# Provider comes from ai_router.GROQ_MODEL_IDS — an explicit allow-list.
+# It is NOT inferred from the id shape any more: Groq's current ids
+# ("openai/gpt-oss-120b") contain a "/" just like OpenRouter's do.
 # ---------------------------------------------------------------------------
 
 # display name → model id
@@ -30,16 +31,19 @@ MODELS = {
     "Laguna M.1":       "poolside/laguna-m.1:free",
     "Nemotron 3 Super": "nvidia/nemotron-3-super-120b-a12b:free",
     "Gemma 4 31B":      "google/gemma-4-31b-it:free",
-    "Llama 3.3 70B":    "llama-3.3-70b-versatile",   # Groq (fallback / heavy)
-    "Llama 3.1 8B":     "llama-3.1-8b-instant",       # Groq (fast / light)
+    "GPT-OSS 120B":     "openai/gpt-oss-120b",        # Groq (fallback / heavy)
+    "GPT-OSS 20B":      "openai/gpt-oss-20b",         # Groq (fast / light)
 }
 NAME_FOR_ID = {mid: name for name, mid in MODELS.items()}
 
 # The two Groq models are the always-available fallback chain (fast + free),
 # used when the primary OpenRouter pick is locked, rate-limited, or errors.
+# These replaced llama-3.3-70b-versatile / llama-3.1-8b-instant, which Groq
+# decommissioned on 2026-08-16 (they started 404-ing mid-conversation and
+# took the whole fallback chain down with them).
 GROQ_FALLBACKS = [
-    ("Llama 3.3 70B", MODELS["Llama 3.3 70B"]),
-    ("Llama 3.1 8B",  MODELS["Llama 3.1 8B"]),
+    ("GPT-OSS 120B", MODELS["GPT-OSS 120B"]),
+    ("GPT-OSS 20B",  MODELS["GPT-OSS 20B"]),
 ]
 
 # intent → primary model (display name)
@@ -102,7 +106,7 @@ ROUTING_TABLE = [
      "OpenRouter free"),
 
     # Fast, cheap model for trivial tasks — stays on Groq's instant model
-    (30, None, MODELS["Llama 3.1 8B"], "Llama 3.1 8B",
+    (30, None, MODELS["GPT-OSS 20B"], "GPT-OSS 20B",
      "Simple task — the small instant model is faster",
      "Groq free"),
 
@@ -129,7 +133,9 @@ def select_model(complexity: int, domain: str = "GENERAL") -> ModelSelection:
     # Fallback
     return ModelSelection(
         model_id=DEFAULT_MODEL_ID,
-        display_name="Llama 3.3 70B (Groq)",
+        # Must describe DEFAULT_MODEL_ID — it used to say "Llama 3.3 70B
+        # (Groq)" while actually dispatching Gemma, so the UI chip lied.
+        display_name=NAME_FOR_ID.get(DEFAULT_MODEL_ID, "Gemma 4 31B"),
         reason="Fallback for unmatched routing",
         estimated_cost="free tier",
     )

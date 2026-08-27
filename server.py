@@ -141,6 +141,15 @@ def _start_auto_chat() -> None:
     from core.brain import speak_response, start_proactive
     from core.curiosity_engine import start_curiosity_loop
 
+    # Initialising the audio mixer costs a few hundred ms on Windows, and
+    # paying it on the first spoken word made AURA's opening line land well
+    # after its text had already appeared. Pay it up front instead.
+    try:
+        from modules import voice_output
+        voice_output.prewarm()
+    except Exception as e:  # noqa: BLE001
+        print(f"[AURA bridge] audio prewarm skipped: {e}")
+
     def speak_fn(text: str) -> None:
         try:
             speak_response(text, mode="CHAT")
@@ -339,8 +348,8 @@ _MODELS = [
     {"id": "laguna", "name": "Laguna M.1"},
     {"id": "nemotron", "name": "Nemotron 3 Super"},
     {"id": "gemma", "name": "Gemma 4 31B"},
-    {"id": "llama", "name": "Llama 3.3 70B"},
-    {"id": "llama8b", "name": "Llama 3.1 8B"},
+    {"id": "llama", "name": "GPT-OSS 120B"},
+    {"id": "llama8b", "name": "GPT-OSS 20B"},
     # Display-only constellation planets (not currently routed).
     {"id": "gpt4o", "name": "GPT-4o"},
     {"id": "gemini", "name": "Gemini 1.5 Pro"},
@@ -555,6 +564,126 @@ async def api_save_settings(req: Request) -> dict[str, Any]:
         return {"ok": False, "error": "settings object required"}
     store.set_settings(patch)
     return {"ok": True, "settings": store.get_settings()}
+
+
+# ── Chats: named conversation sessions ──────────────────────────────────────
+# One endless message stream had no boundaries, so "recent conversation" meant
+# "the last N rows" and turns from weeks ago could pass for the live chat.
+# A chat is a boundary the user can see, name and switch between — and the
+# ACTIVE chat is what scopes the context AURA is given.
+@app.get("/api/chats")
+async def api_chats() -> dict[str, Any]:
+    from memory import store
+    return {"chats": store.list_chat_sessions(), "active": store.active_session_id()}
+
+
+@app.post("/api/chats")
+async def api_chat_new(req: Request) -> dict[str, Any]:
+    from memory import store
+    try:
+        body = await req.json()
+    except Exception:  # noqa: BLE001 — an empty body is a perfectly good "new chat"
+        body = {}
+    sid = store.create_chat_session(str(body.get("title") or "") or None)
+    return {"ok": True, "id": sid, "chats": store.list_chat_sessions()}
+
+
+@app.get("/api/chats/{chat_id}/messages")
+async def api_chat_messages(chat_id: int) -> dict[str, Any]:
+    from memory import store
+    rows = store.get_session_messages(chat_id)
+    return {"messages": [{"role": r, "text": m, "created_at": t} for r, m, t in rows]}
+
+
+@app.post("/api/chats/{chat_id}/activate")
+async def api_chat_activate(chat_id: int) -> dict[str, Any]:
+    """Switch chats. This moves AURA's CONTEXT too — the next thing she reads
+    is this chat's history, not the one that was open before."""
+    from memory import store
+    if not store.set_active_chat_session(chat_id):
+        return {"ok": False, "error": "no such chat"}
+    # The in-RAM mirror belongs to the chat we just left; clearing it stops it
+    # bleeding into the reopened one.
+    try:
+        from core import brain
+        brain.reset_history()
+    except Exception:  # noqa: BLE001
+        pass
+    rows = store.get_session_messages(chat_id)
+    return {"ok": True, "active": chat_id,
+            "messages": [{"role": r, "text": m, "created_at": t} for r, m, t in rows]}
+
+
+@app.patch("/api/chats/{chat_id}")
+async def api_chat_rename(chat_id: int, req: Request) -> dict[str, Any]:
+    from memory import store
+    body = await req.json()
+    title = str(body.get("title") or "")
+    if not store.rename_chat_session(chat_id, title):
+        return {"ok": False, "error": "title required"}
+    return {"ok": True, "chats": store.list_chat_sessions()}
+
+
+@app.delete("/api/chats/{chat_id}")
+async def api_chat_delete(chat_id: int) -> dict[str, Any]:
+    from memory import store
+    store.delete_chat_session(chat_id)
+    try:
+        from core import brain
+        brain.reset_history()
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "chats": store.list_chat_sessions(),
+            "active": store.active_session_id()}
+
+
+# ── Voice: which voice AURA speaks with ─────────────────────────────────────
+# The roster lives in modules/voice_output so the picker, the CLI tool and the
+# speaking code can never drift apart. edge-tts voices are server-side, so
+# "installing" a voice is just storing its name.
+@app.get("/api/voice/voices")
+async def api_voices() -> dict[str, Any]:
+    from modules import voice_output
+    selected = ""
+    try:
+        selected = voice_output.resolve_voice("normal")
+    except Exception:  # noqa: BLE001
+        selected = voice_output.FALLBACK_VOICE
+    return {
+        "voices": voice_output.VOICES,
+        "selected": selected,
+        "preview_line": voice_output.PREVIEW_LINE,
+    }
+
+
+@app.post("/api/voice/preview")
+async def api_voice_preview(req: Request):
+    """Render a sample of one voice and hand the mp3 straight to the browser.
+
+    Runs in a thread: edge-tts is a blocking network call, and doing it on the
+    event loop would stall every websocket AURA is streaming through.
+    """
+    from fastapi.responses import JSONResponse, Response as _Response
+    from modules import voice_output
+
+    body = await req.json()
+    voice = str(body.get("voice") or "").strip()
+    text = body.get("text") or None
+    if not voice:
+        return JSONResponse({"ok": False, "error": "voice required"}, status_code=400)
+
+    loop = asyncio.get_running_loop()
+    try:
+        audio = await loop.run_in_executor(
+            None, lambda: voice_output.render_preview(voice, text))
+    except ValueError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        traceback.print_exc()
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=502)
+
+    return _Response(content=audio, media_type="audio/mpeg",
+                     headers={"Cache-Control": "no-store"})
 
 
 # ── Voice: speech-to-text fallback for the browser ──────────────────────────
@@ -833,6 +962,30 @@ def _send(ws: WebSocket, msg: dict[str, Any]):
     return ws.send_text(json.dumps(msg))
 
 
+def _voice_is_on() -> bool:
+    """Checked BEFORE announcing the speaking state, so a muted AURA doesn't
+    flash 'speaking' and needlessly gate the mic."""
+    try:
+        from modules import voice_output
+        return bool(voice_output._voice_settings().get("enabled", True))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _speak_reply(text: str) -> None:
+    """Say a chat answer out loud. Runs on a worker thread.
+
+    Until now NOTHING spoke the replies: only the proactive and attention
+    loops ever called TTS, so AURA greeted you out loud and then answered
+    your actual questions in silence. This is the missing half.
+    """
+    try:
+        from core.brain import speak_response
+        speak_response(text, mode="CHAT")
+    except Exception as e:  # noqa: BLE001 — a mute reply beats a broken turn
+        print(f"[AURA bridge] TTS skipped: {e}")
+
+
 async def _run_streaming(ws: WebSocket, brain_call: Callable[..., str]) -> None:
     """Run a blocking brain call in a thread, streaming its on_chunk output.
 
@@ -888,6 +1041,19 @@ async def _run_streaming(ws: WebSocket, brain_call: Callable[..., str]) -> None:
 
     done_text = (full or "") + "".join(code_blocks)
     await _send(ws, {"type": "done", "payload": {"text": done_text, "model": model}})
+
+    # Say it. `full` only — never the code blocks, because reading a diff
+    # aloud helps nobody. The state stays "speaking" for the duration so the
+    # UI shows it and the mic stays muted while she talks (otherwise she
+    # hears herself and answers her own sentence).
+    spoken = (full or "").strip()
+    if spoken and _voice_is_on():
+        await _send(ws, {"type": "state", "payload": {"state": "speaking"}})
+        try:
+            await loop.run_in_executor(None, lambda: _speak_reply(spoken))
+        except Exception:  # noqa: BLE001
+            traceback.print_exc()
+
     await _send(ws, {"type": "state", "payload": {"state": "idle"}})
 
 

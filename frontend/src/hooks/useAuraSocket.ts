@@ -199,5 +199,25 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
     ws.send(JSON.stringify(msg));
   }, []);
 
-  return { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, activity, send };
+  /** Replace the visible transcript — used when a saved chat is reopened or
+   *  a new one is started. The backend has already moved AURA's context; this
+   *  just makes the window agree with it. */
+  const loadTurns = useCallback(
+    (msgs: { role: string; text: string; created_at?: string | null }[]) => {
+      setTurns(
+        msgs.map((m) => ({
+          id: newId(),
+          role: m.role === "user" ? "user" : "aura",
+          text: m.text,
+          ts: m.created_at ? new Date(m.created_at).toLocaleTimeString(
+            "en-US", { hour: "numeric", minute: "2-digit", hour12: true }) : undefined,
+        })) as ChatTurn[]
+      );
+    },
+    []
+  );
+
+  const clearTurns = useCallback(() => setTurns([]), []);
+
+  return { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, activity, send, loadTurns, clearTurns };
 }

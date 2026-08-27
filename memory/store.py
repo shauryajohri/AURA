@@ -198,28 +198,282 @@ def mark_reminder_done(reminder_id: int):
     conn.commit()
     conn.close()
 
-def save_conversation(role: str, message: str):
-    conn = _connect()
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO conversations (role, message, created_at)
-        VALUES (?, ?, ?)
-    ''', (role, message, datetime.datetime.now().isoformat()))
-    conn.commit()
-    conn.close()
+# ── Chat sessions ────────────────────────────────────────────────────────────
+# Every message used to land in one endless `conversations` stream, which is
+# how a question from 2026-08-07 ended up being answered on 2026-08-20: the
+# "recent" turns were just the last N rows, and rows have no idea which
+# conversation they belonged to. Sessions give that stream boundaries the user
+# can see, name and switch between.
+#
+# The active session id lives in app_settings under "chat.active_session" —
+# reusing the settings table rather than inventing another piece of state.
 
-def get_recent_conversations(limit: int = 10) -> list:
+_ACTIVE_KEY = "chat.active_session"
+# What the pre-sessions backlog gets called, so old messages stay reachable
+# instead of being orphaned by the migration.
+_LEGACY_TITLE = "Earlier conversations"
+
+
+def _read_active_id(conn):
+    """The stored active-session id, or None.
+
+    Tolerates both storage shapes: this module writes the id raw ("5"), while
+    set_settings() JSON-encodes everything ('"5"'). Reading either means a
+    stray write through the generic settings API can't silently strand the
+    user in a brand-new empty chat.
+    """
+    row = conn.execute(
+        "SELECT value FROM app_settings WHERE key=?", (_ACTIVE_KEY,)).fetchone()
+    if not row or row[0] is None:
+        return None
+    raw = str(row[0]).strip().strip('"')
+    return int(raw) if raw.isdigit() else None
+
+
+def _ensure_chat_tables(conn) -> None:
+    """Create chat_sessions, add conversations.session_id, and adopt any
+    pre-existing messages into one legacy session. Idempotent."""
+    try:
+        # app_settings holds the active-session pointer, and this can run
+        # before anything has touched the settings panel.
+        conn.execute(_SETTINGS_DDL)
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS chat_sessions (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                title       TEXT,
+                created_at  TEXT,
+                updated_at  TEXT
+            )
+        ''')
+        have = {r[1] for r in conn.execute("PRAGMA table_info(conversations)")}
+        if "session_id" not in have:
+            conn.execute("ALTER TABLE conversations ADD COLUMN session_id INTEGER")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_conv_session ON conversations(session_id)")
+        # Adopt orphans. Runs once in practice, but stays correct if some
+        # older code path ever inserts without a session.
+        orphans = conn.execute(
+            "SELECT COUNT(*) FROM conversations WHERE session_id IS NULL").fetchone()[0]
+        if orphans:
+            row = conn.execute(
+                "SELECT id FROM chat_sessions WHERE title=?", (_LEGACY_TITLE,)).fetchone()
+            if row:
+                legacy_id = row[0]
+            else:
+                now = datetime.datetime.now().isoformat()
+                cur = conn.execute(
+                    "INSERT INTO chat_sessions (title, created_at, updated_at) VALUES (?,?,?)",
+                    (_LEGACY_TITLE, now, now))
+                legacy_id = cur.lastrowid
+            conn.execute(
+                "UPDATE conversations SET session_id=? WHERE session_id IS NULL", (legacy_id,))
+        conn.commit()
+    except Exception:  # noqa: BLE001 — never let a migration take the app down
+        pass
+
+
+def _title_from(message: str) -> str:
+    """A chat's name, taken from its first user message. Titles are editable,
+    so this only has to be a reasonable starting point."""
+    text = " ".join((message or "").split())
+    if len(text) > 42:
+        text = text[:42].rsplit(" ", 1)[0] + "…"
+    return text or "New chat"
+
+
+def active_session_id() -> int:
+    """The chat messages are being written to, creating one on first use."""
     conn = _connect()
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT role, message, created_at
-        FROM conversations
-        ORDER BY created_at DESC
-        LIMIT ?
-    ''', (limit,))
-    results = cursor.fetchall()
-    conn.close()
-    return list(reversed(results))
+    try:
+        _ensure_chat_tables(conn)
+        sid = _read_active_id(conn)
+        if sid is not None and conn.execute(
+                "SELECT 1 FROM chat_sessions WHERE id=?", (sid,)).fetchone():
+            return sid
+        now = datetime.datetime.now().isoformat()
+        cur = conn.execute(
+            "INSERT INTO chat_sessions (title, created_at, updated_at) VALUES (?,?,?)",
+            (None, now, now))
+        sid = cur.lastrowid
+        conn.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)",
+                     (_ACTIVE_KEY, str(sid)))
+        conn.commit()
+        return sid
+    finally:
+        conn.close()
+
+
+def set_active_chat_session(session_id: int) -> bool:
+    conn = _connect()
+    try:
+        _ensure_chat_tables(conn)
+        if not conn.execute("SELECT 1 FROM chat_sessions WHERE id=?", (session_id,)).fetchone():
+            return False
+        conn.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)",
+                     (_ACTIVE_KEY, str(int(session_id))))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def create_chat_session(title: str = None) -> int:
+    """Start a new chat and make it active.
+
+    If the chat already open is empty and unnamed, that IS a new chat — hand
+    it back instead of stacking another one. Otherwise every press of
+    "+ New chat" (and every fresh boot) would leave another blank entry in
+    the history list.
+    """
+    conn = _connect()
+    try:
+        _ensure_chat_tables(conn)
+        if not (title or "").strip():
+            current = _read_active_id(conn)
+            if current is not None:
+                row = conn.execute(
+                    "SELECT (SELECT COUNT(*) FROM conversations WHERE session_id=s.id), s.title "
+                    "FROM chat_sessions s WHERE s.id=?", (current,)).fetchone()
+                if row and row[0] == 0 and not (row[1] or "").strip():
+                    return current
+        now = datetime.datetime.now().isoformat()
+        cur = conn.execute(
+            "INSERT INTO chat_sessions (title, created_at, updated_at) VALUES (?,?,?)",
+            ((title or "").strip() or None, now, now))
+        sid = cur.lastrowid
+        conn.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)",
+                     (_ACTIVE_KEY, str(sid)))
+        conn.commit()
+        return sid
+    finally:
+        conn.close()
+
+
+def rename_chat_session(session_id: int, title: str) -> bool:
+    conn = _connect()
+    try:
+        _ensure_chat_tables(conn)
+        clean = " ".join((title or "").split())[:80]
+        if not clean:
+            return False
+        conn.execute("UPDATE chat_sessions SET title=? WHERE id=?", (clean, session_id))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def delete_chat_session(session_id: int) -> bool:
+    """Delete a chat and its messages. If it was the active one, the next
+    write simply starts a fresh session."""
+    conn = _connect()
+    try:
+        _ensure_chat_tables(conn)
+        conn.execute("DELETE FROM conversations WHERE session_id=?", (session_id,))
+        conn.execute("DELETE FROM chat_sessions WHERE id=?", (session_id,))
+        if _read_active_id(conn) == int(session_id):
+            conn.execute("DELETE FROM app_settings WHERE key=?", (_ACTIVE_KEY,))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def list_chat_sessions(limit: int = 60) -> list:
+    """[{id, title, created_at, updated_at, message_count, named}] newest
+    first. `title` is never empty — an unnamed, empty chat reads "New chat"."""
+    conn = _connect()
+    try:
+        _ensure_chat_tables(conn)
+        rows = conn.execute('''
+            SELECT s.id, s.title, s.created_at, s.updated_at,
+                   (SELECT COUNT(*) FROM conversations c WHERE c.session_id = s.id),
+                   (SELECT c.message FROM conversations c
+                     WHERE c.session_id = s.id AND c.role='user'
+                     ORDER BY c.id ASC LIMIT 1)
+            FROM chat_sessions s
+            ORDER BY s.updated_at DESC, s.id DESC
+            LIMIT ?
+        ''', (limit,)).fetchall()
+        out = []
+        for sid, title, created, updated, count, first in rows:
+            out.append({
+                "id": sid,
+                "title": (title or "").strip() or (_title_from(first) if first else "New chat"),
+                "created_at": created,
+                "updated_at": updated,
+                "message_count": count or 0,
+                "named": bool((title or "").strip()),
+            })
+        return out
+    finally:
+        conn.close()
+
+
+def get_session_messages(session_id: int, limit: int = 200) -> list:
+    """[(role, message, created_at)] oldest first, for reopening a chat."""
+    conn = _connect()
+    try:
+        _ensure_chat_tables(conn)
+        rows = conn.execute('''
+            SELECT role, message, created_at FROM conversations
+            WHERE session_id=? ORDER BY id DESC LIMIT ?
+        ''', (session_id, limit)).fetchall()
+        return list(reversed(rows))
+    finally:
+        conn.close()
+
+
+def save_conversation(role: str, message: str, session_id: int = None):
+    sid = session_id if session_id is not None else active_session_id()
+    conn = _connect()
+    try:
+        _ensure_chat_tables(conn)
+        now = datetime.datetime.now().isoformat()
+        conn.execute('''
+            INSERT INTO conversations (role, message, created_at, session_id)
+            VALUES (?, ?, ?, ?)
+        ''', (role, message, now, sid))
+        conn.execute("UPDATE chat_sessions SET updated_at=? WHERE id=?", (now, sid))
+        # Name the chat after its first user message, so the history list is
+        # readable without anyone having to name anything by hand.
+        if role == "user":
+            row = conn.execute(
+                "SELECT title FROM chat_sessions WHERE id=?", (sid,)).fetchone()
+            if row and not (row[0] or "").strip():
+                conn.execute("UPDATE chat_sessions SET title=? WHERE id=?",
+                             (_title_from(message), sid))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_recent_conversations(limit: int = 10, session_id: int = None) -> list:
+    """Recent turns from ONE chat — the active one unless told otherwise.
+
+    Scoped by session on purpose: this is what feeds AURA's prompt, and
+    bleeding another conversation into it is exactly the bug that had her
+    answering a 13-day-old question.
+    """
+    sid = session_id if session_id is not None else active_session_id()
+    conn = _connect()
+    try:
+        _ensure_chat_tables(conn)
+        # `id` is the tie-breaker, and it is NOT optional. save_conversation
+        # writes the user turn and AURA's reply microseconds apart, and they
+        # frequently land on the SAME created_at string — ordering by the
+        # timestamp alone let the answer come back before the question, so the
+        # transcript handed to the model read backwards.
+        results = conn.execute('''
+            SELECT role, message, created_at
+            FROM conversations
+            WHERE session_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+        ''', (sid, limit)).fetchall()
+        return list(reversed(results))
+    finally:
+        conn.close()
 
 
 # ── NEW: curiosity engine read-only helpers ──────────────────────────────────

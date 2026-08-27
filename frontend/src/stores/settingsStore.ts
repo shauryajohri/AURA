@@ -32,6 +32,8 @@ const DEFAULTS: Settings = {
   "orbits.width": 50,
   "orbits.style": "dashed",
   "voice.enabled": true,
+  // "" = no explicit choice; the backend picks (see voice_output.resolve_voice).
+  "voice.name": "",
   "voice.rate": 55,
   "voice.sensitivity": 55,
   "voice.wake_word": true,

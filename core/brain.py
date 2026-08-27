@@ -28,6 +28,17 @@ _last_user_message_time = 0
 _pending_observation = None
 
 
+def reset_history() -> None:
+    """Drop the in-RAM turn mirror.
+
+    Called when the user switches chats. `_history` is only a fallback for
+    when the store read fails, but it is NOT session-aware — left alone it
+    would carry the previous chat's turns into the one just opened, which is
+    the exact cross-talk sessions exist to prevent.
+    """
+    _history.clear()
+
+
 def get_last_user_message_time() -> float:
     return _last_user_message_time
 
@@ -300,23 +311,82 @@ def _is_context_junk(text: str) -> bool:
     return text.startswith("Task:") or any(j in text for j in _CTX_JUNK)
 
 
+# How long a silence has to be before the conversation counts as OVER.
+# Anything older than the gap belongs to a previous sitting and must not be
+# presented to the model as "recent conversation".
+SESSION_GAP_MINUTES = 45
+# Hard ceiling regardless of gaps — nothing older than this is ever "recent".
+SESSION_MAX_AGE_HOURS = 8
+
+
+def _parse_ts(ts) -> float | None:
+    """created_at (ISO string) → unix seconds. None when unparseable."""
+    if not ts:
+        return None
+    try:
+        import datetime as _dt
+        return _dt.datetime.fromisoformat(str(ts)).timestamp()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _recent_turns(max_turns: int = 8) -> str:
-    """Recent conversation as labelled lines.
+    """The CURRENT conversation as labelled lines — not merely the last N rows.
 
     Reads from the PERSISTED store, not the in-RAM `_history`. The store is
     the complete record — every branch (chat, RECALL, tasks, commands) calls
     `store.save_conversation`, and it survives restarts. This is what fixes
     the bug where AURA forgot things said one turn ago: `_history` was empty
     at launch and never recorded RECALL/command turns, so the model saw at
-    most the last 3 chat lines. Junk template blobs are filtered out."""
+    most the last 3 chat lines. Junk template blobs are filtered out.
+
+    ── Where the boundary comes from ────────────────────────────────────
+    Row count alone is NOT a conversation. On 2026-08-20 the user said
+    "its night mate check time 2 am" and got a paragraph about DNA storage:
+    the last 8 rows were from 2026-08-07, and two of them were an unanswered
+    "get me info about dna storage system". The model saw a transcript with
+    an open request in it and answered that instead of the live message.
+
+    There are now two defences, in order of authority:
+
+      1. `store.get_recent_conversations()` is scoped to the ACTIVE CHAT
+         SESSION. That is an explicit user boundary, so it is trusted
+         completely — reopening a chat from last week is *meant* to bring
+         that chat's context back, and applying a time cutoff on top would
+         hand the model an empty transcript for a conversation the user is
+         staring at.
+      2. Within one session, the silence rule still trims: a chat left open
+         for three days shouldn't present Monday's turns as if they were
+         part of the sentence being typed now. It only applies when the
+         session is long-dormant AND has fresh turns, never to a chat the
+         user has just deliberately opened.
+    """
     lines = []
     try:
-        for role, message, _ts in store.get_recent_conversations(max_turns * 2):
+        import time as _time
+        rows = store.get_recent_conversations(max_turns * 3)
+        now = _time.time()
+        newest = _parse_ts(rows[-1][2]) if rows else None
+        # Only police gaps if this session has been touched recently. If the
+        # whole chat is old, the user has just reopened it on purpose — show
+        # it, don't blank it.
+        police_gaps = newest is not None and (now - newest) < SESSION_MAX_AGE_HOURS * 3600
+        kept: list[tuple[str, str]] = []
+        newer_ts: float | None = None
+        # Newest first: keep walking back while the turns are still part of
+        # this same sitting, then stop dead.
+        for role, message, ts in reversed(rows):
+            when = _parse_ts(ts)
+            if police_gaps and when is not None:
+                if newer_ts is not None and (newer_ts - when) > SESSION_GAP_MINUTES * 60:
+                    break
+                newer_ts = when
             text = (message or "").strip()
             if not text or _is_context_junk(text):
                 continue
-            label = "User" if role == "user" else "AURA"
-            lines.append(f"{label}: {text[:400]}")
+            kept.append(("User" if role == "user" else "AURA", text[:400]))
+        for label, text in reversed(kept):
+            lines.append(f"{label}: {text}")
     except Exception:
         # Fall back to in-RAM history if the store read fails.
         for h in _history[-max_turns:]:
@@ -325,6 +395,37 @@ def _recent_turns(max_turns: int = 8) -> str:
                 label = "User" if h.get("role") == "user" else "AURA"
                 lines.append(f"{label}: {text[:400]}")
     return "\n".join(lines[-max_turns:])
+
+
+def part_of_day(hour: int) -> str:
+    """The human name for an hour. 2 AM is NOT morning — that mistake is what
+    had AURA opening with "Morning!" at 2:46 in the morning."""
+    if hour < 5:
+        return "the middle of the night"
+    if hour < 12:
+        return "morning"
+    if hour < 17:
+        return "afternoon"
+    if hour < 21:
+        return "evening"
+    return "night"
+
+
+def _now_block() -> str:
+    """The current date and time, stated plainly.
+
+    Nothing in the prompt used to say what time it was, so AURA greeted the
+    user with "Morning!" at 2:46 AM and had no way to answer "check the time".
+    """
+    import datetime as _dt
+    now = _dt.datetime.now()
+    part = part_of_day(now.hour)
+    line = (f"RIGHT NOW: {now:%A, %d %B %Y}, {now:%I:%M %p}"
+            f" — it is {part}.")
+    if now.hour < 5:
+        line += (" They are up in the small hours; do NOT say good morning,"
+                 " and do not push work at them unprompted.")
+    return line
 
 
 def _facts_block() -> str:
@@ -471,18 +572,33 @@ def build_context_prompt(query: str, intent: str, thought_context: str, comeback
     # time?" was answered by guessing — while the whole project graph (features,
     # tasks, decisions, commits, progress) sat in the same SQLite file. Compact
     # on ordinary turns; expanded when they're actually asking about the work.
+    #
+    # Gated as of 2026-08-20. It used to run on EVERY turn: the third tier of
+    # work_recall.prompt_section() is an unconditional per-project summary, so
+    # "hey" and "what time is it" both arrived carrying the project graph. That
+    # is what the user meant by "AURA should not read the whole context" — the
+    # message drowned in background. It now loads only when the turn is
+    # actually about the work.
     work_memory_section = ""
     try:
         from core import work_recall
-        if work_recall.is_work_question(query):
+        asked_about_work = work_recall.is_work_question(query)
+        names_a_project = bool(work_recall.find_project(query))
+        wants_work_context = (
+            asked_about_work
+            or names_a_project
+            or intent in {"CODING", "PLAN", "RESEARCH", "SEARCH", "RECALL"}
+        )
+        if asked_about_work:
             try:
                 from core import activity
                 activity.emit("Searching memory…", "memory")
             except Exception:  # noqa: BLE001
                 pass
-        block = work_recall.prompt_section(query)
-        if block:
-            work_memory_section = f"\n{block}"
+        if wants_work_context:
+            block = work_recall.prompt_section(query)
+            if block:
+                work_memory_section = f"\n{block}"
     except Exception as e:  # noqa: BLE001 — context is a bonus, never a blocker
         print(f"[AURA] work_recall skipped: {e}")
 
@@ -584,21 +700,43 @@ def build_context_prompt(query: str, intent: str, thought_context: str, comeback
             "back — here's...\"). One natural message.)"
         )
 
-    return f"""Recent conversation:
-{history_text}
-{facts_section}
-{work_memory_section}
-{identity_section}
-{screen_info}
-{thought_section}
-{work_section}
-{relationship_section}
-{v3_section}
-{language_rule}
-{no_code_rule}
-{comeback_rule}
+    # ── Assembly ────────────────────────────────────────────────────────
+    # Everything above is BACKGROUND. The live message is fenced off at the
+    # bottom under an unmistakable heading because it used to be a bare line
+    # trailing a wall of context — and the model answered an old unanswered
+    # request from the transcript instead of the thing just said.
+    history_block = (f"Earlier in this same conversation (background only):\n{history_text}"
+                     if history_text.strip() else "")
 
-{query}"""
+    background = "\n".join(
+        part for part in (
+            _now_block(),
+            history_block,
+            facts_section,
+            work_memory_section,
+            identity_section,
+            screen_info,
+            thought_section,
+            work_section,
+            relationship_section,
+            v3_section,
+            language_rule,
+            no_code_rule,
+            comeback_rule,
+        ) if part and part.strip()
+    )
+
+    return f"""{background}
+
+════════════════════════════════════════════════
+THE MESSAGE TO ANSWER IS THIS ONE, AND ONLY THIS ONE:
+
+{query}
+════════════════════════════════════════════════
+Reply to the message inside the box. Everything above it is background you
+may use, not a queue of things to answer — if an older request up there was
+never answered, it is NOT yours to answer now unless this message asks for
+it."""
 
 def anticipate(answer: str) -> str | None:
     prompt = ANTICIPATE_PROMPT.format(

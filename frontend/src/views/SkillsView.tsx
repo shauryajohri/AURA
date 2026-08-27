@@ -30,7 +30,7 @@ const SKILLS: Skill[] = [
   {
     icon: "❋", name: "Remember you",
     blurb: "Durable facts about you, conversation history and session recaps. She actually recalls — nothing is faked.",
-    routes: "Llama 3.1 8B", live: true,
+    routes: "GPT-OSS 20B", live: true,
   },
   {
     icon: "✓", name: "Manage tasks",
@@ -55,7 +55,7 @@ const SKILLS: Skill[] = [
   {
     icon: "✦", name: "Speak up on her own",
     blurb: "Proactive nudges, curiosity and attention — she starts conversations when something's worth saying.",
-    routes: "Llama 3.3 70B", live: true,
+    routes: "GPT-OSS 120B", live: true,
   },
   {
     icon: "▣", name: "Plan & organise projects",

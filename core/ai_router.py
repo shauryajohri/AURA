@@ -6,12 +6,27 @@ from core.personality import DONNA_SYSTEM_PROMPT, INTENT_PERSONALITY_ADJUSTMENTS
 
 load_dotenv()  # must be before os.getenv
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")  # get from console.groq.com
-GROQ_MODEL   = "llama-3.3-70b-versatile"
+# Groq decommissioned llama-3.3-70b-versatile and llama-3.1-8b-instant on
+# 2026-08-16 — every call started coming back 404 model_not_found. These are
+# the replacements Groq documents for them.
+GROQ_MODEL   = "openai/gpt-oss-120b"
 # Background/meta calls (classifier, think, anticipate, nudges, summaries)
 # run on the small model — Groq rate limits are PER MODEL, so this keeps
-# the whole 70B quota for actual user-facing replies (429s were eating chat).
-GROQ_MODEL_LIGHT = "llama-3.1-8b-instant"
+# the whole heavy-model quota for actual user-facing replies (429s were
+# eating chat).
+GROQ_MODEL_LIGHT = "openai/gpt-oss-20b"
 GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
+
+# Explicit registry of Groq-hosted model ids. Provider USED to be inferred
+# from the id shape ("contains a slash" => OpenRouter), but Groq's current
+# ids ("openai/gpt-oss-120b", "qwen/qwen3.6-27b") contain slashes too, so
+# that heuristic would silently send Groq traffic to OpenRouter with the
+# wrong key. Anything not listed here is treated as OpenRouter.
+GROQ_MODEL_IDS = {
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.6-27b",
+}
 
 # OpenRouter — OpenAI-compatible, so the same request/response shape works;
 # only the endpoint + key differ. User-facing chat/coding/research routes go
@@ -44,9 +59,12 @@ _last_model_used = GROQ_MODEL
 
 
 def _provider_for(model_id: str) -> str:
-    """OpenRouter ids look like 'vendor/model:free' (contain a slash); Groq
-    ids like 'llama-3.3-70b-versatile' don't."""
-    return "openrouter" if (model_id and "/" in model_id) else "groq"
+    """Groq ids are the ones in GROQ_MODEL_IDS; everything else is an
+    OpenRouter id. Do NOT go back to sniffing for a "/" — Groq ids have
+    slashes now too."""
+    if not model_id:
+        return "groq"
+    return "groq" if model_id in GROQ_MODEL_IDS else "openrouter"
 
 
 def _endpoint_for(model_id: str):
@@ -72,6 +90,24 @@ def _headers(provider: str, api_key: str) -> dict:
         h["HTTP-Referer"] = "https://aura.local"
         h["X-Title"] = "AURA"
     return h
+
+
+def _apply_reasoning_policy(body: dict, provider: str) -> dict:
+    """Keep private chain-of-thought out of `content`, mutating `body` in
+    place and returning it.
+
+    OpenRouter: ask the provider to drop reasoning server-side.
+    Groq: the gpt-oss models are reasoning models, so without
+    reasoning_format='hidden' their CoT can surface in the reply, and
+    without a low reasoning_effort the thinking eats the max_tokens budget
+    before the actual answer is emitted (short calls come back empty).
+    """
+    if provider == "openrouter":
+        body["reasoning"] = {"exclude": True}
+    else:
+        body["reasoning_format"] = "hidden"
+        body.setdefault("reasoning_effort", "low")
+    return body
 
 
 def _in_rate_limit_cooldown(provider: str = "groq") -> bool:
@@ -373,11 +409,11 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
         "temperature": 0.6 if is_longform else (0.5 if is_explain else (0.3 if is_coding else 0.7)),
         "stream": True
     }
-    # Reasoning models (Nemotron etc.) return their private chain-of-thought.
-    # On OpenRouter we tell the provider to DROP it server-side so it never
-    # arrives as content — the real root fix, not the regex band-aid below.
-    if provider == "openrouter":
-        body["reasoning"] = {"exclude": True}
+    # Reasoning models (Nemotron, gpt-oss) return their private
+    # chain-of-thought. We tell the provider to DROP it server-side so it
+    # never arrives as content — the real root fix, not the regex band-aid
+    # below.
+    _apply_reasoning_policy(body, provider)
     try:
         response = requests.post(
             url,
@@ -435,16 +471,20 @@ def call_classifier(prompt: str) -> str:
                 "Authorization": f"Bearer {GROQ_API_KEY}",
                 "Content-Type": "application/json"
             },
-            json={
-                "model": GROQ_MODEL_LIGHT,   # 1-word task — never burn 70B quota
+            json=_apply_reasoning_policy({
+                "model": GROQ_MODEL_LIGHT,   # 1-word task — never burn heavy quota
                 "messages": [
                     {"role": "system", "content": _CLASSIFIER_SYSTEM},
                     {"role": "user", "content": prompt}
                 ],
-                "max_tokens": 20,
+                # gpt-oss is a reasoning model: its hidden thinking counts
+                # against max_tokens, so the old ceiling of 20 truncated the
+                # run before the one-word answer was ever emitted. Headroom
+                # here costs nothing — the answer itself is still one word.
+                "max_tokens": 512,
                 "temperature": 0.1,
                 "stream": False
-            },
+            }, "groq"),
             timeout=15
         )
         if response.status_code == 429:
@@ -717,8 +757,18 @@ _META_STRONG_RE = _re_mod.compile(
     r"\b(?:so|thus|hence|therefore|ok(?:ay)?)[,:]?\s*(?:the\s+)?(?:final\s+)?"
     r"answer\s*[:\-]|"
     r"\b(?:final|short|concise|direct)\s+answer\s*[:\-]|"
+    # "…\s+say" optionally followed by "something like" / "it like": gpt-oss
+    # writes "We can say something like: "…"", which slipped straight through
+    # because the old pattern demanded the colon immediately after "say".
     r"\b(?:so|thus|hence|therefore)?\s*(?:we|i)\s+(?:can|could|should|shall|"
-    r"will|'ll|might)\s+say\s*[:,]|"
+    r"will|'ll|might)\s+say(?:\s+(?:something|sth|it|this|that))?"
+    r"(?:\s+like)?\s*[:,]|"
+    # gpt-oss's planning voice: it narrates the shape of the reply before
+    # writing it — "We can respond with a brief comment", "No meta.",
+    # "No question at end." None of these are ever the answer.
+    r"we (?:can|could|should|will|'ll) (?:respond|reply|answer) with\b|"
+    r"(?:^|[.!?]\s*)no meta\b|"
+    r"(?:^|[.!?]\s*)no question at (?:the )?end\b|"
     # The hedged handover — "Probably: "Start by pulling the latest main…"".
     # Same seam, worn as a guess instead of a conclusion.
     r"(?:^|[.!?])\s*(?:probably|perhaps|maybe|likely|something like|"
@@ -758,7 +808,11 @@ _SEAM_RE = _re_mod.compile(
     r"|(?:final|short|concise|direct)\s+answer"
     r"|(?:so|thus|hence|therefore)[,:]?\s*(?:we|i)\s+"
     r"(?:can|could|should|shall|will|'ll|might)\s+say"
+    r"(?:\s+(?:something|sth|it|this|that))?(?:\s+like)?"
     r"|(?:we|i)\s+(?:can|could|should|shall|will|'ll)\s+say"
+    # "We can say SOMETHING LIKE: "…"" — gpt-oss's habitual handover. Without
+    # the optional tail the seam missed and the whole deliberation shipped.
+    r"(?:\s+(?:something|sth|it|this|that))?(?:\s+like)?"
     r")"
     r"\s*[:\-—]\s*"
 )
@@ -1289,7 +1343,7 @@ def call_groq_raw(prompt: str, system: str, max_tokens: int = 1024,
         response = requests.post(
             url,
             headers=_headers(provider, api_key),
-            json={
+            json=_apply_reasoning_policy({
                 "model": model_id,
                 "messages": [
                     {"role": "system", "content": system},
@@ -1298,7 +1352,7 @@ def call_groq_raw(prompt: str, system: str, max_tokens: int = 1024,
                 "max_tokens": max_tokens,
                 "temperature": temperature,
                 "stream": False
-            },
+            }, provider),
             timeout=45
         )
         if response.status_code == 429:
@@ -1350,7 +1404,7 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
         response = requests.post(
             url,
             headers=_headers(provider, api_key),
-            json={
+            json=_apply_reasoning_policy({
                 "model": model_id,
                 "messages": [
                     {"role": "system", "content": strict_system},
@@ -1360,7 +1414,7 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
                 "max_tokens": 2048 if (is_coding or is_longform) else (1024 if is_explain else (600 if is_personal else 400)),
                 "temperature": 0.6 if is_longform else (0.5 if is_explain else (0.3 if is_coding else 0.7)),
                 "stream": False
-            },
+            }, provider),
             timeout=60 if (is_longform or is_explain) else 30
         )
         print(f"[AURA {provider} Debug] Status: {response.status_code} | Intent: {intent} | Model: {model_id}")

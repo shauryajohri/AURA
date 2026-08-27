@@ -22,6 +22,7 @@ const TasksPage = lazy(() => import("./views/TasksPage"));
 const ModelsPage = lazy(() => import("./views/ModelsPage"));
 const SettingsView = lazy(() => import("./views/SettingsView"));
 const LabsPage = lazy(() => import("./views/LabsPage"));
+const ChatsPage = lazy(() => import("./views/ChatsPage"));
 
 /** Shown for the instant a lazy page is fetched — a calm pulse, never a jolt. */
 function PageLoading() {
@@ -49,7 +50,7 @@ const LEGACY: Record<string, string> = {
   skills: "models",
   analytics: "models",
 };
-const PAGES = ["home", "memory", "tasks", "models", "settings", "labs"];
+const PAGES = ["home", "chats", "memory", "tasks", "models", "settings", "labs"];
 
 export default function App() {
   const { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, activity, send,
@@ -87,6 +88,9 @@ export default function App() {
 
   const renderPage = () => {
     switch (view) {
+      case "chats":
+        // Same socket as the dock — one conversation, two places to see it.
+        return <ChatsPage onSend={send} />;
       case "memory":
         return <MemoryPage />;
       case "tasks":

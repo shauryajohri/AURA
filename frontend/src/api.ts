@@ -103,6 +103,22 @@ export interface Chat {
   named: boolean;
 }
 
+/** A room: what a set of chats is ABOUT. Chats live inside one. */
+export interface Room {
+  id: number;
+  name: string;
+  icon: string;
+  accent: string;
+  topic: string;
+  keywords: string[];
+  system_hint: string;
+  auto_switch: boolean;
+  position: number;
+  /** How many chats are filed in here. */
+  chats: number;
+  created_at: string | null;
+}
+
 export interface ChatMessage {
   role: string;
   text: string;
@@ -391,6 +407,32 @@ export const api = {
       body: JSON.stringify({ audio: wavBase64 }),
     }),
 
+  // Rooms — the subject a set of chats belongs to. Entering one resumes its
+  // most recent chat, so a room is never a conversation of its own.
+  getRooms: () => j<{ rooms: Room[]; active: number | null }>("/api/rooms"),
+  newRoom: (patch: Partial<Room>) =>
+    j<{ ok: boolean; id?: number; error?: string; rooms: Room[] }>("/api/rooms", {
+      method: "POST",
+      body: JSON.stringify(patch),
+    }),
+  updateRoom: (id: number, patch: Partial<Room>) =>
+    j<{ ok: boolean; rooms: Room[] }>(`/api/rooms/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  deleteRoom: (id: number) =>
+    j<{ ok: boolean; rooms: Room[]; chats: Chat[] }>(`/api/rooms/${id}`, { method: "DELETE" }),
+  getRoomChats: (id: number) =>
+    j<{ chats: Chat[] }>(`/api/rooms/${id}/chats`).then((r) => r.chats),
+  enterRoom: (id: number) =>
+    j<{ ok: boolean; room_id: number; active: number; messages: ChatMessage[]; error?: string }>(
+      `/api/rooms/${id}/enter`, { method: "POST" }),
+  setChatRoom: (chatId: number, roomId: number | null) =>
+    j<{ ok: boolean; rooms: Room[]; chats: Chat[] }>(`/api/chats/${chatId}/room`, {
+      method: "POST",
+      body: JSON.stringify({ room_id: roomId }),
+    }),
+
   // Chats — named conversation sessions. Activating one moves AURA's context
   // to it, so the reply you get next is informed by THAT conversation.
   getChats: () => j<{ chats: Chat[]; active: number }>("/api/chats"),
@@ -399,6 +441,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ title }),
     }),
+  /** A chat's transcript without switching to it — for reading back. */
+  getChatMessages: (id: number) =>
+    j<{ messages: ChatMessage[] }>(`/api/chats/${id}/messages`).then((r) => r.messages),
   openChat: (id: number) =>
     j<{ ok: boolean; active: number; messages: ChatMessage[]; error?: string }>(
       `/api/chats/${id}/activate`, { method: "POST" }),

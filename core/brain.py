@@ -708,9 +708,28 @@ def build_context_prompt(query: str, intent: str, thought_context: str, comeback
     history_block = (f"Earlier in this same conversation (background only):\n{history_text}"
                      if history_text.strip() else "")
 
+    # Which ROOM this chat is filed under. A chat titled from its first message
+    # says nothing about how to behave; its room does — "teach, don't just
+    # answer" belongs to Japanese Study, not to any one conversation in it.
+    # Unfiled chats get nothing extra, exactly as before.
+    room_section = ""
+    try:
+        from memory import store as _store
+        _room = _store.active_room()
+        if _room and _room.get("name"):
+            bits = [f'You are in the "{_room["name"]}" room.']
+            if _room.get("topic"):
+                bits.append(_room["topic"])
+            if _room.get("system_hint"):
+                bits.append(_room["system_hint"])
+            room_section = "(" + " ".join(bits) + ")"
+    except Exception:  # noqa: BLE001 - context is a bonus, never a blocker
+        pass
+
     background = "\n".join(
         part for part in (
             _now_block(),
+            room_section,
             history_block,
             facts_section,
             work_memory_section,

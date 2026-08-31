@@ -669,6 +669,24 @@ async def api_chat_new(req: Request) -> dict[str, Any]:
     return {"ok": True, "id": sid, "chats": store.list_chat_sessions()}
 
 
+@app.post("/api/chats/clear")
+async def api_chats_clear() -> dict[str, Any]:
+    """Wipe all chat history — every message and every chat session. Rooms
+    stay (empty). The next message opens a fresh chat. Settings → Privacy
+    calls this; it always confirms first."""
+    from memory import store
+    removed = store.clear_all_chats()
+    try:
+        from core import brain
+        brain.reset_history()
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "removed": removed,
+            "chats": store.list_chat_sessions(),
+            "active": store.active_session_id(),
+            "rooms": store.list_rooms()}
+
+
 @app.get("/api/chats/{chat_id}/messages")
 async def api_chat_messages(chat_id: int) -> dict[str, Any]:
     from memory import store

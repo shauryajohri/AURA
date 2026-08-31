@@ -1368,6 +1368,72 @@ def call_groq_raw(prompt: str, system: str, max_tokens: int = 1024,
         return "CONNECTION_ERROR"
 
 
+def call_planner(prompt: str, system: str, model: str = None) -> str:
+    """A single deterministic call for AURA's tool/lookup planner (core/tool_loop).
+
+    Same clean shape as call_groq_raw, with one extra: Groq's gpt-oss models
+    keep deciding to emit a NATIVE tool call even though this path sends no
+    tools array, so Groq answers 400 `tool_use_failed` — but the body's
+    `failed_generation` field still carries the call the model wanted. We
+    reconstruct it as a plain `FETCH: <name> <json>` line so the shim reads
+    it the same as any other. Anything unrecoverable comes back as a sentinel.
+    """
+    import json as _json
+
+    model_id = model or GROQ_MODEL_LIGHT
+    provider, url, api_key = _endpoint_for(model_id)
+    cd_key = _cooldown_key(provider, model_id)
+    if _in_rate_limit_cooldown(cd_key):
+        return "RATE_LIMIT"
+    try:
+        response = requests.post(
+            url,
+            headers=_headers(provider, api_key),
+            json=_apply_reasoning_policy({
+                "model": model_id,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
+                "max_tokens": 160,
+                "temperature": 0.0,
+                "stream": False,
+            }, provider),
+            timeout=30,
+        )
+        if response.status_code == 429:
+            _start_rate_limit_cooldown(cd_key)
+            return "RATE_LIMIT"
+
+        try:
+            data = response.json()
+        except Exception:  # noqa: BLE001
+            return "CONNECTION_ERROR"
+
+        if "choices" in data:
+            return (data["choices"][0]["message"].get("content") or "").strip()
+
+        # Recover a native tool call the model made despite no tools array.
+        err = (data or {}).get("error") or {}
+        if err.get("code") == "tool_use_failed" and err.get("failed_generation"):
+            try:
+                gen = _json.loads(err["failed_generation"])
+                name = str(gen.get("name") or "").split(".")[-1].strip()
+                arguments = gen.get("arguments")
+                if isinstance(arguments, str):
+                    arguments = _json.loads(arguments or "{}")
+                if name:
+                    return f"FETCH: {name} {_json.dumps(arguments or {})}"
+            except Exception:  # noqa: BLE001
+                pass
+
+        print(f"[AURA] planner API error (status {response.status_code}): {data}")
+        return "CONNECTION_ERROR"
+    except Exception as e:  # noqa: BLE001
+        print(f"[AURA] planner error: {e}")
+        return "CONNECTION_ERROR"
+
+
 def call_groq(prompt: str, system: str = DONNA_SYSTEM_PROMPT, intent: str = "CASUAL", model: str = None) -> str:
     model_id = model or GROQ_MODEL
     provider, url, api_key = _endpoint_for(model_id)

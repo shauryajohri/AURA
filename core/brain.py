@@ -530,7 +530,7 @@ def scan_for_errors(query: str) -> dict | None:
     return hint
 
 
-def build_context_prompt(query: str, intent: str, thought_context: str, comeback: str | None = None) -> str:
+def build_context_prompt(query: str, intent: str, thought_context: str, comeback: str | None = None, looked_up: str = "") -> str:
     history_text = _recent_turns(8)
     facts_text = _facts_block()
 
@@ -726,10 +726,21 @@ def build_context_prompt(query: str, intent: str, thought_context: str, comeback
     except Exception:  # noqa: BLE001 - context is a bonus, never a blocker
         pass
 
+    # What AURA fetched with a tool THIS turn (core/tool_loop). Live reads —
+    # git state, code excerpts, project memory — so they outrank the recent
+    # chat history above, which is only a rolling mirror.
+    looked_up_section = ""
+    if looked_up and looked_up.strip():
+        looked_up_section = (
+            "WHAT YOU JUST LOOKED UP (live tool results — treat as current fact):\n"
+            + looked_up.strip()
+        )
+
     background = "\n".join(
         part for part in (
             _now_block(),
             room_section,
+            looked_up_section,
             history_block,
             facts_section,
             work_memory_section,
@@ -1130,7 +1141,17 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
         # the classifier alone could decide CODING for a mere statement of
         # intent and generate unsolicited code past the permission gate.
         intent = intent_hint or classify_intent(query)
-        full_prompt = build_context_prompt(query, intent, "", comeback=comeback_hint)
+        # Tool phase: let AURA fetch what this turn needs (repo state, code,
+        # project memory) before the answer is written. Gated + best-effort —
+        # see core/tool_loop; a failure here leaves the turn exactly as it was.
+        looked_up = ""
+        try:
+            from core import tool_loop
+            looked_up = tool_loop.gather_context(query, intent)
+        except Exception as e:  # noqa: BLE001
+            print(f"[AURA] tool phase skipped: {e}")
+        full_prompt = build_context_prompt(query, intent, "", comeback=comeback_hint,
+                                           looked_up=looked_up)
     if intent in {"RECALL", "SAVE"}:
         result = process(query)
         if on_chunk:

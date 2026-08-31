@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Settings } from "../../api";
+import { api, Settings } from "../../api";
 import { Layout, ColId, Size, CARD_TITLES, DEFAULT_LAYOUT } from "./layoutTypes";
 import MicCheck from "../MicCheck";
 import VoicePicker from "./VoicePicker";
@@ -462,6 +462,9 @@ export default function SettingsOverlay({
           />
         )}
         {controls()}
+        {/* Privacy is also where you wipe the record. It's an action, not a
+            setting, so it lives outside the draft/save flow. */}
+        {category === "privacy" && <ClearHistory />}
         {/* Output above (how AURA speaks), input below (how she hears you).
             Not part of the draft — it touches hardware, not settings. */}
         {category === "voice" && <MicCheck />}
@@ -473,6 +476,65 @@ export default function SettingsOverlay({
           </button>
         </footer>
       </div>
+    </div>
+  );
+}
+
+// ── Clear chat history ──────────────────────────────────────────────────────
+// Deletes every chat and message across every room. Rooms themselves stay —
+// they hold the briefs you set up, and an empty room is still a place to
+// begin again. Two-step (button → confirm) because it can't be undone, then a
+// reload so nothing in the app is left holding a chat id that no longer exists.
+function ClearHistory() {
+  const [phase, setPhase] = useState<"idle" | "confirm" | "working" | "done" | "error">("idle");
+  const [removed, setRemoved] = useState<{ messages: number; chats: number } | null>(null);
+
+  const run = async () => {
+    setPhase("working");
+    try {
+      const r = await api.clearAllChats();
+      setRemoved(r.removed);
+      setPhase("done");
+      window.setTimeout(() => window.location.reload(), 1400);
+    } catch {
+      setPhase("error");
+    }
+  };
+
+  return (
+    <div className="setov__danger">
+      <div className="setov__dangerinfo">
+        <span className="setov__label">Clear chat history</span>
+        <p className="setov__hint">
+          Permanently deletes every chat and message in every room. The rooms
+          stay, just empty. This cannot be undone.
+        </p>
+      </div>
+
+      {phase === "idle" && (
+        <button className="setov__dangerbtn" onClick={() => setPhase("confirm")}>
+          Clear history…
+        </button>
+      )}
+      {phase === "confirm" && (
+        <div className="setov__dangerrow">
+          <span className="setov__hint">Delete everything?</span>
+          <button className="setov__cancel" onClick={() => setPhase("idle")}>Keep it</button>
+          <button className="setov__dangerbtn" onClick={run}>Delete all</button>
+        </div>
+      )}
+      {phase === "working" && <span className="setov__hint">Clearing…</span>}
+      {phase === "done" && (
+        <span className="setov__hint">
+          Cleared {removed?.messages ?? 0} messages across {removed?.chats ?? 0} chats. Reloading…
+        </span>
+      )}
+      {phase === "error" && (
+        <div className="setov__dangerrow">
+          <span className="setov__hint">Couldn't reach the brain — is server.py running?</span>
+          <button className="setov__cancel" onClick={() => setPhase("idle")}>Back</button>
+        </div>
+      )}
     </div>
   );
 }

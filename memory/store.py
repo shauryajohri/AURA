@@ -379,6 +379,31 @@ def delete_chat_session(session_id: int) -> bool:
         conn.close()
 
 
+def clear_all_chats() -> dict:
+    """Wipe every chat and every message, across all rooms.
+
+    Rooms (the folders) are deliberately kept — they carry the briefs the user
+    set up, and an empty room is still a place to start again. The active-chat
+    pointer is dropped so the next message opens a clean session.
+
+    Returns {"messages": n, "chats": n} — what was removed, for the UI to
+    confirm the wipe actually happened.
+    """
+    conn = _connect()
+    try:
+        _ensure_chat_tables(conn)
+        _ensure_room_tables(conn)
+        msgs = conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0]
+        chats = conn.execute("SELECT COUNT(*) FROM chat_sessions").fetchone()[0]
+        conn.execute("DELETE FROM conversations")
+        conn.execute("DELETE FROM chat_sessions")
+        conn.execute("DELETE FROM app_settings WHERE key=?", (_ACTIVE_KEY,))
+        conn.commit()
+        return {"messages": msgs, "chats": chats}
+    finally:
+        conn.close()
+
+
 def list_chat_sessions(limit: int = 60) -> list:
     """[{id, title, created_at, updated_at, message_count, named}] newest
     first. `title` is never empty — an unnamed, empty chat reads "New chat"."""

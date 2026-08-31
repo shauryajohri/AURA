@@ -1,0 +1,355 @@
+import difflib
+import os
+import re
+import subprocess
+import time
+from pathlib import Path
+
+from modules import screen_reader
+from modules.csv_handler import LOOK_AT_PATTERN, STATUS_TRIGGERS
+
+APP_CACHE_TTL = 300
+EXECUTABLE_EXTENSIONS = {".exe", ".bat", ".cmd", ".com"}
+SHORTCUT_EXTENSIONS = {".lnk", ".url"}
+
+_app_cache = {}
+_last_scan_time = 0
+
+
+def _clean_name(name: str) -> str:
+    name = Path(name).stem.lower()
+    for token in [" app", " shortcut", " launcher", " browser"]:
+        name = name.replace(token, "")
+    return " ".join(name.replace("_", " ").replace("-", " ").split())
+
+
+def _add_candidate(index: dict, name: str, path: str):
+    clean = _clean_name(name)
+    if not clean or not path:
+        return
+
+    index.setdefault(clean, path)
+    compact = clean.replace(" ", "")
+    if compact != clean:
+        index.setdefault(compact, path)
+
+
+def _safe_iterdir(folder: Path):
+    try:
+        yield from folder.iterdir()
+    except Exception:
+        return
+
+
+def _scan_path_apps(index: dict):
+    for folder in os.environ.get("PATH", "").split(os.pathsep):
+        if not folder:
+            continue
+        path_folder = Path(folder)
+        if not path_folder.exists():
+            continue
+        for item in _safe_iterdir(path_folder):
+            if item.is_file() and item.suffix.lower() in EXECUTABLE_EXTENSIONS:
+                _add_candidate(index, item.name, str(item))
+
+
+def _scan_start_menu(index: dict):
+    folders = [
+        Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs",
+        Path(os.environ.get("PROGRAMDATA", "")) / "Microsoft/Windows/Start Menu/Programs",
+        Path(os.environ.get("PUBLIC", "")) / "Desktop",
+        Path.home() / "Desktop",
+    ]
+    for folder in folders:
+        if not folder.exists():
+            continue
+        try:
+            for item in folder.rglob("*"):
+                if item.is_file() and item.suffix.lower() in SHORTCUT_EXTENSIONS:
+                    _add_candidate(index, item.name, str(item))
+        except Exception:
+            continue
+
+
+def _scan_common_install_dirs(index: dict):
+    roots = [
+        os.environ.get("ProgramFiles"),
+        os.environ.get("ProgramFiles(x86)"),
+        os.environ.get("LOCALAPPDATA"),
+        os.environ.get("APPDATA"),
+    ]
+    skip_dirs = {
+        "windows", "microsoft", "packages", "temp", "cache", "__pycache__",
+        "node_modules", "python", "site-packages"
+    }
+
+    for root in [Path(r) for r in roots if r]:
+        if not root.exists():
+            continue
+
+        for current, dirs, files in os.walk(root):
+            current_path = Path(current)
+            depth = len(current_path.relative_to(root).parts)
+            if depth > 4:
+                dirs[:] = []
+                continue
+
+            dirs[:] = [
+                d for d in dirs
+                if d.lower() not in skip_dirs and not d.startswith(".")
+            ]
+
+            for filename in files:
+                path = current_path / filename
+                if path.suffix.lower() in EXECUTABLE_EXTENSIONS:
+                    _add_candidate(index, filename, str(path))
+
+
+def _scan_app_paths(index: dict):
+    try:
+        import winreg
+    except Exception:
+        return
+
+    registry_roots = [
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\App Paths"),
+        (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\App Paths"),
+    ]
+
+    for hive, key_path in registry_roots:
+        try:
+            with winreg.OpenKey(hive, key_path) as key:
+                for i in range(winreg.QueryInfoKey(key)[0]):
+                    app_key_name = winreg.EnumKey(key, i)
+                    with winreg.OpenKey(key, app_key_name) as app_key:
+                        app_path = winreg.QueryValue(app_key, None)
+                        _add_candidate(index, app_key_name, app_path)
+        except Exception:
+            continue
+
+
+def scan_apps(force: bool = False) -> dict:
+    global _app_cache, _last_scan_time
+
+    now = time.time()
+    if _app_cache and not force and now - _last_scan_time < APP_CACHE_TTL:
+        return _app_cache
+
+    index = {}
+    _scan_app_paths(index)
+    _scan_start_menu(index)
+    _scan_path_apps(index)
+    _scan_common_install_dirs(index)
+
+    _app_cache = index
+    _last_scan_time = now
+    print(f"[AURA] App scan indexed {len(index)} launch targets")
+    return _app_cache
+
+
+def _find_app(app_name: str) -> tuple[str, str] | None:
+    query = _clean_name(app_name)
+    if not query:
+        return None
+
+    apps = scan_apps()
+    compact_query = query.replace(" ", "")
+
+    for key in [query, compact_query]:
+        if key in apps:
+            return key, apps[key]
+
+    for key, path in apps.items():
+        if query in key or compact_query in key.replace(" ", ""):
+            return key, path
+
+    matches = difflib.get_close_matches(query, apps.keys(), n=1, cutoff=0.74)
+    if matches:
+        match = matches[0]
+        return match, apps[match]
+
+    return None
+
+
+def _launch(path: str):
+    if path.lower().endswith(tuple(SHORTCUT_EXTENSIONS)):
+        os.startfile(path)
+    else:
+        subprocess.Popen([path], shell=False)
+
+
+def open_app(app_name: str) -> str:
+    app_name_clean = app_name.strip()
+    found = _find_app(app_name_clean)
+
+    if found:
+        matched_name, path = found
+        try:
+            _launch(path)
+            return f"Opening {matched_name.title()}."
+        except Exception as e:
+            return f"I found {matched_name}, but couldn't open it: {e}"
+
+    try:
+        subprocess.Popen([app_name_clean], shell=False)
+        return f"Trying to open {app_name_clean}."
+    except Exception:
+        pass
+
+    try:
+        subprocess.Popen([app_name_clean + ".exe"], shell=False)
+        return f"Trying to open {app_name_clean}."
+    except Exception:
+        return f"I couldn't find {app_name_clean} on your system. Try saying the full app name once."
+
+
+def _clean_window_title(title: str, target: str) -> str:
+    title = " ".join((title or "").split())
+    target_lower = target.lower()
+    parts = [p.strip() for p in re.split(r"\s[-|—–]\s", title) if p.strip()]
+    useful = [
+        p for p in parts
+        if target_lower not in p.lower()
+        and p.lower() not in {"new tab", "comet", "google chrome", "visual studio code"}
+    ]
+    return useful[0] if useful else title
+
+
+def describe_open_window(target: str) -> str:
+    window = screen_reader.find_window(target)
+    if not window:
+        return f"I can't find a window for {target} right now."
+
+    context = screen_reader.get_screen_context(target)
+    page = _clean_window_title(window.title, target)
+    visible = " ".join(context.get("visible_text", "").split())
+
+    if visible:
+        return f"{target.title()} is showing {page}. I can see: {visible[:220]}"
+    return f"{target.title()} is showing {page}."
+
+
+AFK_QUERY_PATTERN = re.compile(r"\bafk\b")
+
+
+def _format_duration(seconds: float) -> str:
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds} seconds"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes} minute{'s' if minutes != 1 else ''}"
+    hours = minutes // 60
+    rem_minutes = minutes % 60
+    if rem_minutes:
+        return f"{hours}h {rem_minutes}m"
+    return f"{hours} hour{'s' if hours != 1 else ''}"
+
+
+def describe_afk_status() -> str:
+    try:
+        from modules.proactive import get_afk_status
+    except Exception as e:
+        return f"Can't check AFK status right now: {e}"
+
+    status = get_afk_status()
+
+    if status["is_afk"]:
+        return f"You've been AFK for {_format_duration(status['idle_seconds'])}."
+    if status["last_afk_gap_seconds"] >= 20:
+        return f"You were away for about {_format_duration(status['last_afk_gap_seconds'])} just now."
+    return "You haven't been AFK — been active this whole time."
+
+
+# ── "open X" vs someone just using the word "start" ─────────────────────────
+# The old test was `"start " in q` — ANYWHERE in the message. So
+#   "yes so lets start with wasabikiri upgrade disscussion"
+# was read as a launch command for an app called "with wasabikiri upgrade
+# disscussion", and AURA answered "I couldn't find … on your system. Try
+# saying the full app name once." mid-conversation (seen live 2026-07-31).
+#
+# Three guards now, all needed:
+#   1. The verb must OPEN the message (after an optional polite lead-in).
+#      "lets start with X" doesn't, so it's conversation.
+#   2. What follows can't begin with a preposition — "start WITH the
+#      discussion" and "run THROUGH the plan" are English, not commands.
+#   3. An app name is short. A sentence isn't.
+_OPEN_RE = re.compile(
+    r"^\s*(?:(?:hey|ok|okay|yo)\s+)?(?:aura[,\s]+)?"
+    r"(?:can you |can u |could you |would you |please |pls |just )*"
+    r"(?:open|launch|start|run|fire up|boot|bring up)\s+"
+    r"(?P<rest>.+?)\s*[?.!]*$",
+    re.IGNORECASE,
+)
+
+# Words that mean the "verb" was ordinary English, not an instruction.
+_NOT_AN_APP_HEAD = {
+    "with", "on", "off", "about", "by", "from", "to", "into", "through",
+    "over", "up", "out", "again", "working", "work", "discussing", "talking",
+    "thinking", "planning", "building", "coding", "fixing", "learning",
+    "doing", "it", "that", "this", "there", "here", "now", "today", "then",
+    "the", "a", "an", "my", "our", "some", "another", "next", "first",
+}
+
+MAX_APP_NAME_WORDS = 4
+
+
+def _launch_target(q: str) -> str | None:
+    """The app to open, or None when the sentence merely used the word."""
+    m = _OPEN_RE.match(q)
+    if not m:
+        return None
+    rest = m.group("rest").strip(" ?.!,")
+    if not rest:
+        return None
+    words = rest.split()
+    if words[0].lower() in _NOT_AN_APP_HEAD:
+        return None
+    if len(words) > MAX_APP_NAME_WORDS:
+        return None
+    # A project he's discussing is not an app to launch. This is the same
+    # brain the chat uses, so "open wasabikiri_remake" stays a launch only if
+    # it isn't a known project — otherwise it's a conversation about the work.
+    try:
+        from core import work_recall
+        if work_recall.find_project(rest):
+            return None
+    except Exception:  # noqa: BLE001 — the launcher must work without the brain
+        pass
+    return rest
+
+
+def handle_command(query: str) -> str | None:
+    q = query.lower()
+
+    if AFK_QUERY_PATTERN.search(q):
+        return describe_afk_status()
+
+    look_match = LOOK_AT_PATTERN.search(q)
+    if look_match:
+        target = look_match.group("target").strip()
+        action = (look_match.group("action") or "observe").strip()
+        window = screen_reader.find_window(target)
+        if not window:
+            return f"I can't find a window for {target} right now."
+        screen_reader.set_current_focus(window.title, action)
+        context = screen_reader.get_screen_context(target)
+        from modules.screen_observer import build_observation_reply
+        return build_observation_reply(window.title, action, context)
+
+    window_question = re.search(
+        r"(?:what|which)\s+(?:website|site|page|tab)\s+(?:is\s+)?(?:open|opened|showing)?\s*(?:in|on)\s+(?P<target>[\w .-]+)",
+        q,
+    )
+    if window_question:
+        target = window_question.group("target").strip(" ?.!")
+        return describe_open_window(target)
+
+    if any(trigger in q for trigger in STATUS_TRIGGERS):
+        return screen_reader.describe_current_focus()
+
+    app_name = _launch_target(q)
+    if app_name:
+        return open_app(app_name)
+
+    return None

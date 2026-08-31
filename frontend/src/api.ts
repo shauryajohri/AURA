@@ -456,6 +456,13 @@ export const api = {
     j<{ ok: boolean; chats: Chat[]; active: number }>(`/api/chats/${id}`, {
       method: "DELETE",
     }),
+  /** Wipe every chat and message across all rooms. Rooms stay (empty).
+   *  Irreversible — the caller must confirm first. */
+  clearAllChats: () =>
+    j<{ ok: boolean; removed: { messages: number; chats: number }; chats: Chat[]; active: number; rooms: Room[] }>(
+      "/api/chats/clear",
+      { method: "POST" },
+    ),
 
   // Voice — which voice AURA speaks with. The roster is served by the backend
   // (modules/voice_output.VOICES) so the picker can never drift from what the

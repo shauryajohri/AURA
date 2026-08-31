@@ -4,6 +4,7 @@ import { useVoiceInput } from "../hooks/useVoiceInput";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useSettingsStore } from "../stores/settingsStore";
 import ChatHistory from "./ChatHistory";
+import RoomPicker from "./RoomPicker";
 import MicCheck from "./MicCheck";
 import { renderMarkdown } from "./Markdown";
 
@@ -248,6 +249,13 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
         >
           {"\u2630"}
         </button>
+
+        {/* Pick the room AURA works in \u2014 loads that room's brief so the reply
+            comes back in its style (Coding \u2192 DSA, Japanese Study \u2192 tutor). */}
+        <RoomPicker
+          onLoad={(msgs) => onLoadTurns?.(msgs)}
+          onClear={() => onClearTurns?.()}
+        />
 
         <button
           type="button"

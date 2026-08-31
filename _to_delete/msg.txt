@@ -1,0 +1,43 @@
+Add rooms: a home for chats
+
+Chats gave the conversation boundaries. A room gives those boundaries a
+SUBJECT, and that is the part a flat list cannot express: a chat titled
+from its first message tells AURA nothing about how to behave, while a
+room can say "teach, don't just answer".
+
+Built on top of chat_sessions rather than replacing it. A room is a
+parent row in chat_rooms, and chat_sessions gains a nullable room_id, so
+every chat that exists today keeps working exactly as it does now --
+just unfiled until it is put somewhere. Nothing about the existing chat,
+voice or history features changes.
+
+  * Chats is a new sidebar destination: rooms on the left with their
+    chats nested under them, the open chat's transcript on the right.
+  * Entering a room resumes its most recent chat, or starts one there.
+    A room is never a conversation of its own -- messages always live in
+    a chat.
+  * core/room_router.py scores each message against every room's
+    keywords, name and topic and moves you when the subject changes,
+    saying so as it does. A context change you cannot see is
+    indistinguishable from AURA losing the thread. Nothing is hardcoded
+    to "coding" or "Japanese"; those are rows, so a room invented
+    tomorrow routes the same way. A wrong switch costs far more than a
+    missed one, so a challenger must clear an absolute floor AND beat
+    the current room by a margin.
+  * build_context_prompt now carries the room's topic and house style,
+    which is what stops her answering a kanji question like a code
+    review.
+  * Deleting a room keeps its chats, unfiled. Deleting a folder must
+    never delete the conversations inside it.
+
+Verified against the live database: created a room, entered it, wrote a
+message, deleted the room, confirmed the chat survived. Routing places a
+KeyError in Coding and a te-form question in Japanese Study, and leaves
+"I'm reading the docs" where it was. tsc --noEmit clean.
+
+Note: the working tree has 26 other files showing as modified. Those are
+pure CRLF line-ending churn (git diff --ignore-cr-at-eol reports nothing
+for them) and are deliberately left out of this commit.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01FR2BbRtAiMErhCqsT4EWVf

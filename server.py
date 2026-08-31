@@ -96,6 +96,19 @@ try:
 except Exception:  # noqa: BLE001
     traceback.print_exc()
 
+# Public web surface (/web/api/*) — the sandboxed demo behind the landing
+# page. Deliberately separate from /ws: it never touches the personal store,
+# has no tools, and is budgeted. The static site itself is mounted at the very
+# BOTTOM of this file, because a mount at "/" swallows anything registered
+# after it.
+try:
+    from web_api import mount_site as _mount_site, router as _web_router
+    app.include_router(_web_router)
+    print("[AURA bridge] Web demo API mounted at /web/api")
+except Exception:  # noqa: BLE001
+    _mount_site = None
+    traceback.print_exc()
+
 _DONE = object()
 
 CLIENTS: set[WebSocket] = set()
@@ -1342,6 +1355,17 @@ async def ws_endpoint(ws: WebSocket) -> None:
         traceback.print_exc()
     finally:
         CLIENTS.discard(ws)
+
+
+# ----------------------------------------------------------------------------
+# Static landing page — LAST. StaticFiles mounted at "/" matches every path
+# Starlette hasn't already matched, so anything registered after it is dead.
+# ----------------------------------------------------------------------------
+if _mount_site is not None:
+    try:
+        _mount_site(app)
+    except Exception:  # noqa: BLE001
+        traceback.print_exc()
 
 
 if __name__ == "__main__":

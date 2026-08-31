@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AURA — AI companion &amp; software development OS</title>
+<meta name="description" content="AURA is a self-hosted AI companion that lives on your desktop: voice, screen awareness, durable memory, and a Project Brain that turns conversations into shipped features. Try the basics here — no install.">
+<meta name="theme-color" content="#05060b">
+<meta property="og:title" content="AURA — AI companion & software development OS">
+<meta property="og:description" content="Not a chatbot you summon. A system that observes, remembers, and steps in when it's actually useful. Try it in your browser.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%238b6cff'/%3E%3Cstop offset='1' stop-color='%2335d6ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='16' cy='16' r='11' fill='none' stroke='url(%23g)' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%2305060b'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<canvas id="stars" aria-hidden="true"></canvas>
+
+<header class="nav" id="nav">
+  <a class="brand" href="#top">
+    <span class="mark" aria-hidden="true"></span>
+    <span class="brandname">AURA</span>
+  </a>
+  <nav class="navlinks">
+    <a href="#features">Features</a>
+    <a href="#how">How it works</a>
+    <a href="#try">Try it</a>
+    <a href="#compare">Web vs desktop</a>
+    <a href="#install">Install</a>
+  </nav>
+  <a class="btn btn-ghost navcta" href="#try">Try in browser</a>
+</header>
+
+<main id="top">
+
+  <!-- ─────────────────────────────  HERO  ───────────────────────────── -->
+  <section class="hero">
+    <div class="hero-copy">
+      <p class="eyebrow"><span class="dot"></span> Self-hosted · your keys · your disk</p>
+      <h1>Not a chatbot you<br>summon. A presence<br>that <em>notices</em>.</h1>
+      <p class="lede">
+        AURA lives on your desktop — voice, screen awareness, durable memory, and a
+        Project Brain that turns conversations into features and commits into closed tasks.
+        The basics run right here in your browser. No install, no signup.
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="#try">Try AURA now →</a>
+        <a class="btn btn-ghost" href="#install">Get the desktop app</a>
+      </div>
+      <p class="fineprint">
+        The browser demo is sandboxed: session-only memory, no files, no screen, no terminal.
+      </p>
+    </div>
+    <div class="hero-art" aria-hidden="true">
+      <div class="orb">
+        <div class="disc"></div>
+        <div class="disc disc2"></div>
+        <div class="core"></div>
+        <div class="lens"></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="strip">
+    <span>Groq / OpenRouter models</span><i></i>
+    <span>SQLite on your machine</span><i></i>
+    <span>Python + FastAPI core</span><i></i>
+    <span>React + Electron shell</span><i></i>
+    <span>No telemetry</span>
+  </div>
+
+  <!-- ────────────────────────────  FEATURES  ─────────────────────────── -->
+  <section id="features" class="section">
+    <header class="sec-head reveal">
+      <p class="kicker">What it does</p>
+      <h2>Two halves, one brain</h2>
+      <p class="sub">The companion watches the day. The Domain watches the work. They share the same memory.</p>
+    </header>
+
+    <div class="grid">
+      <article class="card reveal">
+        <span class="ico" aria-hidden="true">◉</span>
+        <h3>Presence, not a prompt box</h3>
+        <p>A floating orb that shows state — idle, listening, thinking, speaking, focused, alert. It snaps to an edge and stays out of the way until it isn't.</p>
+        <p class="tag">Desktop</p>
+      </article>
+
+      <article class="card reveal">
+        <span class="ico" aria-hidden="true">❖</span>
+        <h3>Memory that survives the restart</h3>
+        <p>Conversations, facts, notes and session recaps in SQLite on your disk. Ask "where did we leave off" and the answer comes from records, not vibes.</p>
+        <p class="tag tag-live">Live in demo</p>
+      </article>
+
+      <article class="card reveal">
+        <span class="ico" aria-hidden="true">⌁</span>
+        <h3>Voice both ways</h3>
+        <p>A "Jarvis" wake word, continuous speech-to-text, and a voice picker with per-voice preview. Replies get spoken while the next sentence is still generating.</p>
+        <p class="tag">Desktop</p>
+      </article>
+
+      <article class="card reveal">
+        <span class="ico" aria-hidden="true">▣</span>
+        <h3>Project Brain</h3>
+        <p>Ideas become features, features become tasks, commits close them. The graph keeps the <em>why</em> next to the what — decisions, blockers, and the reason each one was made.</p>
+        <p class="tag tag-live">Preview in demo</p>
+      </article>
+
+      <article class="card reveal">
+        <span class="ico" aria-hidden="true">◐</span>
+        <h3>Screen awareness</h3>
+        <p>It reads what's in front of you, notices the error you've hit three times, and offers the fix before you finish describing it.</p>
+        <p class="tag">Desktop</p>
+      </article>
+
+      <article class="card reveal">
+        <span class="ico" aria-hidden="true">⟡</span>
+        <h3>Nudges with a conscience</h3>
+        <p>An attention engine, a trust and mood model, and an energy meter that decays on silence — so it interrupts when it's worth it and shuts up when it isn't.</p>
+        <p class="tag">Desktop</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ──────────────────────────────  TRY  ────────────────────────────── -->
+  <section id="try" class="section">
+    <header class="sec-head reveal">
+      <p class="kicker">No download</p>
+      <h2>Try AURA in this tab</h2>
+      <p class="sub">
+        Same brain, same personality, sandboxed. Talk to it, teach it something, and look at
+        a Project Brain — then close the tab and it's all gone.
+      </p>
+    </header>
+
+    <div class="demo reveal" id="demo">
+      <div class="demo-bar">
+        <div class="tabs" role="tablist">
+          <button class="tab is-on" role="tab" data-tab="chat">Chat</button>
+          <button class="tab" role="tab" data-tab="memory">Memory</button>
+          <button class="tab" role="tab" data-tab="brain">Project Brain</button>
+        </div>
+        <div class="demo-meta">
+          <span class="pill" id="modelPill" title="Model serving this demo">model —</span>
+          <span class="pill" id="quotaPill">— left</span>
+          <button class="linkbtn" id="resetBtn" title="Wipe this session">Reset</button>
+        </div>
+      </div>
+
+      <!-- CHAT -->
+      <div class="pane is-on" data-pane="chat">
+        <div class="chat" id="chatLog" aria-live="polite">
+          <div class="msg aura">
+            <div class="who">AURA</div>
+            <div class="bubble">Browser version. No screen, no files, no voice here — just me. What are you working on?</div>
+          </div>
+        </div>
+        <div class="chips" id="chips">
+          <button class="chip">What actually makes you different from ChatGPT?</button>
+          <button class="chip">Explain SQLite WAL mode like I'm shipping tonight.</button>
+          <button class="chip">Write a Python retry decorator with backoff.</button>
+          <button class="chip">Remember that I'm building a storefront rewrite.</button>
+        </div>
+        <form class="composer" id="chatForm">
+          <input id="chatInput" type="text" autocomplete="off" placeholder="Say something to AURA…" maxlength="1200">
+          <button class="btn btn-primary send" id="sendBtn" type="submit">Send</button>
+        </form>
+        <p class="paneNote">Sandboxed demo · session-only memory · <span id="quotaNote">limited turns</span></p>
+      </div>
+
+      <!-- MEMORY -->
+      <div class="pane" data-pane="memory">
+        <div class="mem-grid">
+          <div class="mem-col">
+            <h4>Facts <span class="count" id="factCount">0</span></h4>
+            <p class="hint">Tell it something true. Then go back to Chat and ask — it will know.</p>
+            <form class="mem-form" id="factForm">
+              <input id="factInput" type="text" placeholder="I ship on Fridays and hate meetings" maxlength="240">
+              <select id="factCat" aria-label="Category">
+                <option value="general">general</option>
+                <option value="work">work</option>
+                <option value="stack">stack</option>
+                <option value="preference">preference</option>
+                <option value="person">person</option>
+              </select>
+              <button class="btn btn-ghost" type="submit">Remember</button>
+            </form>
+            <ul class="mem-list" id="factList"></ul>
+          </div>
+          <div class="mem-col">
+            <h4>Notes <span class="count" id="noteCount">0</span></h4>
+            <p class="hint">Longer scraps — a decision, a blocker, something to pick up later.</p>
+            <form class="mem-form" id="noteForm">
+              <input id="noteInput" type="text" placeholder="Decided: server components by default" maxlength="600">
+              <button class="btn btn-ghost" type="submit">Save</button>
+            </form>
+            <ul class="mem-list" id="noteList"></ul>
+          </div>
+        </div>
+        <p class="paneNote">
+          On the desktop this is SQLite on your disk, plus automatic session recaps and
+          conversation history. Here it lives in RAM and expires with the tab.
+        </p>
+      </div>
+
+      <!-- PROJECT BRAIN -->
+      <div class="pane" data-pane="brain">
+        <div class="brain-bar">
+          <label for="projSelect">Project</label>
+          <select id="projSelect"></select>
+          <span class="pill" id="sourcePill">sample data</span>
+        </div>
+        <div class="brain-body" id="brainBody">
+          <p class="hint">Loading…</p>
+        </div>
+        <p class="paneNote">
+          Read-only preview. In the desktop app this graph is built from your repo: git scan,
+          conversation capture, and a planner that breaks features into estimated tasks.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────────────────────  HOW IT WORKS  ──────────────────────── -->
+  <section id="how" class="section">
+    <header class="sec-head reveal">
+      <p class="kicker">Under the hood</p>
+      <h2>What one turn actually does</h2>
+      <p class="sub">No agent framework, no vector database. A router, a store, and a guard.</p>
+    </header>
+
+    <ol class="steps">
+      <li class="reveal"><span class="n">1</span>
+        <h3>Classify the intent</h3>
+        <p>CASUAL, PERSONAL, CODING, SEARCH, RECALL, SAVE, COMMAND or REMINDER. The label decides everything downstream.</p></li>
+      <li class="reveal"><span class="n">2</span>
+        <h3>Assemble the context</h3>
+        <p>Recent turns from the store, durable facts, the project brain, screen context, error-intelligence hints, the relationship layer.</p></li>
+      <li class="reveal"><span class="n">3</span>
+        <h3>Route to a model</h3>
+        <p>Cheap model for trivia, heavy model for code and research. Rate limits are per model, so the small one absorbs the background work.</p></li>
+      <li class="reveal"><span class="n">4</span>
+        <h3>Sanitize and guard</h3>
+        <p>Leaked chain-of-thought is stripped, brevity is enforced on sentence boundaries, and the output gate has the last word.</p></li>
+      <li class="reveal"><span class="n">5</span>
+        <h3>Write it back</h3>
+        <p>Everything lands in SQLite, so the next turn — tomorrow's turn — still remembers.</p></li>
+    </ol>
+  </section>
+
+  <!-- ───────────────────────────  COMPARISON  ────────────────────────── -->
+  <section id="compare" class="section">
+    <header class="sec-head reveal">
+      <p class="kicker">Honest limits</p>
+      <h2>What the browser gives you</h2>
+      <p class="sub">The demo is deliberately small. Everything that touches your machine needs the app.</p>
+    </header>
+
+    <div class="table-wrap reveal">
+      <table class="cmp">
+        <thead><tr><th>Capability</th><th>This site</th><th>Desktop app</th></tr></thead>
+        <tbody>
+          <tr><td>Conversation with AURA's brain</td><td class="y">Yes</td><td class="y">Yes</td></tr>
+          <tr><td>Memory that persists</td><td class="p">Session only</td><td class="y">SQLite, forever</td></tr>
+          <tr><td>Project Brain</td><td class="p">Read-only sample</td><td class="y">Built from your repo</td></tr>
+          <tr><td>Voice in and out</td><td class="n">No</td><td class="y">Wake word + TTS</td></tr>
+          <tr><td>Screen awareness</td><td class="n">No</td><td class="y">Yes</td></tr>
+          <tr><td>Files, terminal, git</td><td class="n">No</td><td class="y">Yes</td></tr>
+          <tr><td>Proactive nudges</td><td class="n">No</td><td class="y">Attention engine</td></tr>
+          <tr><td>Your own API keys</td><td class="p">Host's key</td><td class="y">Yours, local .env</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ────────────────────────────  INSTALL  ──────────────────────────── -->
+  <section id="install" class="section">
+    <header class="sec-head reveal">
+      <p class="kicker">Run the real thing</p>
+      <h2>Four commands and a double-click</h2>
+    </header>
+
+    <div class="install reveal">
+      <div class="code">
+        <button class="copy" data-copy="install">Copy</button>
+        <pre id="install-code"><code># 1 — Python deps
+pip install -r requirements.txt
+
+# 2 — Frontend deps
+cd frontend &amp;&amp; npm install &amp;&amp; cd ..
+
+# 3 — Keys: create .env with GROQ_API_KEY=...
+
+# 4 — Run
+python server.py            # backend on 127.0.0.1:8760
+cd frontend &amp;&amp; npm run dev   # Vite + Electron</code></pre>
+      </div>
+      <div class="install-notes">
+        <h3>Or just double-click <code>AURA.bat</code></h3>
+        <p>It builds the frontend on first run, launches Electron, and Electron boots the server itself. <code>CREATE_DESKTOP_SHORTCUT.bat</code> puts it on your desktop with the black-hole icon.</p>
+        <h3>Hosting this page yourself</h3>
+        <p>The site and its demo API ship with the repo. <code>python server.py</code> serves both — the landing page at <code>/</code>, the sandboxed demo at <code>/web/api/*</code>.</p>
+        <h3>Requirements</h3>
+        <p>Python 3.11+, Node 18+, and a Groq or OpenRouter key. Windows is the tested path; the backend is platform-neutral.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="closer reveal">
+    <h2>It's yours, on your machine.</h2>
+    <p>No account, no cloud sync, no one else's server holding your day.</p>
+    <div class="cta-row center">
+      <a class="btn btn-primary" href="#try">Try the demo</a>
+      <a class="btn btn-ghost" href="#install">Install locally</a>
+    </div>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <div class="foot-in">
+    <span class="brand small"><span class="mark" aria-hidden="true"></span> AURA</span>
+    <span class="muted">Self-hosted AI companion &amp; software development OS.</span>
+    <span class="muted">Built by shaurya.</span>
+  </div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

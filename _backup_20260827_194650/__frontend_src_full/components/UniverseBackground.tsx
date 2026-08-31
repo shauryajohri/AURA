@@ -1,0 +1,212 @@
+import { useEffect, useRef, useState } from "react";
+import type { AuraState } from "../types";
+
+interface Props {
+  state: AuraState;
+  /** Called if the video file is missing/unplayable so App can fall back. */
+  onFail?: () => void;
+}
+
+// Relative paths — work from Vite's dev server AND Electron's file:// origin
+// (an absolute "/universe.mp4" resolves to the DISK root under file://).
+// The new "Aura Main" cosmos plays first; the original universe file is the
+// fallback if it's missing, before we give up to the CSS starfield.
+const SOURCES = ["./aura-main.mp4", "./universe.mp4"];
+/** Seconds of crossfade around the loop point so the restart is invisible. */
+const FADE_S = 0.9;
+
+/**
+ * Layer 1 — the permanent living universe.
+ *
+ * Two stacked <video> elements play the same file; shortly before the active
+ * one ends, the other starts from 0 and crossfades in, so the loop never
+ * shows a cut or jump. Autoplay, muted, inline, GPU-composited
+ * (object-fit: cover + opacity transitions only), never visibly restarts.
+ *
+ * State language:
+ *   idle      → slow drift (playbackRate 0.85)
+ *   listening → slight brightening
+ *   thinking  → energetic (rate 1.4, brighter/saturated)
+ *   speaking  → light pulses spread across the universe (overlay)
+ *
+ * Pauses completely while the window is hidden/minimized.
+ */
+const RATE: Record<string, number> = {
+  idle: 0.85,
+  listening: 1.0,
+  thinking: 1.4,
+  speaking: 1.1,
+};
+const FILTER: Record<string, string> = {
+  idle: "brightness(1) saturate(1)",
+  listening: "brightness(1.12) saturate(1.05)",
+  thinking: "brightness(1.18) saturate(1.2)",
+  speaking: "brightness(1.1) saturate(1.1)",
+};
+
+export default function UniverseBackground({ state, onFail }: Props) {
+  const [srcIdx, setSrcIdx] = useState(0);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const vaRef = useRef<HTMLVideoElement>(null);
+  const vbRef = useRef<HTMLVideoElement>(null);
+  const stateRef = useRef<AuraState>(state);
+  stateRef.current = state;
+
+  /* state → tempo + tone (no re-render churn; direct style writes) */
+  useEffect(() => {
+    const rate = RATE[state] ?? 1;
+    for (const v of [vaRef.current, vbRef.current]) {
+      if (v) v.playbackRate = rate;
+    }
+    if (wrapRef.current) {
+      wrapRef.current.style.filter = FILTER[state] ?? FILTER.idle;
+    }
+  }, [state]);
+
+  useEffect(() => {
+    const va = vaRef.current!;
+    const vb = vbRef.current!;
+    let active = va;
+    let standby = vb;
+    let fading = false;
+    let failed = false;
+    let fadeTimer = 0;
+    let watchdog = 0;
+    let lastTime = -1;
+    let stalls = 0;
+
+    va.style.opacity = "1";
+    vb.style.opacity = "0";
+
+    const play = (v: HTMLVideoElement) =>
+      v.play().catch(() => {
+        /* autoplay is muted+inline, retry on first user gesture just in case */
+        const kick = () => { v.play().catch(() => {}); window.removeEventListener("pointerdown", kick); };
+        window.addEventListener("pointerdown", kick);
+      });
+
+    /* seamless loop: crossfade to the standby copy near the end */
+    const onTime = () => {
+      if (fading || failed || !active.duration) return;
+      const remain = active.duration - active.currentTime;
+      if (remain <= FADE_S) {
+        fading = true;
+        standby.currentTime = 0;
+        standby.playbackRate = RATE[stateRef.current] ?? 1;
+        play(standby);
+        standby.style.opacity = "1";
+        active.style.opacity = "0";
+        fadeTimer = window.setTimeout(() => {
+          active.pause();
+          const t = active; active = standby; standby = t;
+          fading = false;
+        }, FADE_S * 1000);
+      }
+    };
+
+    /* Safety net. Neither element has `loop` — the crossfade is supposed to
+       hand over before the end. If that window is ever MISSED (throttled
+       timeupdate while minimized, a decoder hiccup, a seek), the video simply
+       ends and the background freezes on its last frame or goes black. That's
+       the "background collapses sometimes". Restart immediately instead. */
+    const onEnded = (e: Event) => {
+      if (failed) return;
+      const v = e.target as HTMLVideoElement;
+      v.currentTime = 0;
+      play(v);
+      // Whichever element ended is the one that should be visible now.
+      if (v === active) {
+        v.style.opacity = "1";
+        standby.style.opacity = "0";
+        fading = false;
+        window.clearTimeout(fadeTimer);
+      }
+    };
+
+    const onError = () => {
+      if (failed) return;
+      failed = true;
+      // Step down the source list before surrendering to the CSS starfield.
+      if (srcIdx < SOURCES.length - 1) {
+        setSrcIdx(srcIdx + 1); // effect reruns with fresh flags + new src
+        return;
+      }
+      onFail?.();
+    };
+
+    /* pause rendering while minimized/hidden; resume seamlessly */
+    const onVis = () => {
+      if (document.hidden) {
+        va.pause(); vb.pause();
+      } else if (!failed) {
+        play(active);
+        if (fading) play(standby);
+      }
+    };
+
+    /* Watchdog: the visible video must actually be advancing. Covers the
+       cases no event fires for — a dropped decoder under memory pressure
+       (this app also holds ambient.mp4 and transition.mp4 in flight), or a
+       play() that silently never started. Nudge first, hard-reset if it
+       keeps sitting still, and only give up to the CSS fallback after that. */
+    const onWatchdog = () => {
+      if (failed || document.hidden) return;
+      const v = active;
+      const t = v.currentTime;
+      const advancing = Math.abs(t - lastTime) > 0.01;
+      lastTime = t;
+      if (advancing || fading) { stalls = 0; return; }
+      stalls += 1;
+      if (stalls === 1 || stalls === 2) {
+        play(v);                       // gentle nudge
+      } else if (stalls === 3) {
+        v.currentTime = 0;             // hard reset
+        v.style.opacity = "1";
+        play(v);
+      } else if (stalls >= 5) {
+        onError();                     // genuinely dead — let App fall back
+      }
+    };
+
+    va.addEventListener("timeupdate", onTime);
+    vb.addEventListener("timeupdate", onTime);
+    va.addEventListener("ended", onEnded);
+    vb.addEventListener("ended", onEnded);
+    // Both elements need this. Only `va` was watched, so a failure on the
+    // standby copy went unnoticed and surfaced later as a blank crossfade.
+    va.addEventListener("error", onError);
+    vb.addEventListener("error", onError);
+    document.addEventListener("visibilitychange", onVis);
+    watchdog = window.setInterval(onWatchdog, 2000);
+    play(va);
+
+    return () => {
+      window.clearTimeout(fadeTimer);
+      window.clearInterval(watchdog);
+      va.removeEventListener("timeupdate", onTime);
+      vb.removeEventListener("timeupdate", onTime);
+      va.removeEventListener("ended", onEnded);
+      vb.removeEventListener("ended", onEnded);
+      va.removeEventListener("error", onError);
+      vb.removeEventListener("error", onError);
+      document.removeEventListener("visibilitychange", onVis);
+      va.pause(); vb.pause();
+    };
+  }, [onFail, srcIdx]);
+
+  const SRC = SOURCES[srcIdx];
+
+  return (
+    <div ref={wrapRef} className="universe-bg" aria-hidden="true">
+      <video ref={vaRef} src={SRC} muted playsInline autoPlay preload="auto" />
+      <video ref={vbRef} src={SRC} muted playsInline preload="auto" />
+      {/* speaking: light pulses spreading across the universe */}
+      {state === "speaking" && (
+        <>
+          <div className="universe-pulse" />
+          <div className="universe-pulse universe-pulse--late" />
+        </>
+      )}
+    </div>
+  );
+}

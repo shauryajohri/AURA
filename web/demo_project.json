@@ -1,0 +1,102 @@
+{
+  "_comment": "Curated read-only snapshot served by /web/api/domain/*. This is a SAMPLE, not the live graph — set AURA_WEB_LIVE_DOMAIN=1 to serve the real Project Brain instead (self-host only).",
+  "projects": [
+    {
+      "id": "aura",
+      "name": "AURA",
+      "summary": "The companion itself — voice, memory, presence, and the Domain OS it runs on.",
+      "overall": { "done": 41, "total": 58, "pct": 71 },
+      "counts": { "features": 12, "tasks": 58, "decisions": 19, "commits": 214 },
+      "blocker": {
+        "title": "Two response paths have drifted apart",
+        "detail": "brain.process() and brain.process_streaming() duplicate context assembly. Every fix has to land twice, and one of them is always behind.",
+        "feature": "Conversation core",
+        "age_days": 11
+      },
+      "features": [
+        { "name": "Conversation core", "status": "in_progress", "done": 9, "total": 12,
+          "note": "Streaming path is the one the UI uses; the sync path lags." },
+        { "name": "Voice I/O", "status": "done", "done": 6, "total": 6,
+          "note": "Wake word, STT, per-voice TTS with in-app picker." },
+        { "name": "Durable memory", "status": "done", "done": 7, "total": 7,
+          "note": "SQLite: conversations, facts, notes, recaps, tasks." },
+        { "name": "Project Brain (Domain)", "status": "in_progress", "done": 8, "total": 14,
+          "note": "Graph + git scan + planning + progress wired; timeline views partial." },
+        { "name": "Attention & presence", "status": "in_progress", "done": 5, "total": 8,
+          "note": "Nudges and energy meter live; AFK roaming still pending." },
+        { "name": "Web surface", "status": "in_progress", "done": 3, "total": 6,
+          "note": "Public landing page + sandboxed browser demo." },
+        { "name": "Quests", "status": "done", "done": 3, "total": 3,
+          "note": "Goal contracts with verification terms." }
+      ],
+      "timeline": [
+        { "date": "2026-07-06", "kind": "milestone", "title": "Real model routing",
+          "detail": "Intent picks the model; the UI chip shows the one actually used." },
+        { "date": "2026-07-20", "kind": "milestone", "title": "One-click launch",
+          "detail": "AURA.bat boots Electron, which boots the server itself." },
+        { "date": "2026-07-30", "kind": "decision", "title": "Project brain in every turn",
+          "detail": "work_recall injects the graph into the prompt, so 'where did we leave off' answers from data, not a guess." },
+        { "date": "2026-08-16", "kind": "incident", "title": "Groq retired the llama models",
+          "detail": "Every call 404'd. Moved to gpt-oss + an explicit model allow-list." },
+        { "date": "2026-08-20", "kind": "milestone", "title": "Named chat sessions",
+          "detail": "Switchable chats, context follows the switch, replies speak." }
+      ],
+      "graph": {
+        "nodes": [
+          { "id": "n1", "type": "idea",     "title": "\"It should know what I'm working on\"" },
+          { "id": "n2", "type": "feature",  "title": "Project Brain" },
+          { "id": "n3", "type": "decision", "title": "Graph in SQLite, not a vector store" },
+          { "id": "n4", "type": "task",     "title": "work_recall injects graph per turn", "status": "done" },
+          { "id": "n5", "type": "task",     "title": "Timeline view",                     "status": "in_progress" },
+          { "id": "n6", "type": "commit",   "title": "de-leak RECALL path" }
+        ],
+        "edges": [
+          { "src": "n1", "dst": "n2", "type": "became" },
+          { "src": "n2", "dst": "n3", "type": "decided_by" },
+          { "src": "n2", "dst": "n4", "type": "broken_into" },
+          { "src": "n2", "dst": "n5", "type": "broken_into" },
+          { "src": "n6", "dst": "n4", "type": "closes" }
+        ]
+      }
+    },
+    {
+      "id": "sample-shop",
+      "name": "Storefront rewrite",
+      "summary": "A second project, so you can see what switching context looks like.",
+      "overall": { "done": 12, "total": 31, "pct": 39 },
+      "counts": { "features": 6, "tasks": 31, "decisions": 7, "commits": 63 },
+      "blocker": {
+        "title": "Checkout still calls the old pricing service",
+        "detail": "The rewrite can't ship until pricing moves behind the new gateway. Blocked on an API key from the payments team.",
+        "feature": "Checkout",
+        "age_days": 4
+      },
+      "features": [
+        { "name": "Catalogue", "status": "done", "done": 8, "total": 8, "note": "Migrated and indexed." },
+        { "name": "Checkout", "status": "blocked", "done": 1, "total": 9, "note": "Waiting on pricing gateway." },
+        { "name": "Auth", "status": "in_progress", "done": 3, "total": 6, "note": "Sessions done, SSO pending." },
+        { "name": "Admin", "status": "todo", "done": 0, "total": 8, "note": "Not started." }
+      ],
+      "timeline": [
+        { "date": "2026-08-02", "kind": "decision", "title": "Server components by default",
+          "detail": "Client bundles were the whole problem; ship HTML first." },
+        { "date": "2026-08-14", "kind": "milestone", "title": "Catalogue live" },
+        { "date": "2026-08-27", "kind": "incident", "title": "Checkout blocked",
+          "detail": "Pricing service contract changed without notice." }
+      ],
+      "graph": {
+        "nodes": [
+          { "id": "s1", "type": "idea",    "title": "\"Storefront feels slow\"" },
+          { "id": "s2", "type": "feature", "title": "Server-rendered catalogue" },
+          { "id": "s3", "type": "task",    "title": "Move pricing behind gateway", "status": "blocked" },
+          { "id": "s4", "type": "commit",  "title": "drop client-side cart state" }
+        ],
+        "edges": [
+          { "src": "s1", "dst": "s2", "type": "became" },
+          { "src": "s2", "dst": "s3", "type": "broken_into" },
+          { "src": "s4", "dst": "s2", "type": "advances" }
+        ]
+      }
+    }
+  ]
+}

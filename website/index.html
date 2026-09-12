@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AURA — an AI that sits beside you</title>
-<meta name="description" content="A self-hosted AI desktop companion and software development OS. It watches, remembers, and stays quiet unless speaking up actually helps. MIT licensed, runs on your own machine.">
+<title>AURA, an AI that sits beside you</title>
+<meta name="description" content="A self-hosted AI desktop companion and software development OS. Try her five natures, watch the routing, and see exactly how much of her is built. MIT licensed, runs on your own machine.">
 <meta name="theme-color" content="#0A0912">
 
 <meta property="og:type" content="website">
-<meta property="og:title" content="AURA — an AI that sits beside you">
-<meta property="og:description" content="A self-hosted AI desktop companion and software development OS. It watches, remembers, and stays quiet unless speaking up actually helps.">
+<meta property="og:title" content="AURA, an AI that sits beside you">
+<meta property="og:description" content="Pick a nature and ask her something. Same question, five different people. Self-hosted, MIT licensed.">
 <meta property="og:image" content="assets/lance.webp">
 <meta name="twitter:card" content="summary_large_image">
 
@@ -22,10 +22,7 @@
 </head>
 <body>
 
-<a class="skip" href="#main">Skip to content</a>
-
-<!-- the spine: this page is a sequence, so it is marked as one -->
-<nav class="rail" id="rail" aria-label="Section navigation"></nav>
+<a class="skip" href="#demo">Skip to the demo</a>
 
 <header class="nav">
   <div class="wrap nav__in">
@@ -37,8 +34,8 @@
       <span>AURA</span>
     </a>
     <div class="nav__links">
-      <a href="#problem">What it is</a>
-      <a href="#turn">How it works</a>
+      <a href="#demo">Demo</a>
+      <a href="#halves">What she does</a>
       <a href="#stage">Current stage</a>
       <a href="#install">Install</a>
       <a class="btn btn--go" id="nav-src" href="#">View the source</a>
@@ -48,38 +45,54 @@
 
 <main id="main">
 
-  <!-- ============================================================ hero -->
+  <!-- ====================================== hero, deliberately short ==== -->
   <section class="hero" id="top">
-    <!-- A still, deliberately. AURA's whole argument is that it stays quiet
-         unless motion carries information; an autoplaying loop here would
-         contradict the product. assets/hero-scrub.mp4 is kept if you disagree. -->
-    <div class="hero__media" id="hero-media">
+    <div class="hero__media">
       <img src="assets/horizon.webp" alt="" width="1344" height="756" fetchpriority="high">
     </div>
     <div class="hero__scrim"></div>
     <div class="wrap hero__in" id="hero"></div>
   </section>
 
-  <!-- the current stage, stated immediately rather than buried -->
+  <!-- ============================================== THE DEMO =========== -->
+  <section class="demo" id="demo">
+    <div class="wrap">
+      <div class="sect__head" id="demo-head"></div>
+
+      <div class="picker" id="nature-picker" role="radiogroup" aria-label="Choose a nature"></div>
+      <p class="picker__note" id="nature-note" aria-live="polite"></p>
+
+      <div class="stagepair">
+        <!-- left: the conversation -->
+        <div class="chat" id="chat-panel">
+          <div class="chat__bar" aria-hidden="true">
+            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            <span class="chat__title" id="chat-title">AURA</span>
+          </div>
+          <div class="chat__log" id="chat-log" role="log" aria-live="polite"></div>
+          <div class="chat__asks" id="chat-asks"></div>
+          <div class="chat__input">
+            <input type="text" id="fake-input" disabled
+                   placeholder="Pick a question above. The real one takes typing, and your voice.">
+            <span class="chat__hint" aria-hidden="true">scripted</span>
+          </div>
+        </div>
+
+        <!-- right: what actually happened -->
+        <aside class="pipe" id="pipe-panel" aria-label="How the answer was produced">
+          <p class="pipe__head">What just happened</p>
+          <ol class="pipe__steps" id="pipe-steps"></ol>
+          <div class="pipe__overlay" id="pipe-overlay"></div>
+          <div class="pipe__guard" id="pipe-guard"></div>
+        </aside>
+      </div>
+
+      <p class="honesty" id="demo-honesty"></p>
+    </div>
+  </section>
+
+  <!-- the current stage, stated immediately -->
   <div class="strip"><div class="wrap strip__in" id="strip"></div></div>
-
-  <!-- ==================================================== the problem -->
-  <section class="sect" id="problem">
-    <div class="wrap">
-      <div class="sect__head" id="problem-head"></div>
-      <div class="rows" id="problem-rows"></div>
-      <div id="fig-problem"></div>
-    </div>
-  </section>
-
-  <!-- ======================================================= the turn -->
-  <section class="sect" id="turn">
-    <div class="wrap">
-      <div class="sect__head" id="turn-head"></div>
-      <div class="rows" id="turn-rows"></div>
-      <div id="fig-turn"></div>
-    </div>
-  </section>
 
   <!-- ===================================================== two halves -->
   <section class="sect" id="halves">
@@ -144,8 +157,8 @@
 
 <noscript>
   <div class="wrap" style="padding:40px 28px">
-    <p>This page renders its content from <code>content.js</code>. Enable JavaScript,
-    or read the project's README for the same information.</p>
+    <p>The demo and the capability ledger render from <code>content.js</code>.
+    Enable JavaScript, or read the project's README for the same information.</p>
   </div>
 </noscript>
 

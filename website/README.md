@@ -1,7 +1,11 @@
 # The AURA site
 
-A static demo site: what AURA is, what it does, and **exactly how far along it
-is**. No build step, no framework, no CDN except the webfont.
+A demo first, then the facts. The page opens with an interactive AURA: pick one
+of her five natures, ask her something, and watch the real pipeline that would
+have produced the answer. Below that, only useful information: what she does,
+exactly how far along she is, the permission ladder, and how to install her.
+
+No build step, no framework, no CDN except the webfont.
 
 ```
 website/
@@ -11,6 +15,25 @@ website/
   styles.css          the design system
   assets/*.webp       the images that ship
 ```
+
+## The demo is scripted, and the page says so
+
+There is no model in a browser tab. The replies in `content.js` under `demo` are
+written by hand; the routing shown beside them is real, copied from the app:
+
+| Shown on the page | Read from |
+|---|---|
+| the five natures and their overlay text | `core/nature.py` |
+| the model for each intent | `core/model_router.py` |
+| the style and its sentence cap | `core/response_composer.py` |
+| what the guard strips | `core/response_composer.py` |
+
+Those four blocks are quoted, not paraphrased, which is why the nature overlays
+keep their original punctuation. If you change any of those files, change the
+matching block here or the page starts lying.
+
+To add a question, push one object onto `demo.questions` with a reply for every
+nature key. A missing reply renders as blank, so add all five.
 
 ## Updating it when AURA moves forward
 

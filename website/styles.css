@@ -133,9 +133,9 @@ code,pre{font-family:var(--mono)}
 @media (max-width:1380px){.rail{display:none}}
 
 /* --------------------------------------------------------------- hero */
-/* 84vh, not 94: the nav is 60px, so a taller hero pushes the actions under
-   the fold on a 900px laptop screen. */
-.hero{position:relative;min-height:clamp(560px,84vh,860px);display:flex;align-items:flex-end;
+/* Short on purpose. The demo is the hero of this page, so this band only has
+   to name the thing and hand the visitor down into it. */
+.hero{position:relative;min-height:clamp(340px,52vh,520px);display:flex;align-items:flex-end;
   overflow:hidden;border-bottom:1px solid var(--line)}
 .hero__media{position:absolute;inset:0;z-index:0}
 .hero__media img,.hero__media video{width:100%;height:100%;object-fit:cover}
@@ -315,3 +315,109 @@ footer a:hover{color:var(--horizon)}
 .figure img{width:100%;aspect-ratio:16/7;object-fit:cover}
 .figure figcaption{padding:13px 18px;font-size:var(--t-xs);color:var(--dust-dim);
   border-top:1px solid var(--line)}
+
+/* =====================================================================
+   THE DEMO — the top of the page and the reason it exists.
+   Two panels: the conversation on the left, what actually produced it
+   on the right. The pipeline is not decoration; it is the argument.
+   ===================================================================== */
+.demo{padding:clamp(56px,7vh,88px) 0 clamp(70px,9vh,110px);
+  border-bottom:1px solid var(--line);
+  background:
+    radial-gradient(ellipse 70% 52% at 50% -8%,rgba(139,92,255,.10),transparent 70%),
+    var(--void)}
+.demo .sect__head{margin-bottom:30px}
+
+/* ---- nature picker ---- */
+.picker{display:flex;flex-wrap:wrap;gap:9px}
+.picker button{display:inline-flex;align-items:center;gap:8px;cursor:pointer;
+  font:inherit;font-size:var(--t-sm);color:var(--dust);
+  background:var(--strata);border:1px solid var(--line);border-radius:999px;
+  padding:9px 16px;transition:all .26s var(--ease)}
+.picker button:hover{border-color:var(--line-hi);color:var(--horizon)}
+.picker button[aria-checked="true"]{background:rgba(139,92,255,.16);
+  border-color:var(--aura);color:var(--horizon)}
+.picker button .ic{font-size:15px;line-height:1}
+.picker__note{margin:14px 0 26px;color:var(--dust);font-size:var(--t-sm);max-width:62ch;
+  min-height:1.6em}
+
+/* ---- the two panels ---- */
+.stagepair{display:grid;gap:18px;align-items:start}
+@media (min-width:960px){.stagepair{grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:22px}}
+
+/* ---- chat ---- */
+.chat{background:var(--strata);border:1px solid var(--line);border-radius:14px;
+  overflow:hidden;display:flex;flex-direction:column;min-height:430px}
+.chat__bar{display:flex;align-items:center;gap:7px;padding:12px 16px;
+  border-bottom:1px solid var(--line);background:var(--void-lift)}
+.chat__bar .dot{width:9px;height:9px;border-radius:50%;background:var(--dust-dim);opacity:.5}
+.chat__title{margin-left:10px;font-size:var(--t-xs);color:var(--dust);letter-spacing:.08em}
+.chat__log{flex:1;padding:20px 18px;display:flex;flex-direction:column;gap:14px;
+  overflow-y:auto;max-height:380px}
+.msg{max-width:88%;font-size:var(--t-sm);line-height:1.6;padding:12px 15px;border-radius:12px}
+.msg--you{align-self:flex-end;background:rgba(139,92,255,.17);
+  border:1px solid rgba(139,92,255,.32);color:var(--horizon);border-bottom-right-radius:4px}
+.msg--aura{align-self:flex-start;background:var(--void-lift);border:1px solid var(--line);
+  color:#D3CFE6;border-bottom-left-radius:4px}
+.msg code{background:rgba(139,92,255,.14);border-radius:4px;padding:1px 5px;
+  font-size:.92em;color:#CDBEFF}
+.msg--empty{align-self:flex-start;color:var(--dust-dim);border:1px dashed var(--line);
+  background:transparent}
+/* she types before she answers */
+.msg--typing{display:inline-flex;gap:5px;align-items:center;padding:15px}
+.msg--typing i{width:6px;height:6px;border-radius:50%;background:var(--dust);
+  animation:blink 1.25s infinite both}
+.msg--typing i:nth-child(2){animation-delay:.18s}
+.msg--typing i:nth-child(3){animation-delay:.36s}
+@keyframes blink{0%,80%,100%{opacity:.22}40%{opacity:1}}
+.msg--in{animation:rise .45s var(--ease) both}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){
+  .msg--in{animation:none}
+  .msg--typing i{animation:none;opacity:.6}
+}
+
+.chat__asks{display:flex;flex-wrap:wrap;gap:7px;padding:0 18px 16px;border-top:1px solid var(--line);
+  padding-top:16px}
+.chat__asks button{cursor:pointer;font:inherit;font-size:var(--t-xs);color:var(--dust);
+  background:transparent;border:1px solid var(--line);border-radius:999px;padding:7px 13px;
+  transition:all .24s var(--ease);text-align:left}
+.chat__asks button:hover{border-color:var(--aura);color:var(--horizon);
+  background:rgba(139,92,255,.10)}
+.chat__asks button[aria-pressed="true"]{border-color:var(--aura);color:var(--horizon);
+  background:rgba(139,92,255,.15)}
+.chat__input{display:flex;align-items:center;gap:10px;padding:13px 16px;
+  border-top:1px solid var(--line);background:var(--void-lift)}
+.chat__input input{flex:1;background:transparent;border:0;color:var(--dust);
+  font:inherit;font-size:var(--t-sm);min-width:0}
+.chat__input input::placeholder{color:var(--dust-dim)}
+.chat__hint{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;color:var(--dust-dim);
+  border:1px solid var(--line);border-radius:999px;padding:3px 9px;flex:none}
+
+/* ---- pipeline readout ---- */
+.pipe{background:var(--strata);border:1px solid var(--line);border-radius:14px;padding:20px 20px 18px}
+.pipe__head{font-size:var(--t-xs);color:var(--aura-hi);margin-bottom:16px}
+.pipe__steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:1px}
+.pipe__steps li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 13px;
+  padding:11px 0;border-top:1px solid var(--line);opacity:.35;
+  transition:opacity .4s var(--ease)}
+.pipe__steps li.on{opacity:1}
+.pipe__n{font-family:var(--mono);font-size:var(--t-xs);color:var(--dust-dim);grid-row:1/3;
+  align-self:center;width:20px}
+.pipe__name{font-size:var(--t-sm);font-weight:500;color:var(--horizon)}
+.pipe__val{font-family:var(--mono);font-size:var(--t-xs);color:var(--live);word-break:break-word}
+.pipe__steps li.on .pipe__n{color:var(--aura)}
+
+.pipe__overlay,.pipe__guard{margin-top:16px;padding:14px 15px;border-radius:10px;
+  background:var(--void-lift);border:1px solid var(--line)}
+.pipe__overlay p:first-child,.pipe__guard p:first-child{font-size:var(--t-xs);color:var(--dust);
+  margin-bottom:8px}
+.pipe__overlay pre{background:transparent;border:0;padding:0;font-size:var(--t-xs);
+  line-height:1.62;color:#C0B4E8;white-space:pre-wrap;overflow-x:auto}
+.pipe__guard ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.pipe__guard li{font-family:var(--mono);font-size:var(--t-xs);color:var(--dust-dim);
+  text-decoration:line-through;text-decoration-color:rgba(245,166,35,.6)}
+
+.honesty{margin-top:24px;padding:18px 20px;max-width:78ch;
+  border-left:2px solid var(--forming);background:rgba(245,166,35,.05);
+  border-radius:0 10px 10px 0;color:var(--dust);font-size:var(--t-sm);line-height:1.6}

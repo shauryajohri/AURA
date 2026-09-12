@@ -1,5 +1,5 @@
 /* =====================================================================
-   content.js — THE ONLY FILE YOU EDIT TO UPDATE THIS SITE.
+   content.js, THE ONLY FILE YOU EDIT TO UPDATE THIS SITE.
    ---------------------------------------------------------------------
    Every word, every capability and every status mark on the page is read
    from this object. index.html is a shell; site.js renders this.
@@ -38,87 +38,139 @@ window.AURA_CONTENT = {
     kicker: "Self-hosted, and MIT licensed",
     headline: "She is already there.",
     lede:
-      "Not a chatbot you summon. AURA runs on your own machine, watches what " +
-      "you are working on, remembers it tomorrow, and decides most of the time " +
-      "that the kindest thing it can do is say nothing.",
+      "Not a chatbot you summon. She runs on your own machine, remembers what " +
+      "you were doing, and mostly decides not to interrupt you about it.",
     actions: [
-      { label: "Read the current stage", href: "#stage", kind: "go" },
+      { label: "Try her", href: "#demo", kind: "go" },
       { label: "View the source",        href: "https://github.com/shauryajohri/AURA", kind: "ghost" },
     ],
   },
 
-  /* The complaints section — kept from the original copy, it is good. */
-  problems: {
-    title: "What people actually say about AI assistants.",
-    items: [
+
+  /* ===================================================================
+     THE DEMO, the top of the page.
+     Every line here is scripted. The real AURA runs on your machine and
+     answers with live models; this is a faithful reconstruction of what
+     she does, not a model in a browser tab. Said plainly on the page.
+
+     The natures and their overlay text are copied from core/nature.py.
+     The models and intent lanes are from core/model_router.py.
+     The sentence caps are from core/response_composer.py.
+     If you change those files, change these.
+     =================================================================== */
+  demo: {
+    kicker: "Try her",
+    title: "Same question. Five different people.",
+    lede:
+      "Nature is a lock. Pick one and it is appended to every system prompt " +
+      "until you change it, so she cannot drift back out halfway through an " +
+      "evening. Pick a nature, then ask her something.",
+    honesty:
+      "Scripted, and worth saying so. The real AURA runs on your own machine " +
+      "against live models; a browser tab has no screen, no files and no memory " +
+      "of you. The words below are hers, the routing is real, the demo is a " +
+      "reconstruction.",
+
+    /* from core/nature.py: `overlay` is the actual prompt text appended */
+    natures: [
+      { key: "auto", label: "Auto", icon: "🟢",
+        note: "No overlay. The intent lanes carry their own tone, so personal, casual and coding already sound different.",
+        overlay: "(no overlay appended)" },
+      { key: "chill", label: "Chill", icon: "😎",
+        note: "Laid-back friend energy no matter the task.",
+        overlay: "NATURE LOCK — CHILL: Laid-back friend energy no matter the task. Slow-night vibes, jokes welcome, zero productivity pushing. Even code questions get answered relaxed." },
+      { key: "focus", label: "Focus", icon: "🎯",
+        note: "All business. Minimal words, code and results first.",
+        overlay: "NATURE LOCK — FOCUS: All business. Minimal words, direct answers, no teasing, no small talk, no questions unless essential to the task." },
+      { key: "savage", label: "Savage", icon: "🔥",
+        note: "Roast mode. Merciless, never cruel, and it still fixes the bug.",
+        overlay: "NATURE LOCK — SAVAGE: Roast mode. Heavy banter, merciless (never cruel) teasing, dry burns. Still genuinely helpful — roast the code AND fix it." },
+      { key: "professional", label: "Professional", icon: "👔",
+        note: "For screen shares and demos. No slang, no sarcasm.",
+        overlay: "NATURE LOCK — PROFESSIONAL: Polite, articulate, complete sentences. No slang, no teasing, no sarcasm." },
+    ],
+
+    /* Each question shows the real pipeline: intent → style → model.
+       `cap` is the sentence cap that style enforces. */
+    questions: [
       {
-        quote: "It is like supervising a junior developer with short-term memory loss.",
-        answer: "She reads the project graph before she answers.",
-        body:
-          "Recent projects, percent done, last event, the current blocker, and the " +
-          "decisions with their reasons. If nothing is stored she says it is fuzzy " +
-          "rather than inventing a project name.",
-        code: "core/work_recall.py",
+        id: "code",
+        ask: "my retry loop keeps hammering the API",
+        intent: "CODING", style: "coding", cap: "no cap",
+        model: "Laguna M.1", gather: "screen context, recent turns",
+        replies: {
+          auto: "Your sleep is inside the `try`, so the moment the call raises you skip straight past the wait and fire again. Move it out, back off on `base * 2 ** attempt`, and add jitter so ten clients don't retry in lockstep.",
+          chill: "Ah, that one. Your sleep is sitting inside the `try`, so when the call throws you never actually wait, you just go again. Pull it out of the block, add a bit of jitter, and it'll settle down on its own.",
+          focus: "Sleep is inside the `try`. Move it out. Back off `base * 2 ** attempt`, add jitter, re-raise on the final attempt.",
+          savage: "You wrote a retry loop that retries instantly. That is not a retry, that is a denial of service attack on someone who trusted you. The sleep is inside the `try`, so it never runs on failure. Move it out and add jitter before the API blocks your key.",
+          professional: "The delay is currently inside the `try` block, so it is skipped whenever the request raises. Move it outside the block, apply exponential backoff of base × 2^attempt, and add jitter to avoid synchronised retries. Re-raise on the final attempt.",
+        },
       },
       {
-        quote: "It keeps popping up to ask me something.",
-        answer: "Silence is a valid output.",
-        body:
-          "An engagement gate decides whether anything she noticed is worth " +
-          "interrupting you for. Most of the time it decides it is not, and you " +
-          "never hear about it.",
-        code: "core/engagement.py",
+        id: "tired",
+        ask: "I've been at this for six hours",
+        intent: "PERSONAL", style: "casual", cap: "2 sentences",
+        model: "Gemma 4 31B", gather: "work_recall, durable facts, session length",
+        replies: {
+          auto: "Six hours, and the last three commits are all called some version of fix. That is fatigue, not progress.",
+          chill: "Six hours is plenty. Nothing here is on fire, go eat something.",
+          focus: "Six hours. Returns are diminishing. Stop and resume tomorrow.",
+          savage: "Six hours, and your last three commits are fix, fix2 and actually-fix. The code stopped being the problem around hour four.",
+          professional: "You have been working for six hours, and your recent commits suggest fatigue rather than progress. I would suggest stopping here and returning tomorrow.",
+        },
       },
       {
-        quote: "Every query and document goes to a third party.",
-        answer: "The server binds to 127.0.0.1.",
-        body:
-          "Your memory is a SQLite file sitting next to the code. Nothing public is " +
-          "required, not even to sign in to GitHub, because the callback comes back " +
-          "to your own machine.",
-        code: "memory/store.py",
+        id: "who",
+        ask: "what are you?",
+        intent: "CASUAL", style: "casual", cap: "2 sentences",
+        model: "answered by AURA, not the model",
+        gather: "identity block",
+        identity: true,
+        replies: {
+          auto: "AURA. I live on your desktop, remember what you were doing, and mostly decide not to interrupt you about it.",
+          chill: "I'm AURA. I hang around on your desktop, keep track of things, and stay out of the way.",
+          focus: "AURA. Desktop companion. Memory, screen awareness, model routing, all local.",
+          savage: "AURA. I am the thing that remembers what you swore you would fix last Tuesday.",
+          professional: "I am AURA, a self-hosted desktop companion. I keep memory across sessions, read the screen when asked, and route each request to a suitable model.",
+        },
+      },
+      {
+        id: "search",
+        ask: "mutex or semaphore?",
+        intent: "SEARCH", style: "search", cap: "6 sentences",
+        model: "Nemotron 3 Super", gather: "recent turns",
+        replies: {
+          auto: "A mutex if one thing may hold it at a time, a semaphore if you are counting permits. The mutex has an owner, so the thread that locked it is the thread that unlocks it. A semaphore has no owner, which is why it works for pools and producer-consumer queues.",
+          chill: "Mutex when only one thing gets in, semaphore when you're handing out a few passes. The mutex remembers who took it, the semaphore just counts.",
+          focus: "Mutex: one holder, ownership enforced, unlock by the locking thread. Semaphore: counted permits, no owner. Pools and queues want the semaphore.",
+          savage: "If you have to ask, use the mutex. One holder, it remembers who took it, and it will scream when you unlock it from the wrong thread, which you were going to do. Semaphores are for counting permits, and they will let you leak every one.",
+          professional: "Use a mutex when exactly one thread may hold the resource at a time. Ownership is enforced, so the locking thread must also unlock it. Use a semaphore when you are counting available permits, such as a connection pool. A semaphore has no owner and may be signalled by any thread.",
+        },
       },
     ],
+
+    /* the four steps, shown live beside the answer */
+    steps: [
+      { n: "1", name: "Classify", detail: "8 intents, on the small model" },
+      { n: "2", name: "Gather",   detail: "memory, project block, screen" },
+      { n: "3", name: "Route",    detail: "5 models, per-lane keys" },
+      { n: "4", name: "Guard",    detail: "scrub, then the final gate" },
+    ],
+
+    /* shown under the guard step, real strings from response_composer.py */
+    guard: {
+      title: "What the guard removes",
+      note: "Every model output passes the persona layer before you see it.",
+      strips: [
+        "As an AI language model...",
+        "Certainly! I'd be happy to help.",
+        "Great question!",
+        "I don't have personal feelings.",
+      ],
+    },
   },
 
-  /* Four steps of a single chat turn. */
-  pipeline: {
-    title: "Four steps, every single message.",
-    lede: "Every turn is written back to SQLite, so the next one already knows.",
-    steps: [
-      {
-        n: "01", title: "Classify", question: "What kind of message is this?",
-        body:
-          "Eight intents: casual, personal, coding, search, recall, save, command, " +
-          "reminder. The classifier runs on a small model so it never eats the quota " +
-          "the real reply needs.",
-        code: "core/brain.py",
-      },
-      {
-        n: "02", title: "Gather", question: "What does she need to know?",
-        body:
-          "Recent turns pulled from the store rather than from memory, durable facts, " +
-          "the project block, and what is currently on your screen.",
-        code: "core/work_recall.py",
-      },
-      {
-        n: "03", title: "Route", question: "Which model answers?",
-        body:
-          "Five models across two providers, each lane on its own key, so one " +
-          "exhausted free tier never takes the others down with it.",
-        code: "core/ai_router.py",
-      },
-      {
-        n: "04", title: "Guard", question: "Is this fit to show you?",
-        body:
-          "Reasoning models narrate their own thinking out loud. Two filter tiers and " +
-          "a final gate stop that reaching you, and fenced code is lifted out first " +
-          "and put back byte for byte.",
-        code: "core/ai_router.py",
-      },
-    ],
-    /* the closing thought for this section lives on figures.turn.caption */
-  },
+
 
   /* The two halves. `key` is matched against capability.half below. */
   halves: [
@@ -140,21 +192,9 @@ window.AURA_CONTENT = {
     },
   ],
 
-  /* Three images, placed where they carry an idea rather than decorate one.
+  /* Images, placed where they carry an idea rather than decorate one.
      Keyed by the section they belong to; drop a key to drop the image. */
   figures: {
-    problem: {
-      src: "assets/sanctuary.webp",
-      alt: "A dark home office at night, empty chair, a laptop screen casting violet light across the desk.",
-      caption: "The room she spends most of her time in, saying nothing.",
-    },
-    turn: {
-      src: "assets/memory.webp",
-      alt: "Stratified bands of violet and amber light in darkness, like a geological core sample.",
-      caption:
-        "A filter that flattens a C++ answer into one line is worse than the leak " +
-        "it was written to prevent, so the code never goes through it.",
-    },
     halves: {
       src: "assets/graph.webp",
       alt: "A constellation of luminous nodes joined by fine edges, flowing left to right in generations.",
@@ -163,7 +203,7 @@ window.AURA_CONTENT = {
   },
 
   /* ===================================================================
-     THE LEDGER — the spine of this site.
+     THE LEDGER, the spine of this site.
      One row per capability. `status` must be a key of `states` above.
      This is the list to edit when AURA moves forward.
      =================================================================== */

@@ -19,25 +19,27 @@
   function el(id) { return document.getElementById(id); }
   function set(id, html) { var n = el(id); if (n) n.innerHTML = html; }
 
-  /* shell comments are dimmed so the command itself reads first */
+  /* `backticks` in authored copy become real inline code */
+  function ticks(s) {
+    return esc(s).replace(/`([^`]+)`/g, function (_, c) { return "<code>" + c + "</code>"; });
+  }
   function shell(code) {
     return esc(code).replace(/(#[^\n]*)/g, '<span class="c">$1</span>');
   }
   function pathTag(code) {
     return code ? '<div class="path">' + esc(code) + "</div>" : "";
   }
-  /* a figure renders only if content.js still has a key for it */
   function figure(mountId, key) {
     var f = (C.figures || {})[key];
-    if (!f) return;
+    if (!f || !el(mountId)) return;
     set(mountId,
       '<figure class="figure"><img src="' + esc(f.src) + '" alt="' + esc(f.alt) +
       '" loading="lazy"><figcaption>' + esc(f.caption) + "</figcaption></figure>");
   }
+  var reduced = window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   /* --------------------------------------------------- derived counts */
-  /* Nothing below is written down anywhere. It is all counted from the
-     capabilities list, which is why adding one row keeps the page true. */
   var caps = C.capabilities || [];
   var order = Object.keys(C.states);
   var byState = {};
@@ -64,6 +66,127 @@
   var src = el("nav-src");
   if (src) src.href = C.meta.repo;
 
+  /* ==================================================== THE DEMO ===== */
+  var D = C.demo;
+  var demoState = { nature: D.natures[0].key, q: null };
+
+  set("demo-head",
+    '<p class="label">' + esc(D.kicker) + "</p>" +
+    "<h2>" + esc(D.title) + "</h2>" +
+    '<p class="measure">' + esc(D.lede) + "</p>"
+  );
+  set("demo-honesty", esc(D.honesty));
+
+  set("nature-picker", D.natures.map(function (n) {
+    return '<button type="button" role="radio" data-n="' + esc(n.key) + '" aria-checked="' +
+      (n.key === demoState.nature) + '"><span class="ic" aria-hidden="true">' + n.icon +
+      "</span>" + esc(n.label) + "</button>";
+  }).join(""));
+
+  set("chat-asks", D.questions.map(function (q) {
+    return '<button type="button" data-q="' + esc(q.id) + '" aria-pressed="false">' +
+      esc(q.ask) + "</button>";
+  }).join(""));
+
+  function currentNature() {
+    return D.natures.filter(function (n) { return n.key === demoState.nature; })[0];
+  }
+
+  function paintNatureNote() {
+    var n = currentNature();
+    set("nature-note", esc(n.note));
+    var t = el("chat-title");
+    if (t) t.textContent = "AURA " + n.icon + " " + n.label;
+  }
+
+  /* the pipeline readout: dimmed until there is an answer to explain */
+  function paintPipe(q) {
+    var vals = q
+      ? [q.intent, q.gather, q.model, "persona layer, then the gate"]
+      : ["waiting", "waiting", "waiting", "waiting"];
+    set("pipe-steps", D.steps.map(function (s, i) {
+      return '<li class="' + (q ? "on" : "") + '">' +
+        '<span class="pipe__n">' + esc(s.n) + "</span>" +
+        '<span class="pipe__name">' + esc(s.name) + "</span>" +
+        '<span class="pipe__val">' + esc(vals[i]) + "</span>" +
+        "</li>";
+    }).join(""));
+
+    var n = currentNature();
+    set("pipe-overlay",
+      "<p>Appended to the system prompt</p><pre>" + esc(n.overlay) + "</pre>"
+    );
+
+    var styleLine = q
+      ? "<p>Style <b>" + esc(q.style) + "</b>, " + esc(q.cap) + ". Removed before you see it:</p>"
+      : "<p>" + esc(D.guard.note) + "</p>";
+    set("pipe-guard", styleLine + "<ul>" +
+      D.guard.strips.map(function (s) { return "<li>" + esc(s) + "</li>"; }).join("") +
+      "</ul>");
+  }
+
+  function bubble(cls, html) {
+    var d = document.createElement("div");
+    d.className = "msg " + cls + (reduced ? "" : " msg--in");
+    d.innerHTML = html;
+    return d;
+  }
+
+  function answer(q) {
+    var log = el("chat-log");
+    if (!log) return;
+    log.innerHTML = "";
+    log.appendChild(bubble("msg--you", esc(q.ask)));
+
+    var typing = bubble("msg--aura msg--typing", "<i></i><i></i><i></i>");
+    log.appendChild(typing);
+    paintPipe(q);
+
+    var wait = reduced ? 0 : 620;
+    window.setTimeout(function () {
+      if (typing.parentNode) typing.parentNode.removeChild(typing);
+      var reply = q.replies[demoState.nature];
+      log.appendChild(bubble("msg--aura", ticks(reply)));
+      log.scrollTop = log.scrollHeight;
+    }, wait);
+  }
+
+  function resetChat() {
+    set("chat-log",
+      '<div class="msg msg--empty">Pick a nature, then pick a question. ' +
+      "The same question answered by five different people is the whole point.</div>");
+    paintPipe(null);
+  }
+
+  var picker = el("nature-picker");
+  if (picker) picker.addEventListener("click", function (e) {
+    var b = e.target.closest("button[data-n]");
+    if (!b) return;
+    demoState.nature = b.getAttribute("data-n");
+    picker.querySelectorAll("button").forEach(function (x) {
+      x.setAttribute("aria-checked", String(x === b));
+    });
+    paintNatureNote();
+    /* the moment worth building: change her nature and the last answer
+       is spoken again, by someone else. */
+    if (demoState.q) answer(demoState.q); else paintPipe(null);
+  });
+
+  var asks = el("chat-asks");
+  if (asks) asks.addEventListener("click", function (e) {
+    var b = e.target.closest("button[data-q]");
+    if (!b) return;
+    var id = b.getAttribute("data-q");
+    demoState.q = D.questions.filter(function (q) { return q.id === id; })[0];
+    asks.querySelectorAll("button").forEach(function (x) {
+      x.setAttribute("aria-pressed", String(x === b));
+    });
+    answer(demoState.q);
+  });
+
+  paintNatureNote();
+  resetChat();
+
   /* --------------------------------------- the status strip (the ask) */
   set("strip",
     "<dl><dt>Stage</dt><dd>" + esc(C.meta.stage) + "</dd></dl>" +
@@ -77,38 +200,9 @@
     "<dl><dt>Last updated</dt><dd>" + esc(C.meta.updated) + "</dd></dl>"
   );
 
-  /* ---------------------------------------------------- the complaints */
-  set("problem-head",
-    '<p class="label">What it is</p>' +
-    "<h2>" + esc(C.problems.title) + "</h2>"
-  );
-  set("problem-rows", C.problems.items.map(function (it) {
-    return '<div class="row">' +
-      '<p class="quote">' + esc(it.quote) + "</p>" +
-      "<div><h3>" + esc(it.answer) + "</h3>" +
-      '<p class="measure" style="margin-top:10px">' + esc(it.body) + "</p>" +
-      pathTag(it.code) + "</div></div>";
-  }).join(""));
-
-  /* --------------------------------------------------- a single turn */
-  set("turn-head",
-    '<p class="label">How it works</p>' +
-    "<h2>" + esc(C.pipeline.title) + "</h2>" +
-    '<p class="measure">' + esc(C.pipeline.lede) + "</p>"
-  );
-  set("turn-rows", C.pipeline.steps.map(function (s) {
-    return '<div class="row">' +
-      "<div><h3>" + esc(s.n) + " " + esc(s.title) + "</h3>" +
-      '<p style="margin-top:8px">' + esc(s.question) + "</p></div>" +
-      '<div><p class="measure">' + esc(s.body) + "</p>" + pathTag(s.code) + "</div>" +
-      "</div>";
-  }).join(""));
-  figure("fig-problem", "problem");
-  figure("fig-turn", "turn");
-
   /* --------------------------------------------------- the two halves */
   set("halves-head",
-    '<p class="label">What you get</p>' +
+    '<p class="label">What she does</p>' +
     "<h2>Two halves, one brain.</h2>"
   );
   set("halves-grid", C.halves.map(function (h) {
@@ -124,10 +218,10 @@
   /* ============================== THE LEDGER — the spine of the page = */
   set("stage-head",
     '<p class="label">Current stage</p>' +
-    "<h2>Everything it can do, and what it cannot do yet.</h2>" +
-    '<p class="measure">This list is the project’s own record, not a summary of it. ' +
-    "When a capability ships, one line changes in <code>content.js</code> and this " +
-    "section, the counts above and the progress bar all move with it.</p>"
+    "<h2>Everything she can do, and what she cannot do yet.</h2>" +
+    '<p class="measure">The project’s own record, not a summary of it. When a ' +
+    "capability ships, one line changes in <code>content.js</code> and this section, " +
+    "the counts above and the progress bar all move with it.</p>"
   );
 
   var filters = [{ k: "all", label: "Everything (" + total + ")" }].concat(
@@ -184,7 +278,7 @@
       '<span class="rung__n">' + (i + 1) + "</span>" +
       '<span class="rung__name">' + esc(r.name) + "</span>" +
       '<span class="rung__grants">' + esc(r.grants) +
-        (r.note ? " — " + esc(r.note) : "") + "</span>" +
+        (r.note ? ", " + esc(r.note) : "") + "</span>" +
       "</div>";
   }).join(""));
 
@@ -230,7 +324,7 @@
     '<p class="measure">' + esc(C.close.body) + "</p>" +
     '<div class="hero__actions">' +
       '<a class="btn btn--go" href="' + esc(C.meta.repo) + '" rel="noopener">Clone the repository</a>' +
-      '<a class="btn btn--ghost" href="#stage">See what runs today</a>' +
+      '<a class="btn btn--ghost" href="#demo">Back to the demo</a>' +
     "</div>"
   );
   set("footer",
@@ -238,29 +332,6 @@
     '<a href="' + esc(C.meta.repo) + '" rel="noopener">Source</a>' +
     "<span>Built by Shaurya.</span>"
   );
-
-  /* -------------------------------------------------------- the spine */
-  var marks = [
-    ["problem", "What it is"], ["turn", "How it works"], ["halves", "Two halves"],
-    ["stage", "Current stage"], ["ladder", "Permissions"], ["install", "Install"],
-    ["faq", "Questions"]
-  ];
-  set("rail", marks.map(function (m) {
-    return '<a href="#' + m[0] + '" data-sec="' + m[0] + '"><i></i><span>' + m[1] + "</span></a>";
-  }).join(""));
-
-  var links = Array.prototype.slice.call(document.querySelectorAll(".rail a"));
-  if ("IntersectionObserver" in window) {
-    var io = new IntersectionObserver(function (entries) {
-      entries.forEach(function (en) {
-        if (!en.isIntersecting) return;
-        links.forEach(function (a) {
-          a.classList.toggle("on", a.getAttribute("data-sec") === en.target.id);
-        });
-      });
-    }, { rootMargin: "-45% 0px -50% 0px" });
-    marks.forEach(function (m) { var n = el(m[0]); if (n) io.observe(n); });
-  }
 
   /* the single orchestrated moment: the hero settles once, on load */
   requestAnimationFrame(function () {

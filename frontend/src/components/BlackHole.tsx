@@ -1,96 +1,185 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import type { AuraState } from "../types";
 import { useCoreStore } from "../stores/coreStore";
 import { usePlanetStore } from "../stores/planetStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { useRoster, useRosterStore } from "../stores/rosterStore";
+import { skinFor, useSkinStore } from "../stores/skinStore";
+import { skinById, skinUrl } from "../data/planetSkins";
+import { useBootStore } from "../stores/bootStore";
+import { coreGeom, coreSignals, emitCore, onCore } from "../lib/coreBus";
+import { sfx } from "../lib/sfx";
+
+// Shared pointer state for the scene (viewport px).
+const pointer = { x: -1e4, y: -1e4, ui: false };
 
 // ============================================================================
-// AURA CORE — Black Hole, built 1:1 from the design spec:
-//   Event horizon 240px · 12 orbital guides · Main #7D3CFF · Inner #A76DFF
-//   Photon ring #F3D9FF · Disk: purple/pink/blue/orange · 90s/revolution
-//   Subtle pulse · 20% soft purple bloom · gravitational lens arcs
-// Layer order: bloom → guides → lens → REAR disk → inner glow →
-//              event horizon (pure black) → photon ring → FRONT disk
+// AURA CORE — the black hole and its planets.
+//
+// The black hole itself is film: a Higgsfield render (Kling 3.0) looped
+// seamlessly and encoded as WebM with a luminance alpha channel, so its light
+// lays over the space plate like light and the void stays empty. The canvas
+// adds everything that has to react live — the planets on a tilted orbital
+// plane (in front of and behind the hole), their orbits, gravity waves, and
+// the light that falls in when you type or send.
+//
+// Draw order: backing → rear orbits → planets behind → horizon occluder →
+//             the film → waves → front orbits → planets in front → infall
 // ============================================================================
 
-// Monochrome violet palette — matched to the reference still: a black void,
-// one white-hot ring wrapped in electric purple, and nothing else in the way.
-const MAIN = "125,60,255";    // #7D3CFF electric purple
-const INNER = "167,109,255";  // #A76DFF inner glow
-const PHOTON = "243,217,255"; // #F3D9FF near-white ring light
-const SOFT = "196,150,255";   // pale violet wisps
-const DEEP = "139,101,255";   // #8B65FF
-const WHITE = "255,252,255";  // white-hot sparks / beam core
-const CYAN = "56,225,255";
-// Realistic ring dust — neutral space tones (sand, grey ice, white sparkle),
-// NOT the planet's color. Like the real thing.
-const DUST_SAND = "218,208,186";
-const DUST_GREY = "198,200,212";
-const DUST_ICE = "255,250,240";
+const LOOP_SRC = "./cosmos/core-loop.webm";
+const BIRTH_SRC = "./cosmos/core-birth.webm";
+// Where the photon ring sits inside those clips (1600×650 frames).
+const VW = 1600, VH = 650, VCX = 804, VCY = 326, VR = 173;
 
-const rgba = (c: string, a: number) => `rgba(${c},${a < 0 ? 0 : a > 1 ? 1 : a})`;
-
-type OrbState = "idle" | "listening" | "thinking" | "speaking" | "focus" | "alert";
-const SPIN: Record<OrbState, number> = { idle: 1, listening: 1.6, thinking: 5, speaking: 2.4, focus: 0.7, alert: 7 };
-const GLOW: Record<OrbState, number> = { idle: 0.55, listening: 0.72, thinking: 0.95, speaking: 0.85, focus: 0.45, alert: 1 };
-
-const REF = 680;         // reference composition size (px)
-// Fixed orbit slots (fractions of the guide radius). One planet per slot;
-// dropping a planet on a taken slot swaps the occupant onto the vacated one.
-// Pushed outward so the enlarged horizon keeps generous clearance to the
-// first orbit even at bigger Core / Planet sizes.
-// One slot per model (never fewer than the original nine), spread over the
-// same 0.74–1.38 band so a bigger roster packs tighter instead of growing
-// past the stage. With nine models this is exactly the old hand-set list.
-// The roster grows when a planet is installed, so the slots are computed
-// from it (slotFracsFor) rather than fixed at import.
-const slotFracsFor = (n: number) => {
-  const count = Math.max(9, n);
-  return Array.from({ length: count }, (_, i) => 0.74 + (0.64 * i) / (count - 1));
-};
-// A newly installed planet is born at the event horizon and spirals out to
-// its orbit — once per planet per app session.
-const BIRTH_MS = 2800;
+const TILT = 0.36;       // the orbital plane seen from above: height/width of an orbit
+const MAX_R = 128;       // photon-ring radius cap (px)
+const INNER = 1.9;       // first orbit, in ring radii
+const SPAN = 2.55;       // innermost → outermost orbit, in ring radii
+const BIRTH_MS = 2800;   // a planet's spiral out of the horizon
 const BIRTH_WINDOW_MS = 5 * 60_000;
 const BIRTHS_PLAYED = new Set<string>();
-const MAX = 420;         // on-screen cap — keeps the core compact in the stage
-const HORIZON = 168;     // event-horizon radius (≈40% larger — cinematic redesign)
-const RINGS = 12;        // orbital guide count, per spec
+
+const PHOTON = "244,238,255";
+const VIOLET = "155,123,255";
+const SIGNAL = "127,231,255";
+
+const rgba = (c: string, a: number) => `rgba(${c},${a < 0 ? 0 : a > 1 ? 1 : a})`;
+const smooth = (e0: number, e1: number, x: number) => {
+  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+};
+const hexRgb = (h: string) => {
+  const n = parseInt(h.slice(1), 16);
+  return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`;
+};
+
+type CoreState = "idle" | "listening" | "thinking" | "speaking";
+const RATE: Record<CoreState, number> = { idle: 0.8, listening: 0.95, thinking: 1.7, speaking: 1.1 };
+const GLOW: Record<CoreState, number> = { idle: 1, listening: 1.08, thinking: 1.28, speaking: 1.14 };
+const INFALL: Record<CoreState, number> = { idle: 0.5, listening: 0.9, thinking: 6, speaking: 1.6 };
+
+// One slot per model (never fewer than nine), spread evenly from the inner to
+// the outer orbit. The roster grows when a planet is installed.
+const slotFracsFor = (n: number) => {
+  const count = Math.max(9, n);
+  return Array.from({ length: count }, (_, i) => i / (count - 1));
+};
+
+// ---- planet sprites --------------------------------------------------------
+// 512px renders, stepped down by halves into a sprite near the drawn size —
+// drawing 512 → 40px every frame would shimmer.
+const IMG = new Map<string, HTMLImageElement>();
+const SPRITES = new Map<string, HTMLCanvasElement>();
+function image(id: string) {
+  let im = IMG.get(id);
+  if (!im) {
+    im = new Image();
+    im.decoding = "async";
+    im.src = skinUrl(id);
+    IMG.set(id, im);
+  }
+  return im;
+}
+function sprite(id: string, px: number): HTMLCanvasElement | null {
+  const im = image(id);
+  if (!im.complete || !im.naturalWidth) return null;
+  const size = Math.max(32, Math.min(512, Math.ceil(px / 24) * 24));
+  const key = id + ":" + size;
+  const hit = SPRITES.get(key);
+  if (hit) return hit;
+  let src: CanvasImageSource = im;
+  let sw = im.naturalWidth;
+  while (sw / 2 >= size) {
+    const t = document.createElement("canvas");
+    t.width = t.height = Math.round(sw / 2);
+    const tc = t.getContext("2d")!;
+    tc.imageSmoothingQuality = "high";
+    tc.drawImage(src, 0, 0, t.width, t.height);
+    src = t;
+    sw = t.width;
+  }
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const cc = c.getContext("2d")!;
+  cc.imageSmoothingQuality = "high";
+  cc.drawImage(src, 0, 0, size, size);
+  SPRITES.set(key, c);
+  return c;
+}
+// Body radius inside a sprite (the rest is atmosphere).
+const SPRITE_PAD = 1.18;
+
+// A soft point of light, drawn once and stamped for every particle of infall.
+let GLINT: HTMLCanvasElement | null = null;
+function glint() {
+  if (GLINT) return GLINT;
+  const c = document.createElement("canvas");
+  c.width = c.height = 32;
+  const g = c.getContext("2d")!;
+  const r = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+  r.addColorStop(0, "rgba(255,252,255,1)");
+  r.addColorStop(0.18, "rgba(226,212,255,0.85)");
+  r.addColorStop(0.45, "rgba(160,126,255,0.28)");
+  r.addColorStop(1, "rgba(120,90,255,0)");
+  g.fillStyle = r;
+  g.fillRect(0, 0, 32, 32);
+  GLINT = c;
+  return c;
+}
+
+function makeVideo(src: string, loop: boolean) {
+  const v = document.createElement("video");
+  v.src = src;
+  v.muted = true;
+  v.loop = loop;
+  v.playsInline = true;
+  v.preload = "auto";
+  v.setAttribute("aria-hidden", "true");
+  return v;
+}
 
 interface Props {
   state: AuraState;
-  size?: number;
   activeModelId?: string | null; // planet of the model that last answered
 }
 
-/** One crackling electric wisp swirling around the void. */
-interface Filament {
-  r: number; a0: number; len: number; w: number; c: string;
-  al: number; sp: number; ph: number; amp: number;
+interface Planet {
+  id: string; name: string; role: string; ring: boolean; idx: number;
+  a: number;          // angle on its orbit
+  w: number;          // angular speed (rad/s)
+  def: number;        // default slot
+  birthAt: number;    // performance.now() the birth started, 0 = none
+  hov: number;        // eased hover 0..1
+  kickAt: number;     // last shockwave
+  x: number; y: number; z: number; pr: number; rx: number; hidden: boolean;
+  seenAt: number;     // when its art was first ready (it fades in from there)
 }
-interface Node { ring: number; a: number; tw: number; big: boolean; }
+interface Mote { x: number; y: number; vx: number; vy: number; delay: number; life: number; c: string; }
+interface Wave { at: number; strong: boolean; }
 
-export default function BlackHole({ state, size: sizeProp, activeModelId = null }: Props) {
+export default function BlackHole({ state, activeModelId = null }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const wrapRef = useRef<HTMLDivElement>(null);
+  const hostRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef<AuraState>(state);
   stateRef.current = state;
   const activeRef = useRef<string | null>(activeModelId);
   activeRef.current = activeModelId;
 
   // Built-in + installed planets. The scene rebuilds only when the SET of
-  // planets changes (an install or an uninstall), not on every roster fetch.
+  // planets changes, not on every roster fetch.
   const roster = useRoster();
   const rosterKey = roster.map((m) => m.id).join("|");
+  const rosterRef = useRef(roster);
+  rosterRef.current = roster;
   const born = useRosterStore((st) => st.born);
   const bornRef = useRef(born);
   bornRef.current = born;
-  const slotFracsRef = useRef(slotFracsFor(roster.length));
-  slotFracsRef.current = slotFracsFor(roster.length);
+  const picks = useSkinStore((s) => s.picks);
+  const picksRef = useRef(picks);
+  picksRef.current = picks;
 
-  // Planet settings (Planets menu in the top bar) — read live via ref so the
-  // sliders act instantly without restarting the render loop.
+  // Planets menu (top bar) — read live so sliders act instantly.
   const pOrbit = usePlanetStore((st) => st.orbit);
   const pSize = usePlanetStore((st) => st.size);
   const pSpeed = usePlanetStore((st) => st.speed);
@@ -108,824 +197,690 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
   metaRef.current = metaMap;
   const setSlotsRef = useRef(setSlots);
   setSlotsRef.current = setSlots;
+  const slotFracsRef = useRef(slotFracsFor(roster.length));
+  slotFracsRef.current = slotFracsFor(roster.length);
 
-  // Sanctuary settings (backend app_settings, synced by settingsStore).
-  // `density` sizes the particle arrays, so it has to be a real dependency of
-  // the setup effect — changing it rebuilds the scene. Rotation and labels are
-  // read per-frame through refs, so those apply instantly without a rebuild.
+  // Settings → Appearance / Orbit lines.
   const density = useSettingsStore((st) => st.density);
   const rotationMul = useSettingsStore((st) => st.rotationMul);
   const showLabels = useSettingsStore((st) => st.showLabels);
-  const rotationMulRef = useRef(rotationMul);
-  rotationMulRef.current = rotationMul;
-  const showLabelsRef = useRef(showLabels);
-  showLabelsRef.current = showLabels;
-  // Orbit-line settings (Settings → Orbit Lines) — read per-frame via ref so
-  // the sliders act live without a scene rebuild.
   const orbitMul = useSettingsStore((st) => st.orbitMul);
   const orbitWidthMul = useSettingsStore((st) => st.orbitWidthMul);
   const orbitStyle = useSettingsStore((st) => st.orbitStyle);
-  const orbitCfgRef = useRef({ mul: 1, wmul: 1, style: "dashed" as string });
-  orbitCfgRef.current = { mul: orbitMul, wmul: orbitWidthMul, style: orbitStyle };
-  // live geometry + planet objects, for hit-testing and drag
-  const planetsRef = useRef<Array<{ id: string; a: number; x: number; y: number; curR: number; def: number }>>([]);
-  const geomRef = useRef({ cx: 0, cy: 0, rMax: 1, maxR: 1, minR: 0, mul: 1 });
-  const planetDragRef = useRef<string | null>(null);
-  const dragSlotRef = useRef<number | null>(null);
-  if (!planetDragRef.current) slotsRef.current = slotsMap; // sync unless mid-drag
+  const liveCfgRef = useRef({ density: 1, rotation: 1, labels: true, omul: 1, owidth: 1, ostyle: "dashed" });
+  liveCfgRef.current = {
+    density, rotation: rotationMul, labels: showLabels,
+    omul: orbitMul, owidth: orbitWidthMul, ostyle: orbitStyle,
+  };
 
-  // All appearance/position comes from the core store (Core menu in the top bar).
-  // Editing is gated: drag & sliders only work in edit mode; Save persists.
+  // Core menu (top bar): size, glow and position — adjustable in edit mode.
   const scalePct = useCoreStore((s) => s.scale);
   const glowPct = useCoreStore((s) => s.glow);
   const posX = useCoreStore((s) => s.x);
   const posY = useCoreStore((s) => s.y);
   const editing = useCoreStore((s) => s.editing);
   const setCfg = useCoreStore((s) => s.set);
-  const glowMulRef = useRef(1);
-  glowMulRef.current = glowPct / 100;
+  const coreCfgRef = useRef({ scale: 1, glow: 1, x: 0, y: 0, editing: false });
+  coreCfgRef.current = { scale: scalePct / 100, glow: glowPct / 100, x: posX, y: posY, editing };
 
-  const [stageMin, setStageMin] = useState<number>(sizeProp ?? MAX);
-  const stageDims = useRef({ w: sizeProp ?? MAX, h: sizeProp ?? MAX });
+  const bootPhase = useBootStore((s) => s.phase);
+  const bootRef = useRef(bootPhase);
+  bootRef.current = bootPhase;
 
-  // Fit inside the stage: never bigger than the stage, never comically small.
+  // live scene objects shared with the pointer handlers
+  const planetsRef = useRef<Planet[]>([]);
+  const hoverRef = useRef<string | null>(null);
+  const planetDragRef = useRef<string | null>(null);
+  const dragSlotRef = useRef<number | null>(null);
+  const geomRef = useRef({ cx: 0, cy: 0, R: 100, left: 0, top: 0, stageW: 0, stageH: 0 });
+  if (!planetDragRef.current) slotsRef.current = slotsMap; // sync unless mid-drag
+
+  // The stage: where the core is centred and what it has to fit inside.
+  const stageRef = useRef({ x: window.innerWidth / 2, y: window.innerHeight / 2, w: 800, h: 600 });
   useEffect(() => {
-    if (sizeProp) return;
-    const el = wrapRef.current?.parentElement;
-    if (!el) return;
-    const ro = new ResizeObserver((entries) => {
-      const r = entries[0].contentRect;
-      stageDims.current = { w: r.width, h: r.height };
-      const m = Math.floor(Math.min(r.width, r.height));
-      if (m > 100) setStageMin(m);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [sizeProp]);
+    const host = hostRef.current;
+    if (!host) return;
+    const measure = () => {
+      const r = host.getBoundingClientRect();
+      stageRef.current = { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height };
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(host);
+    window.addEventListener("resize", measure);
+    return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
+  }, []);
 
-  const fitBase = sizeProp ?? Math.min(MAX, stageMin * 0.86);
-  const size = Math.max(160, Math.min(stageMin, Math.round((fitBase * scalePct) / 100)));
+  // ---- the two films: the birth (startup) and the loop --------------------
+  const filmsRef = useRef<{ loop: HTMLVideoElement; birth: HTMLVideoElement | null; revealT: number }>();
+  useEffect(() => {
+    const loop = makeVideo(LOOP_SRC, true);
+    const birth = bootRef.current === "intro" ? makeVideo(BIRTH_SRC, false) : null;
+    // Kept in the DOM (1px, invisible) so Chromium never parks the decoder.
+    const shelf = document.createElement("div");
+    shelf.className = "bh-films";
+    shelf.append(loop);
+    if (birth) shelf.append(birth);
+    document.body.append(shelf);
+    filmsRef.current = { loop, birth, revealT: 0 };
+    void loop.play().catch(() => { /* retried on the first gesture */ });
+    const retry = () => { if (loop.paused) void loop.play().catch(() => {}); };
+    window.addEventListener("pointerdown", retry);
+
+    let fallback = 0;
+    let disposed = false;
+    if (birth) {
+      // (a pause() from unmounting rejects play() — that isn't a failure)
+      const reveal = () => { if (!disposed) useBootStore.getState().reveal(); };
+      birth.addEventListener("ended", reveal);
+      birth.addEventListener("error", reveal);
+      birth.play().catch(reveal);
+      // never hold the app hostage to a slow decoder
+      fallback = window.setTimeout(reveal, 7000);
+    }
+    return () => {
+      disposed = true;
+      window.clearTimeout(fallback);
+      window.removeEventListener("pointerdown", retry);
+      loop.pause();
+      birth?.pause();
+      shelf.remove();
+    };
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
     const ctx = canvas.getContext("2d")!;
-    // The canvas covers the ENTIRE app (viewport diagonal), so planets and
-    // orbits are never cut off no matter where the core sits or how far out
-    // an orbit goes. DPR is trimmed on huge canvases to keep memory sane.
-    const D = Math.ceil(Math.hypot(window.innerWidth, window.innerHeight));
-    const DPR = Math.min(window.devicePixelRatio || 1, D > 1700 ? 1.5 : 2);
-    canvas.width = D * DPR;
-    canvas.height = D * DPR;
-    canvas.style.width = D + "px";
-    canvas.style.height = D + "px";
-    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-
-    const s = size / REF;
-    const cx = D / 2, cy = D / 2;
-    const R = HORIZON * s; // event-horizon radius
-
-    // Particle counts scale with the Sanctuary "particles" setting — this is
-    // also the performance dial on a weaker GPU, so it's clamped rather than
-    // trusted blindly.
-    const dens = Math.max(0.1, Math.min(1.8, density));
-    const N = (base: number) => Math.max(4, Math.round(base * dens));
-
-    // ---- Electric filaments — the crackling violet wisps of the reference.
-    // No accretion disk, no rainbow: just lightning-like plasma threads
-    // hugging the ring, thinning out with distance. Each one is a curved arc
-    // whose radius wobbles with two sine frequencies, so it reads as a
-    // living electric tendril rather than a clean circle.
-    const filaments: Filament[] = [];
-    for (let i = 0; i < N(110); i++) {
-      const rn = 1.05 + Math.pow(Math.random(), 1.8) * 0.95; // 1.05–2.0 R, dense near the ring
-      const roll = Math.random();
-      filaments.push({
-        r: rn,
-        a0: Math.random() * Math.PI * 2,
-        len: 0.5 + Math.random() * 2.3,
-        w: roll > 0.85 ? 0.4 + Math.random() * 0.5 : 0.6 + Math.random() * 1.3,
-        c: roll > 0.92 ? WHITE : roll > 0.62 ? INNER : roll > 0.28 ? MAIN : SOFT,
-        al: (0.08 + Math.random() * 0.26) + Math.max(0, 1.55 - rn) * 0.22,
-        sp: 0.22 / rn + 0.07,
-        ph: Math.random() * Math.PI * 2,
-        amp: 0.015 + Math.random() * 0.05,
-      });
-    }
-
-    // Faint concentric swirl echoes — the ghost circles around the still.
-    const echoes = Array.from({ length: 6 }, (_, i) => ({
-      r: 1.28 + i * 0.17 + Math.random() * 0.05,
-      al: 0.055 - i * 0.007,
-    }));
-
-    // ---- Planet system: AI models orbiting AURA in harmonic synchrony ------
-    // Per the design sheet: equal angular spacing, own orbit + color + nature,
-    // slow orbits (60–120s), rim lit by the core, shadow side away, dashed
-    // orbit guides. The ACTIVE model (last answered) orbits faster + glows.
-    const hexRgb = (h: string) => {
-      const n = parseInt(h.slice(1), 16);
-      return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`;
+    let D = 0, DPR = 1;
+    const fit = () => {
+      // The canvas spans the viewport diagonal, so no orbit is ever clipped
+      // wherever the core sits.
+      D = Math.ceil(Math.hypot(window.innerWidth, window.innerHeight));
+      DPR = Math.min(window.devicePixelRatio || 1, D > 1700 ? 1.5 : 2);
+      canvas.width = Math.round(D * DPR);
+      canvas.height = Math.round(D * DPR);
+      canvas.style.width = D + "px";
+      canvas.style.height = D + "px";
     };
-    // Pre-rendered surface texture per planet — the new card design: dark
-    // volcanic rock threaded with glowing energy veins in the planet's own
-    // color, a few white-hot nodes where the cracks meet, soft energy
-    // patches underneath. Rotated live for the self-spin motion.
-    const makeTexture = (rgb: string) => {
-      const T = 160;
-      const tc = document.createElement("canvas");
-      tc.width = T; tc.height = T;
-      const t = tc.getContext("2d")!;
-      const c0 = T / 2;
-      // dark rocky base, faintly lit from the upper-left in its own color
-      const base = t.createRadialGradient(c0 - T * 0.14, c0 - T * 0.14, T * 0.06, c0, c0, T / 2);
-      base.addColorStop(0, `rgba(${rgb},0.34)`);
-      base.addColorStop(0.4, "rgba(18,16,30,1)");
-      base.addColorStop(1, "rgba(5,4,12,1)");
-      t.fillStyle = base;
-      t.beginPath(); t.arc(c0, c0, T / 2, 0, Math.PI * 2); t.fill();
-      t.save();
-      t.beginPath(); t.arc(c0, c0, T / 2, 0, Math.PI * 2); t.clip();
-      // rock mottling — dark craters and plates
-      for (let i = 0; i < 34; i++) {
-        const a = Math.random() * Math.PI * 2, rr = Math.random() * T * 0.48;
-        const x = c0 + Math.cos(a) * rr, y = c0 + Math.sin(a) * rr;
-        const sr = T * (0.04 + Math.random() * 0.13);
-        const sg = t.createRadialGradient(x, y, 0, x, y, sr);
-        sg.addColorStop(0, "rgba(0,0,8,0.4)");
-        sg.addColorStop(1, "rgba(0,0,0,0)");
-        t.fillStyle = sg;
-        t.beginPath(); t.arc(x, y, sr, 0, Math.PI * 2); t.fill();
-      }
-      // soft molten patches glowing under the crust
-      for (let i = 0; i < 5; i++) {
-        const a = Math.random() * Math.PI * 2, rr = Math.random() * T * 0.4;
-        const x = c0 + Math.cos(a) * rr, y = c0 + Math.sin(a) * rr;
-        const sr = T * (0.1 + Math.random() * 0.16);
-        const sg = t.createRadialGradient(x, y, 0, x, y, sr);
-        sg.addColorStop(0, `rgba(${rgb},0.3)`);
-        sg.addColorStop(1, "rgba(0,0,0,0)");
-        t.fillStyle = sg;
-        t.beginPath(); t.arc(x, y, sr, 0, Math.PI * 2); t.fill();
-      }
-      // glowing energy veins — jagged branching cracks of pure color
-      t.lineCap = "round";
-      t.shadowColor = `rgba(${rgb},1)`;
-      for (let i = 0; i < 16; i++) {
-        t.shadowBlur = 4 + Math.random() * 6;
-        t.strokeStyle = `rgba(${rgb},${0.35 + Math.random() * 0.5})`;
-        t.lineWidth = 0.6 + Math.random() * 1.5;
-        t.beginPath();
-        const a = Math.random() * Math.PI * 2, rr = Math.random() * T * 0.42;
-        let x = c0 + Math.cos(a) * rr, y = c0 + Math.sin(a) * rr;
-        t.moveTo(x, y);
-        const segs = 4 + Math.floor(Math.random() * 5);
-        for (let k = 0; k < segs; k++) {
-          x += (Math.random() - 0.5) * T * 0.2;
-          y += (Math.random() - 0.5) * T * 0.2;
-          t.lineTo(x, y);
-        }
-        t.stroke();
-      }
-      // white-hot nodes where the cracks meet
-      for (let i = 0; i < 9; i++) {
-        const a = Math.random() * Math.PI * 2, rr = Math.random() * T * 0.4;
-        t.shadowBlur = 5;
-        t.shadowColor = "rgba(255,255,255,1)";
-        t.fillStyle = `rgba(255,255,255,${0.4 + Math.random() * 0.5})`;
-        t.beginPath();
-        t.arc(c0 + Math.cos(a) * rr, c0 + Math.sin(a) * rr, 0.7 + Math.random() * 0.9, 0, Math.PI * 2);
-        t.fill();
-      }
-      t.shadowBlur = 0;
-      t.restore();
-      return tc;
-    };
+    fit();
+    window.addEventListener("resize", fit);
 
-    interface Planet {
-      id: string; name: string; role: string; c: string;
-      a: number; def: number; w: number; pr: number;
-      tex: HTMLCanvasElement; rot: number; rw: number;
-      x: number; y: number; curR: number;
-      ring: boolean; tilt: number;
-      ringA: number; ringW: number;
-      ringDust: Array<{ ang: number; rf: number; sz: number; al: number; t: string }>;
-      birthAt: number; // performance.now() when its birth started, 0 = none
-      // card-design extras: faint local orbit circles + tiny travelling dots,
-      // and one small grey moon of its own
-      loc: number[];
-      locDots: Array<{ ri: number; a: number; w: number }>;
-      moonA: number; moonW: number; moonD: number; moonS: number;
-    }
     const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-    const SLOT_FRACS = slotFracsRef.current;
-    const planets: Planet[] = roster.map((m, i) => ({
-      id: m.id,
-      name: m.name,
-      role: m.role,
-      c: hexRgb(m.color),
-      a: (i * Math.PI * 2) / roster.length + 0.4, // equal spacing start
-      def: i % SLOT_FRACS.length,                  // default orbit slot
+    const list = rosterRef.current;
+    const intro = bootRef.current === "intro";
+    const planets: Planet[] = list.map((m, i) => ({
+      id: m.id, name: m.name, role: m.role, ring: !!m.ring, idx: i,
+      a: (i * Math.PI * 2) / list.length + 0.5 + (i % 2) * 0.35,
+      w: 0, def: i,
       birthAt: (() => {
+        if (intro) return -1; // born when the startup reveal begins
         const t = bornRef.current[m.id];
         if (!t || reduceMotion || BIRTHS_PLAYED.has(m.id) || Date.now() - t > BIRTH_WINDOW_MS) return 0;
         BIRTHS_PLAYED.add(m.id);
         return performance.now();
       })(),
-      w: (Math.PI * 2) / (70 + (i % 5) * 12),     // 70–118s per revolution
-      pr: 11 + (i % 3) * 3,                        // bigger, like the cards
-      tex: makeTexture(hexRgb(m.color)),
-      rot: Math.random() * Math.PI * 2,
-      rw: (Math.PI * 2) / (25 + (i % 4) * 6),      // self-rotation 25–43s
-      x: 0, y: 0, curR: 0,                          // live position (hit-testing)
-      ring: !!m.ring,                                // models that see images wear rings
-      tilt: -0.45 + (i % 3) * 0.35,
-      ringA: Math.random() * Math.PI * 2,
-      ringW: (Math.PI * 2) / (14 + (i % 4) * 4),     // ring revolves in 14–26s
-      ringDust: !m.ring ? [] : Array.from({ length: 95 }, () => {
-        const roll = Math.random();
-        return {
-          ang: Math.random() * Math.PI * 2,
-          rf: 0.82 + Math.random() * 0.36,           // spread across the band
-          sz: roll > 0.93 ? 1.6 + Math.random() : 0.5 + Math.random() * 0.8,
-          al: roll > 0.93 ? 0.85 : 0.2 + Math.random() * 0.45, // comets sparkle
-          t: roll > 0.93 ? DUST_ICE : roll > 0.5 ? DUST_SAND : DUST_GREY,
-        };
-      }),
-      loc: [1.55, 1.95, 2.35].slice(0, 2 + (i % 2)),
-      locDots: Array.from({ length: 3 + (i % 3) }, () => ({
-        ri: Math.floor(Math.random() * 3),
-        a: Math.random() * Math.PI * 2,
-        w: 0.25 + Math.random() * 0.4,
-      })),
-      moonA: Math.random() * Math.PI * 2,
-      moonW: (Math.PI * 2) / (16 + (i % 5) * 6),     // one lap in 16–40s
-      moonD: 1.65 + (i % 3) * 0.32,
-      moonS: 0.14 + (i % 3) * 0.04,
+      hov: 0, kickAt: -1e9,
+      x: 0, y: 0, z: 0, pr: 0, rx: 1, hidden: false, seenAt: 0,
     }));
-    planetsRef.current = planets as never[];
+    planetsRef.current = planets;
+    for (const p of planets) image(skinFor(picksRef.current, p.id, p.idx));
 
-    // ---- Orbital guides + node dots ----------------------------------------
-    const rMin = R * 1.4, rMax = size / 2 - 4 * s;
-    geomRef.current = { cx, cy, rMax, maxR: D / 2 - 28 * s, minR: R * 1.25, mul: 1 };
-    const guideR: number[] = [];
-    for (let i = 0; i < RINGS; i++) guideR.push(rMin + ((rMax - rMin) * i) / (RINGS - 1));
-    const nodes: Node[] = [];
-    for (let i = 0; i < RINGS; i++) {
-      const n = 1 + Math.floor(Math.random() * 3);
-      for (let j = 0; j < n; j++) {
-        nodes.push({ ring: i, a: Math.random() * Math.PI * 2, tw: Math.random() * Math.PI * 2, big: Math.random() < 0.14 });
-      }
-    }
-
-    let rot = 0, glow = 0.55, pulse = 0, raf = 0;
+    const motes: Mote[] = [];
+    const waves: Wave[] = [];
+    let glowBoost = 0;
+    let Rc = 0;
+    const center = { x: stageRef.current.x, y: stageRef.current.y };
+    let orbitFade = intro ? 0 : 1;
+    let birthsQueued = !intro;
+    let lastRate = -1;
+    let loopShownAt = 0;
+    let nextAmbient = 0;
+    let nextWave = performance.now() + 6000;
     let last = performance.now();
+    let raf = 0;
+
+    const toCanvas = (vx: number, vy: number) => ({
+      x: vx - (center.x - D / 2),
+      y: vy - (center.y - D / 2),
+    });
+    const spawn = (x: number, y: number, n: number, spread: number, delayMax: number, up: number) => {
+      for (let i = 0; i < n; i++) {
+        const p = toCanvas(x + (Math.random() - 0.5) * spread, y + (Math.random() - 0.5) * 8);
+        motes.push({
+          x: p.x, y: p.y,
+          vx: (Math.random() - 0.5) * 120, vy: -up * (0.4 + Math.random() * 0.8),
+          delay: Math.random() * delayMax, life: 0,
+          c: Math.random() < 0.25 ? SIGNAL : Math.random() < 0.5 ? PHOTON : "205,186,255",
+        });
+      }
+      if (motes.length > 600) motes.splice(0, motes.length - 600);
+    };
+    const offBus = onCore((e) => {
+      if (reduceMotion) return;
+      if (e.kind === "spark") spawn(e.x, e.y, 2, 6, 0, 90);
+      else if (e.kind === "feed") {
+        for (let i = 0; i < 44; i++) spawn(e.x + Math.random() * e.w, e.y + Math.random() * e.h, 1, 0, 0.35, 160);
+      } else if (e.kind === "pulse") {
+        waves.push({ at: performance.now(), strong: false });
+        glowBoost = Math.min(0.5, glowBoost + 0.25);
+      } else if (e.kind === "shock") {
+        const now = performance.now();
+        waves.push({ at: now, strong: true });
+        glowBoost = Math.min(0.7, glowBoost + 0.45);
+        for (const p of planets) p.kickAt = now;
+      }
+    });
 
     const draw = (now: number) => {
+      raf = requestAnimationFrame(draw);
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
-      const os: OrbState = (stateRef.current as OrbState) in SPIN ? (stateRef.current as OrbState) : "idle";
-      const baseW = (Math.PI * 2) / 90; // spec: 90 s per revolution
-      const w = baseW * SPIN[os] * rotationMulRef.current;
-      rot = (rot + w * dt) % (Math.PI * 2);
-      glow += (GLOW[os] * glowMulRef.current - glow) * Math.min(1, dt * 4);
-      pulse += dt * (os === "speaking" ? 2.6 : os === "thinking" ? 1.8 : 0.9);
-      const breathe = 1 + 0.015 * Math.sin(pulse); // spec: subtle pulse
-      // The life signal — layered sines at odd frequencies make a natural
-      // electric flicker that everything (ring, beam, hotspots, filaments)
-      // drinks from, so the whole core visibly LIVES instead of idling.
-      const flicker =
-        0.84 +
-        0.12 * Math.sin(pulse * 5.1) +
-        0.05 * Math.sin(pulse * 12.7 + 1.3) +
-        0.04 * Math.sin(pulse * 2.3 + 0.7);
+      const films = filmsRef.current;
+      const phase = bootRef.current;
+      const live = liveCfgRef.current;
+      const core = coreCfgRef.current;
+      const pcfg = planetCfgRef.current;
+      const raw = stateRef.current as string;
+      const st: CoreState =
+        raw === "thinking" || raw === "speaking" ? raw : coreSignals.mic ? "listening" : "idle";
 
-      for (const f of filaments) f.a0 = (f.a0 + w * dt * f.sp * 6) % (Math.PI * 2);
+      // ---- where, and how big -------------------------------------------
+      const stage = stageRef.current;
+      const fitR = Math.min(MAX_R, (stage.w / 2 - 36) / (INNER + SPAN), (stage.h / 2 - 34) / ((INNER + SPAN) * TILT + 0.2));
+      const Rt = Math.max(56, fitR * core.scale);
+      Rc = Rc ? Rc + (Rt - Rc) * Math.min(1, dt * 5) : Rt;
+      const tx = stage.x + core.x, ty = stage.y + core.y;
+      center.x += (tx - center.x) * Math.min(1, dt * (core.editing ? 30 : 6));
+      center.y += (ty - center.y) * Math.min(1, dt * (core.editing ? 30 : 6));
+      canvas.style.transform = `translate3d(${center.x - D / 2}px, ${center.y - D / 2}px, 0)`;
+      const R = Rc;
+      const cx = D / 2, cy = D / 2;
+      coreGeom.x = center.x; coreGeom.y = center.y; coreGeom.r = R;
+      geomRef.current = { cx, cy, R, left: center.x - D / 2, top: center.y - D / 2, stageW: stage.w, stageH: stage.h };
 
+      // ---- the startup: once the reveal begins, planets are born ---------
+      if (phase !== "intro" && !birthsQueued) {
+        birthsQueued = true;
+        planets.forEach((p, i) => { p.birthAt = now + 250 + i * 120; });
+        if (films) films.revealT = now;
+      }
+      if (phase !== "intro") orbitFade = Math.min(1, orbitFade + dt / 1.6);
+
+      // ---- tempo & light --------------------------------------------------
+      const rate = Math.max(0.3, Math.min(2.4, RATE[st] * live.rotation));
+      if (films && Math.abs(rate - lastRate) > 0.01) { films.loop.playbackRate = rate; lastRate = rate; }
+      glowBoost = Math.max(0, glowBoost - dt * 0.45);
+      const near = coreGeom.pointer ? smooth(R * 4, R * 1.2, Math.hypot(pointer.x - center.x, pointer.y - center.y)) : 0;
+      const talk = st === "speaking" ? 0.1 * Math.sin(now / 1000 * 6.3) + 0.06 * Math.sin(now / 1000 * 9.7) : 0;
+      const glow = (GLOW[st] + glowBoost + near * 0.18 + talk) * core.glow;
+
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
       ctx.clearRect(0, 0, D, D);
 
-      // Deep black backing — the core lives in true darkness, like the still.
-      // This buries the busy universe video around the ring so the flare and
-      // filaments are the only light sources near the void.
-      const backing = ctx.createRadialGradient(cx, cy, R * 0.5, cx, cy, R * 3.6);
-      backing.addColorStop(0, "rgba(0,0,0,0.97)");
-      backing.addColorStop(0.5, "rgba(0,0,3,0.82)");
-      backing.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = backing;
-      ctx.beginPath(); ctx.arc(cx, cy, R * 3.6, 0, Math.PI * 2); ctx.fill();
+      // soft darkening around the core so its light owns the middle of space
+      const back = ctx.createRadialGradient(cx, cy, R * 0.6, cx, cy, R * 3.4);
+      back.addColorStop(0, "rgba(2,1,8,0.75)");
+      back.addColorStop(1, "rgba(2,1,8,0)");
+      ctx.fillStyle = back;
+      ctx.beginPath(); ctx.arc(cx, cy, R * 3.4, 0, Math.PI * 2); ctx.fill();
 
-      // Orbital guides — styled by Settings → Orbit Lines: brightness,
-      // width and dash style are the user's, "hidden" removes them entirely.
-      const ocfg = orbitCfgRef.current;
-      const orbitsOn = ocfg.style !== "hidden" && ocfg.mul > 0.01;
-      const orbitDash: number[] =
-        ocfg.style === "solid" ? [] :
-        ocfg.style === "dotted" ? [1.5 * s, 7 * s] : [5 * s, 9 * s];
-      if (orbitsOn) {
-        ctx.setLineDash(ocfg.style === "dashed" ? [] : orbitDash); // guides stay calm
-        for (let i = 0; i < RINGS; i++) {
-          ctx.beginPath();
-          ctx.arc(cx, cy, guideR[i], 0, Math.PI * 2);
-          ctx.strokeStyle = rgba(INNER, (0.035 + (i % 4 === 0 ? 0.02 : 0)) * ocfg.mul);
-          ctx.lineWidth = 1 * ocfg.wmul;
-          ctx.stroke();
-        }
-        ctx.setLineDash([]);
-      }
-      if (orbitsOn) for (const n of nodes) {
-        const a = n.a + rot * 0.25;
-        const x = cx + guideR[n.ring] * Math.cos(a);
-        const y = cy + guideR[n.ring] * Math.sin(a);
-        const tw = 0.5 + 0.5 * Math.sin(pulse * 1.4 + n.tw);
-        if (n.big) {
-          const g = ctx.createRadialGradient(x, y, 0, x, y, 9 * s);
-          g.addColorStop(0, rgba(PHOTON, 0.7 * tw));
-          g.addColorStop(0.35, rgba(DEEP, 0.35 * tw));
-          g.addColorStop(1, rgba(DEEP, 0));
-          ctx.fillStyle = g;
-          ctx.beginPath(); ctx.arc(x, y, 9 * s, 0, Math.PI * 2); ctx.fill();
-        }
-        ctx.fillStyle = rgba(PHOTON, 0.18 + 0.22 * tw);
-        ctx.beginPath(); ctx.arc(x, y, (n.big ? 1.8 : 1.2) * s, 0, Math.PI * 2); ctx.fill();
-      }
-
-      ctx.globalCompositeOperation = "lighter";
-
-      // ---- Faint concentric swirl echoes — breathing, not frozen: each one
-      // slowly swells and dims on its own phase.
-      for (let ei = 0; ei < echoes.length; ei++) {
-        const e = echoes[ei];
-        const er = R * e.r * (1 + 0.025 * Math.sin(pulse * 0.7 + ei * 1.9));
-        ctx.beginPath();
-        ctx.arc(cx, cy, er, 0, Math.PI * 2);
-        ctx.strokeStyle = rgba(
-          MAIN,
-          Math.max(0, e.al) * (0.5 + 0.6 * glow) * (0.6 + 0.5 * Math.sin(pulse * 1.1 + ei)),
-        );
-        ctx.lineWidth = 1 * s;
-        ctx.stroke();
-      }
-
-      // ---- Electric filaments — crackling violet plasma threads swirling
-      // the void. Radius wobbles on two frequencies so each thread reads as
-      // living lightning, not a clean circle. They rotate with the core.
-      ctx.lineCap = "round";
-      for (const f of filaments) {
-        ctx.beginPath();
-        const STEPS = 16;
-        for (let k = 0; k <= STEPS; k++) {
-          const t = k / STEPS;
-          const ang = f.a0 + rot * 0.4 + f.len * t;
-          const wob =
-            1 +
-            f.amp * Math.sin(ang * 7 + f.ph + pulse * 0.7) +
-            f.amp * 0.6 * Math.sin(ang * 17 + f.ph * 2.3);
-          const rr = f.r * wob * R;
-          const px = cx + rr * Math.cos(ang);
-          const py = cy + rr * Math.sin(ang);
-          if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-        }
-        // twinkle: every filament surges and fades on its own rhythm, so the
-        // swirl constantly crackles instead of holding one exposure
-        const tw = 0.55 + 0.45 * Math.sin(pulse * (1.3 + f.sp * 5) + f.ph * 3.1);
-        ctx.strokeStyle = rgba(f.c, f.al * (0.4 + 0.7 * glow) * (0.5 + tw));
-        ctx.lineWidth = f.w * s * (0.85 + 0.3 * tw);
-        ctx.stroke();
-      }
-
-      // ---- Soft violet bloom breathing around the whole core
-      const bloom = ctx.createRadialGradient(cx, cy, R * 0.8, cx, cy, R * 2.7);
-      bloom.addColorStop(0, rgba(MAIN, 0.15 * glow + 0.04));
-      bloom.addColorStop(0.5, rgba(MAIN, 0.05 * glow));
-      bloom.addColorStop(1, rgba(MAIN, 0));
-      ctx.fillStyle = bloom;
-      ctx.beginPath(); ctx.arc(cx, cy, R * 2.7, 0, Math.PI * 2); ctx.fill();
-      ctx.globalCompositeOperation = "source-over";
-
-      // ---- Event horizon: pure, textureless black that absorbs everything
-      const edge = ctx.createRadialGradient(cx, cy, R * 0.9 * breathe, cx, cy, R * 1.1 * breathe);
-      edge.addColorStop(0, "rgba(0,0,0,1)");
-      edge.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = edge;
-      ctx.beginPath(); ctx.arc(cx, cy, R * 1.1 * breathe, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "#000";
-      ctx.beginPath(); ctx.arc(cx, cy, R * breathe, 0, Math.PI * 2); ctx.fill();
-
-      // ---- THE ring — matched to the reference: a white-hot filament
-      // wrapped in electric violet, hugging the void tightly.
-      const ringR = R * 1.03 * breathe;
-      ctx.globalCompositeOperation = "lighter";
-      ctx.save();
-      // wide outer violet halo
-      ctx.shadowColor = rgba(MAIN, 1);
-      ctx.shadowBlur = 34 * s;
-      ctx.strokeStyle = rgba(MAIN, 0.45 * glow + 0.18);
-      ctx.lineWidth = 9 * s;
-      ctx.beginPath(); ctx.arc(cx, cy, ringR * 1.06, 0, Math.PI * 2); ctx.stroke();
-      // bright violet band
-      ctx.shadowColor = rgba(INNER, 1);
-      ctx.shadowBlur = 24 * s;
-      ctx.strokeStyle = rgba(INNER, 0.7 * glow + 0.22);
-      ctx.lineWidth = 4.5 * s;
-      ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, Math.PI * 2); ctx.stroke();
-      // white-hot inner filament — brightness rides the flicker
-      ctx.shadowColor = rgba(PHOTON, 1);
-      ctx.shadowBlur = 15 * s;
-      ctx.strokeStyle = rgba(PHOTON, (0.72 + 0.28 * glow) * flicker);
-      ctx.lineWidth = 2.1 * s;
-      ctx.beginPath(); ctx.arc(cx, cy, ringR * 0.985, 0, Math.PI * 2); ctx.stroke();
-      // shimmer arcs — three hot segments racing around the ring at
-      // different speeds/directions, so the ring is never the same twice.
-      // Thinking spins the core fast, and these whip around with it.
-      for (let si2 = 0; si2 < 3; si2++) {
-        const dir2 = si2 % 2 ? -1 : 1;
-        const sa = rot * (1.6 + si2 * 0.7) * dir2 + si2 * 2.3;
-        const alen = 0.7 + 0.35 * Math.sin(pulse * 1.7 + si2 * 2.1);
-        ctx.shadowBlur = 20 * s;
-        ctx.strokeStyle = rgba(PHOTON, (0.2 + 0.22 * Math.sin(pulse * 2.4 + si2 * 1.4)) * glow + 0.05);
-        ctx.lineWidth = 2.6 * s;
-        ctx.beginPath(); ctx.arc(cx, cy, ringR, sa, sa + alen); ctx.stroke();
-      }
-      if (os === "speaking") {
-        ctx.shadowBlur = 0;
-        ctx.strokeStyle = rgba(CYAN, 0.18 + 0.18 * Math.sin(pulse * 2));
-        ctx.lineWidth = 1.8 * s;
-        ctx.beginPath(); ctx.arc(cx, cy, ringR * 1.12, 0, Math.PI * 2); ctx.stroke();
-      }
-      ctx.restore();
-
-      // ---- Twin hotspots — the two blinding points where the beam pierces
-      // the ring at the horizontal, exactly like the reference.
-      for (const side of [-1, 1] as const) {
-        const hx = cx + side * ringR;
-        // real flicker: two incommensurate sines + the global life signal
-        const flick =
-          (1 + 0.13 * Math.sin(pulse * 3.2 + side * 1.7) + 0.07 * Math.sin(pulse * 8.9 + side * 0.6)) *
-          (0.75 + 0.35 * flicker);
-        const hr = R * 0.6 * flick;
-        const g1 = ctx.createRadialGradient(hx, cy, 0, hx, cy, hr);
-        g1.addColorStop(0, rgba(WHITE, (0.9 * glow + 0.1) * flicker));
-        g1.addColorStop(0.16, rgba(PHOTON, (0.55 * glow + 0.1) * flicker));
-        g1.addColorStop(0.45, rgba(INNER, 0.22 * glow + 0.03));
-        g1.addColorStop(1, rgba(MAIN, 0));
-        ctx.fillStyle = g1;
-        ctx.beginPath(); ctx.arc(hx, cy, hr, 0, Math.PI * 2); ctx.fill();
-      }
-
-      // ---- The horizontal lens-flare beam — a razor of light across space,
-      // layered from a wide violet haze down to a 1px white core.
-      // The beam breathes: length swells slowly, brightness rides the
-      // flicker, and while she SPEAKS it visibly pulses with her voice.
-      const talk = os === "speaking" ? 0.25 * Math.sin(pulse * 6) : 0;
-      const beamLen =
-        Math.min(D * 0.46, R * 6.5) * (0.9 + 0.12 * Math.sin(pulse * 0.8) + talk * 0.3);
-      const beam = (h: number, a0: number, cStr: string) => {
-        const aa = a0 * flicker * (1 + talk);
-        for (const side of [-1, 1] as const) {
-          const hx = cx + side * ringR * 0.88;
-          const g = ctx.createLinearGradient(hx, 0, hx + side * beamLen, 0);
-          g.addColorStop(0, rgba(cStr, aa * (0.55 + 0.55 * glow)));
-          g.addColorStop(0.3, rgba(cStr, aa * 0.4 * (0.55 + 0.55 * glow)));
-          g.addColorStop(1, rgba(cStr, 0));
-          ctx.fillStyle = g;
-          ctx.fillRect(side === -1 ? hx - beamLen : hx, cy - h / 2, beamLen, h);
-        }
-      };
-      const bh = 1 + 0.18 * (flicker - 0.84) + talk; // thickness lives too
-      beam(30 * s * bh, 0.09, MAIN);    // wide violet haze
-      beam(11 * s * bh, 0.26, INNER);   // mid glow
-      beam(3.4 * s * bh, 0.85, PHOTON); // bright blade
-      beam(1.4 * s, 1.0, WHITE);        // razor core stays razor
-
-      // ---- Occasional gravitational pulse — every ~9s one luminous wave
-      // rolls outward from the horizon and dissolves. Subtle, not a siren.
-      {
-        const period = 9;
-        const gp = ((now / 1000) % period) / period; // 0..1
-        if (gp < 0.55) {
-          const t = gp / 0.55;
-          const rr = R * (1.15 + t * 3.2);
-          const a = 0.2 * (1 - t) * (1 - t) * (0.5 + 0.5 * glow);
-          ctx.strokeStyle = rgba(INNER, a);
-          ctx.lineWidth = (3 - 2 * t) * s;
-          ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.stroke();
-          ctx.strokeStyle = rgba(PHOTON, a * 0.5);
-          ctx.lineWidth = 1.2 * s;
-          ctx.beginPath(); ctx.arc(cx, cy, rr * 0.94, 0, Math.PI * 2); ctx.stroke();
-        }
-      }
-      ctx.globalCompositeOperation = "source-over";
-
-      // ---- Planet system ------------------------------------------------
+      // ---- planets: positions first, so both halves can be depth-sorted --
+      const fracs = slotFracsRef.current;
+      const maxRx = D / 2 - 30;
+      const slotRx = (si: number) =>
+        Math.min(maxRx, R * (INNER + SPAN * fracs[si % fracs.length]) * pcfg.orbit);
       const activeId = activeRef.current;
-      const pcfg = planetCfgRef.current;
       const editMode = pEditingRef.current;
-      const slotR = (si: number) =>
-        Math.min(D / 2 - 28 * s, rMax * SLOT_FRACS[si % SLOT_FRACS.length] * pcfg.orbit);
-
-      // visible orbit rings — one slot per planet. Styled by the Orbit Lines
-      // settings; edit mode overrides them (you need to SEE where to drop a
-      // planet), and the hovered slot lights up cyan during a drag.
-      if (orbitsOn || editMode) {
-        for (let si = 0; si < SLOT_FRACS.length; si++) {
-          const rr = slotR(si);
-          const hovered = planetDragRef.current !== null && dragSlotRef.current === si;
-          ctx.setLineDash(editMode ? [5 * s, 9 * s] : orbitDash);
-          ctx.beginPath();
-          ctx.arc(cx, cy, rr, 0, Math.PI * 2);
-          ctx.strokeStyle = hovered
-            ? rgba(CYAN, 0.65)
-            : rgba(INNER, editMode ? 0.45 : Math.min(0.6, 0.22 * ocfg.mul));
-          ctx.lineWidth = hovered ? 1.8 : 1.2 * (editMode ? 1 : ocfg.wmul);
-          ctx.stroke();
-          ctx.setLineDash([]);
-        }
-      }
-
-      for (const pl of planets) {
-        const isAct = pl.id === activeId;
-        const dragging = planetDragRef.current === pl.id;
-        if (!dragging) {
-          pl.a = (pl.a + pl.w * pcfg.speed * (isAct ? 3.5 : 1) * dt) % (Math.PI * 2);
-        }
+      const vx0 = center.x - D / 2, vy0 = center.y - D / 2;
+      let hoverId: string | null = null;
+      let hoverZ = -9;
+      for (const p of planets) {
+        const isAct = p.id === activeId;
+        const dragging = planetDragRef.current === p.id;
         const si = dragging && dragSlotRef.current !== null
           ? dragSlotRef.current
-          : (slotsRef.current[pl.id] ?? pl.def);
-        let orbitR = slotR(si);
-        let ang = pl.a;
-        let grow = 1;
-        let birthT = 1;
-        if (pl.birthAt) {
-          birthT = Math.min(1, (performance.now() - pl.birthAt) / BIRTH_MS);
-          if (birthT >= 1) pl.birthAt = 0;
-          const e = 1 - Math.pow(1 - birthT, 3);             // ease-out: fast launch, gentle arrival
-          orbitR = R * 1.02 + (orbitR - R * 1.02) * e;       // out of the event horizon…
-          ang = pl.a - (1 - e) * Math.PI * 1.4;              // …on a spiral, not a straight line
-          grow = 0.15 + 0.85 * e;
+          : (slotsRef.current[p.id] ?? p.def);
+        const frac = fracs[si % fracs.length];
+        // inner orbits run faster, like a real system (40s → 110s a lap)
+        p.w = (Math.PI * 2) / (40 + 70 * frac);
+        if (!dragging && !reduceMotion) {
+          p.a = (p.a + p.w * pcfg.speed * live.rotation * (isAct ? 2.2 : 1) * (1 - p.hov * 0.85) * dt) % (Math.PI * 2);
         }
-        const x = cx + orbitR * Math.cos(ang);
-        const y = cy + orbitR * Math.sin(ang);
-        const pr = pl.pr * s * pcfg.size * (isAct ? 1.25 : 1) * grow;
-        pl.x = x; pl.y = y; pl.curR = pr; // published for hit-testing
+        let rx = slotRx(si);
+        let ang = p.a;
+        let grow = 1;
+        p.hidden = p.birthAt < 0 || (p.birthAt > 0 && now < p.birthAt);
+        if (p.birthAt > 0 && now >= p.birthAt) {
+          const bt = Math.min(1, (now - p.birthAt) / BIRTH_MS);
+          if (bt >= 1) p.birthAt = 0;
+          const e = 1 - Math.pow(1 - bt, 3);
+          rx = R * 0.9 + (rx - R * 0.9) * e;
+          ang = p.a - (1 - e) * Math.PI * 1.5;
+          grow = 0.12 + 0.88 * e;
+        }
+        // a strike on the core sends a ripple through every orbit
+        const since = (now - p.kickAt) / 1000;
+        if (since < 2.2) rx *= 1 + 0.05 * Math.sin(since * 11 - p.idx * 0.4) * Math.exp(-since * 2.2);
+        p.x = cx + rx * Math.cos(ang);
+        p.y = cy + rx * TILT * Math.sin(ang);
+        p.z = Math.sin(ang);
+        p.rx = rx;
+        const base = R * (0.17 + (p.idx % 3) * 0.028);
+        p.pr = base * pcfg.size * (1 + 0.16 * p.z) * grow * (1 + 0.28 * p.hov + (isAct ? 0.1 : 0));
+        // hover: front-most planet under the pointer
+        if (!p.hidden && coreGeom.pointer && !pointer.ui && !editMode) {
+          const d = Math.hypot(pointer.x - (vx0 + p.x), pointer.y - (vy0 + p.y));
+          const behindHole = p.z < 0 && Math.hypot(p.x - cx, p.y - cy) < R * 0.95;
+          if (d < p.pr + 8 && !behindHole && p.z > hoverZ) { hoverId = p.id; hoverZ = p.z; }
+        }
+      }
+      if (hoverId !== hoverRef.current) {
+        if (hoverId) sfx.hover();
+        hoverRef.current = hoverId;
+      }
+      for (const p of planets) p.hov += ((p.id === hoverId ? 1 : 0) - p.hov) * Math.min(1, dt * 9);
+      const overCore = coreGeom.pointer && !pointer.ui &&
+        Math.hypot(pointer.x - center.x, pointer.y - center.y) < R * 1.1;
+      coreGeom.hot = !!hoverId || overCore;
 
-        if (birthT < 1) {
-          // the flash it leaves the horizon with, and a widening ring as it settles
-          ctx.globalCompositeOperation = "lighter";
-          const glowR = Math.max(pr, 6 * s) * 11;
-          const fl = ctx.createRadialGradient(x, y, 0, x, y, glowR);
-          fl.addColorStop(0, rgba(WHITE, 0.9 * (1 - birthT)));
-          fl.addColorStop(0.18, rgba(pl.c, 0.6 * (1 - birthT)));
-          fl.addColorStop(1, rgba(pl.c, 0));
-          ctx.fillStyle = fl;
-          ctx.beginPath(); ctx.arc(x, y, glowR, 0, Math.PI * 2); ctx.fill();
-          ctx.strokeStyle = rgba(pl.c, 0.95 * (1 - birthT));
-          ctx.lineWidth = 2 * s;
-          ctx.beginPath(); ctx.arc(x, y, Math.max(pr, 6 * s) * (1.6 + birthT * 7), 0, Math.PI * 2); ctx.stroke();
-          ctx.globalCompositeOperation = "source-over";
+      // ---- orbits -----------------------------------------------------------
+      const ostyle = live.ostyle;
+      const orbitsOn = (ostyle !== "hidden" && live.omul > 0.01) || editMode;
+      const dash: number[] = editMode ? [5, 8] : ostyle === "solid" ? [] : ostyle === "dotted" ? [1.2, 7] : [3, 10];
+      const drawOrbits = (front: boolean) => {
+        if (!orbitsOn || orbitFade <= 0) return;
+        ctx.save();
+        ctx.setLineDash(dash);
+        ctx.lineDashOffset = -now / 220;
+        const used = new Set<number>();
+        for (const p of planets) used.add(slotsRef.current[p.id] ?? p.def);
+        for (let si = 0; si < fracs.length; si++) {
+          if (!editMode && !used.has(si)) continue;
+          const rx = slotRx(si);
+          const owner = planets.find((p) => (slotsRef.current[p.id] ?? p.def) === si);
+          const lit = owner && (owner.id === activeId || owner.hov > 0.05);
+          const targeted = planetDragRef.current !== null && dragSlotRef.current === si;
+          let a = (front ? 0.17 : 0.08) * Math.min(2, live.omul);
+          if (lit) a += (front ? 0.22 : 0.1) * (owner!.id === activeId ? 1 : owner!.hov);
+          if (editMode) a = front ? 0.4 : 0.22;
+          ctx.strokeStyle = targeted ? rgba(SIGNAL, 0.8) : rgba("190,172,255", a * orbitFade);
+          ctx.lineWidth = (targeted ? 1.6 : 1) * (editMode ? 1 : live.owidth);
+          ctx.beginPath();
+          ctx.ellipse(cx, cy, rx, rx * TILT, 0, front ? 0 : Math.PI, front ? Math.PI : Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.restore();
+      };
+
+      // ---- a planet ---------------------------------------------------------
+      const drawPlanet = (p: Planet) => {
+        if (p.hidden) return;
+        const skinId = skinFor(picksRef.current, p.id, p.idx);
+        const skin = skinById(skinId);
+        const gc = hexRgb(skin?.glow ?? "#9b7bff");
+        const isAct = p.id === activeId;
+        const { x, y, pr } = p;
+        // no flat placeholder: a planet appears once its art is decoded
+        const spr = sprite(skinId, pr * 2 * SPRITE_PAD * DPR);
+        if (!spr) return;
+        if (!p.seenAt) p.seenAt = now;
+        const birthing = p.birthAt > 0;
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, (now - p.seenAt) / 600) *
+          (birthing ? Math.min(1, (now - p.birthAt) / 500) : 1);
+
+        // the comet trail it leaves along its orbit
+        if (orbitFade > 0 && !reduceMotion) {
+          const rx = p.rx;
+          const at = Math.atan2((p.y - cy) / TILT, p.x - cx);
+          const step = Math.min(0.06, (pr * 0.9) / rx);
+          ctx.lineCap = "round";
+          for (let k = 1; k <= 7; k++) {
+            const a0 = at - k * step;
+            ctx.strokeStyle = rgba(gc, (0.16 - k * 0.02) * orbitFade * (1 + p.hov));
+            ctx.lineWidth = Math.max(0.6, pr * 0.22 * (1 - k / 9));
+            ctx.beginPath();
+            ctx.ellipse(cx, cy, rx, rx * TILT, 0, a0, a0 + step);
+            ctx.stroke();
+          }
         }
 
         // atmosphere glow
         ctx.globalCompositeOperation = "lighter";
-        const atm = ctx.createRadialGradient(x, y, pr * 0.4, x, y, pr * 3);
-        atm.addColorStop(0, rgba(pl.c, isAct ? 0.6 : 0.35));
-        atm.addColorStop(1, rgba(pl.c, 0));
-        ctx.fillStyle = atm;
-        ctx.beginPath(); ctx.arc(x, y, pr * 3, 0, Math.PI * 2); ctx.fill();
-
-        // local orbit circles — the card design's faint rings + tiny dots
-        // travelling them, all in the planet's own color. They follow the
-        // Orbit Lines setting too (dimmed, styled, or gone).
-        if (orbitsOn) {
-          ctx.setLineDash(orbitDash);
-          for (let li = 0; li < pl.loc.length; li++) {
-            ctx.strokeStyle = rgba(
-              pl.c,
-              (0.13 - li * 0.03) * (isAct ? 1.7 : 1) * Math.min(1.6, ocfg.mul),
-            );
-            ctx.lineWidth = 1 * ocfg.wmul;
-            ctx.beginPath(); ctx.arc(x, y, pr * pl.loc[li], 0, Math.PI * 2); ctx.stroke();
-          }
-          ctx.setLineDash([]);
-        }
-        for (const ld of pl.locDots) {
-          const ang = ld.a + pulse * ld.w;
-          const lr = pr * pl.loc[ld.ri % pl.loc.length];
-          ctx.fillStyle = rgba(pl.c, 0.35 + 0.3 * Math.sin(pulse * 2 + ld.a));
-          ctx.beginPath();
-          ctx.arc(x + Math.cos(ang) * lr, y + Math.sin(ang) * lr, 1.1 * s, 0, Math.PI * 2);
-          ctx.fill();
-        }
+        const halo = ctx.createRadialGradient(x, y, pr * 0.7, x, y, pr * (2.4 + p.hov));
+        halo.addColorStop(0, rgba(gc, (isAct ? 0.34 : 0.16) + p.hov * 0.2));
+        halo.addColorStop(1, rgba(gc, 0));
+        ctx.fillStyle = halo;
+        ctx.beginPath(); ctx.arc(x, y, pr * (2.4 + p.hov), 0, Math.PI * 2); ctx.fill();
         ctx.globalCompositeOperation = "source-over";
 
-        // Saturn ring (paid LLMs) — revolving band of neutral space dust
-        // (sand/grey/ice, single-toned like real rings), well outside the
-        // body, scaled by the Rings slider. Rear half passes behind.
+        // ring (models that can see images) — the far half goes behind
         const rgMul = Math.max(0.6, pcfg.rings);
-        const rgx = pr * 2.2 * rgMul, rgy = pr * 0.66 * rgMul;
-        const ringCt = Math.cos(pl.tilt), ringSt = Math.sin(pl.tilt);
-        const drawRingDust = (frontHalf: boolean) => {
-          for (const dd of pl.ringDust) {
-            const th = dd.ang + pl.ringA;
-            const sn = Math.sin(th);
-            if (frontHalf ? sn < 0 : sn >= 0) continue;
-            const ex = Math.cos(th) * rgx * dd.rf;
-            const ey = sn * rgy * dd.rf;
-            const px = x + ex * ringCt - ey * ringSt;
-            const py = y + ex * ringSt + ey * ringCt;
-            ctx.fillStyle = rgba(dd.t, dd.al * (frontHalf ? 1 : 0.55));
+        const ringTilt = -0.28 + (p.idx % 3) * 0.2;
+        const drawRing = (front: boolean) => {
+          if (!p.ring) return;
+          for (let b = 0; b < 3; b++) {
+            ctx.strokeStyle = rgba(b === 1 ? "232,222,205" : "196,190,214", (front ? 0.5 : 0.28) * (b === 1 ? 1 : 0.55));
+            ctx.lineWidth = pr * (b === 1 ? 0.14 : 0.07);
             ctx.beginPath();
-            ctx.arc(px, py, dd.sz * s * Math.max(0.7, Math.min(2, pcfg.size)), 0, Math.PI * 2);
-            ctx.fill();
+            ctx.ellipse(x, y, pr * (1.75 + b * 0.18) * rgMul, pr * (0.42 + b * 0.05) * rgMul, ringTilt,
+              front ? 0 : Math.PI, front ? Math.PI : Math.PI * 2);
+            ctx.stroke();
           }
         };
-        if (pl.ring) {
-          pl.ringA += pl.ringW * dt; // the ring itself revolves
-          ctx.globalCompositeOperation = "lighter";
-          // faint continuous dust band (rear half)
-          ctx.strokeStyle = rgba(DUST_SAND, 0.16);
-          ctx.lineWidth = pr * 0.3;
-          ctx.beginPath();
-          ctx.ellipse(x, y, rgx, rgy, pl.tilt, Math.PI, Math.PI * 2);
-          ctx.stroke();
-          drawRingDust(false);
-          ctx.globalCompositeOperation = "source-over";
+        drawRing(false);
+
+        // body — lit side turned toward the core. The renders are lit from
+        // the left, so planets left of the core are mirrored, crossfading
+        // as they pass in front of or behind it.
+        const half = pr * SPRITE_PAD;
+        {
+          const wRight = smooth(-0.2, 0.2, (x - cx) / p.rx);
+          const drawSide = (mirror: boolean, alpha: number) => {
+            if (alpha <= 0.01) return;
+            ctx.save();
+            ctx.globalAlpha *= alpha;
+            ctx.translate(x, y);
+            if (mirror) ctx.scale(-1, 1);
+            ctx.drawImage(spr, -half, -half, half * 2, half * 2);
+            ctx.restore();
+          };
+          if (wRight >= 0.5) { drawSide(false, 1); drawSide(true, 1 - wRight); }
+          else { drawSide(true, 1); drawSide(false, wRight); }
         }
-
-        // body — textured surface (clouds/storms/bands), self-rotating
-        pl.rot += pl.rw * dt;
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.rotate(pl.rot);
-        ctx.beginPath(); ctx.arc(0, 0, pr, 0, Math.PI * 2); ctx.clip();
-        ctx.drawImage(pl.tex, -pr, -pr, pr * 2, pr * 2);
-        ctx.restore();
-
-        // shading — lit by the core, shadow side facing away
-        const ux = (cx - x) / orbitR, uy = (cy - y) / orbitR;
-        const shade = ctx.createLinearGradient(
-          x + ux * pr, y + uy * pr, x - ux * pr, y - uy * pr);
-        shade.addColorStop(0, "rgba(255,255,255,0.2)");
-        shade.addColorStop(0.45, "rgba(0,0,0,0)");
-        shade.addColorStop(1, "rgba(3,3,12,0.8)");
-        ctx.fillStyle = shade;
-        ctx.beginPath(); ctx.arc(x, y, pr, 0, Math.PI * 2); ctx.fill();
-
-        // rim glow — the card design's luminous edge: a full colored ring,
-        // blazing brightest on the core-facing side (that's the light source)
+        // farther planets sit a little deeper in shadow
+        if (p.z < 0) {
+          ctx.fillStyle = `rgba(3,2,10,${0.38 * -p.z})`;
+          ctx.beginPath(); ctx.arc(x, y, pr * 0.995, 0, Math.PI * 2); ctx.fill();
+        }
+        // rim light from the core
         const toCore = Math.atan2(cy - y, cx - x);
         ctx.globalCompositeOperation = "lighter";
-        ctx.save();
-        ctx.shadowColor = rgba(pl.c, 1);
-        ctx.shadowBlur = 10 * s;
-        ctx.strokeStyle = rgba(pl.c, isAct ? 0.5 : 0.3);
-        ctx.lineWidth = 1.6 * s;
-        ctx.beginPath(); ctx.arc(x, y, pr * 0.99, 0, Math.PI * 2); ctx.stroke();
-        // hot lit arc facing the core
-        ctx.shadowBlur = 14 * s;
-        ctx.strokeStyle = rgba(pl.c, isAct ? 0.95 : 0.75);
-        ctx.lineWidth = 2.2 * s;
-        ctx.beginPath(); ctx.arc(x, y, pr * 0.97, toCore - 1.25, toCore + 1.25); ctx.stroke();
-        ctx.shadowColor = "rgba(255,255,255,1)";
-        ctx.shadowBlur = 8 * s;
-        ctx.strokeStyle = "rgba(255,255,255,0.55)";
-        ctx.lineWidth = 1 * s;
-        ctx.beginPath(); ctx.arc(x, y, pr * 0.96, toCore - 0.8, toCore + 0.8); ctx.stroke();
-        ctx.restore();
-
-        // Saturn ring — front half sweeping over the body
-        if (pl.ring) {
-          ctx.strokeStyle = rgba(DUST_SAND, 0.26);
-          ctx.lineWidth = pr * 0.3;
-          ctx.beginPath();
-          ctx.ellipse(x, y, rgx, rgy, pl.tilt, 0, Math.PI);
-          ctx.stroke();
-          drawRingDust(true);
-        }
-
-        // its own little grey moon, circling on the outer local ring
-        pl.moonA += pl.moonW * dt;
-        {
-          const mr = Math.max(1.4, pr * pl.moonS);
-          const md = pr * pl.moonD;
-          const mx = x + Math.cos(pl.moonA) * md;
-          const my = y + Math.sin(pl.moonA) * md;
-          const mg = ctx.createRadialGradient(
-            mx - mr * 0.4, my - mr * 0.4, mr * 0.15, mx, my, mr);
-          mg.addColorStop(0, "rgba(214,214,228,0.95)");
-          mg.addColorStop(0.6, "rgba(120,122,140,0.9)");
-          mg.addColorStop(1, "rgba(40,40,56,0.9)");
-          ctx.fillStyle = mg;
-          ctx.beginPath(); ctx.arc(mx, my, mr, 0, Math.PI * 2); ctx.fill();
-        }
-
-        // active halo pulse
-        if (isAct) {
-          ctx.strokeStyle = rgba(pl.c, 0.35 + 0.25 * Math.sin(pulse * 2));
-          ctx.lineWidth = 1.6 * s;
-          ctx.beginPath(); ctx.arc(x, y, pr * 1.8, 0, Math.PI * 2); ctx.stroke();
-        }
+        ctx.strokeStyle = rgba(gc, 0.35 + p.hov * 0.3 + (isAct ? 0.2 : 0));
+        ctx.lineWidth = Math.max(1, pr * 0.07);
+        ctx.beginPath(); ctx.arc(x, y, pr * 0.985, toCore - 1.1, toCore + 1.1); ctx.stroke();
         ctx.globalCompositeOperation = "source-over";
+        drawRing(true);
 
-        // label — NAME in the planet's color, archetype under it (card style).
-        // User-edited names/roles (Planets menu) take precedence.
-        // Hidden entirely when the Sanctuary "planet labels" setting is off,
-        // except for the ACTIVE marker, which is status rather than decoration.
-        if (!showLabelsRef.current) {
-          if (isAct) {
-            ctx.textAlign = "center";
-            ctx.font = `700 ${Math.max(7, 8 * s)}px "Exo 2", sans-serif`;
-            ctx.fillStyle = "rgba(70,232,138,0.95)";
-            ctx.fillText("● ACTIVE", x, y + pr + 13 * s);
-          }
-          continue;
-        }
-        const meta = metaRef.current[pl.id] || {};
-        const shownName = meta.name || pl.name;
-        const shownRole = meta.role || pl.role;
-        ctx.textAlign = "center";
-        ctx.font = `700 ${Math.max(9, 10.5 * s)}px "Exo 2", sans-serif`;
-        ctx.fillStyle = rgba(pl.c, isAct ? 1 : 0.8);
-        ctx.fillText(shownName, x, y + pr + 13 * s);
-        ctx.font = `400 ${Math.max(8, 8.5 * s)}px "Exo 2", sans-serif`;
-        ctx.fillStyle = rgba("236,234,254", isAct ? 0.85 : 0.5);
-        ctx.fillText(shownRole, x, y + pr + 24 * s);
+        // the model answering right now wears a slow halo
         if (isAct) {
-          ctx.font = `700 ${Math.max(7, 8 * s)}px "Exo 2", sans-serif`;
-          ctx.fillStyle = "rgba(70,232,138,0.95)";
-          ctx.fillText("● ACTIVE", x, y + pr + 35 * s);
+          const ph = (now / 1600) % 1;
+          ctx.strokeStyle = rgba(gc, 0.55 * (1 - ph));
+          ctx.lineWidth = 1.2;
+          ctx.beginPath(); ctx.arc(x, y, pr * (1.35 + ph * 0.9), 0, Math.PI * 2); ctx.stroke();
+        }
+        ctx.restore();
+      };
+
+      // Labels never pile up: nearer planets (and the hovered / answering one)
+      // claim their space first; a label that would overlap is skipped.
+      const taken: Array<[number, number, number, number]> = [];
+      const drawLabel = (p: Planet) => {
+        if (p.hidden || !p.seenAt) return;
+        const isAct = p.id === activeId;
+        const show = live.labels || isAct || p.hov > 0.05;
+        if (!show) return;
+        if (p.z < 0 && Math.hypot(p.x - cx, p.y - cy) < R * 1.05) return; // behind the hole
+        const meta = metaRef.current[p.id] || {};
+        const name = meta.name || p.name;
+        const role = meta.role || p.role;
+        const depthA = 0.55 + 0.45 * (p.z + 1) / 2;
+        const a = Math.max(depthA * (live.labels ? 0.78 : 0), isAct ? 0.95 : 0, p.hov) * orbitFade;
+        const ly = p.y + p.pr + 15;
+        const two = p.hov > 0.05 || isAct;
+        const w = Math.max(name.length, two ? role.length : 0) * 6.2 + 8;
+        const box: [number, number, number, number] = [p.x - w / 2, ly - 11, p.x + w / 2, ly + (two ? 18 : 4)];
+        if (taken.some((b) => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])) return;
+        taken.push(box);
+        ctx.save();
+        ctx.textAlign = "center";
+        ctx.shadowColor = "rgba(0,0,0,0.9)";
+        ctx.shadowBlur = 6;
+        ctx.font = `500 ${11.5 + p.hov * 1.5}px "Instrument Sans", "Segoe UI", sans-serif`;
+        ctx.fillStyle = rgba(PHOTON, a);
+        ctx.fillText(name, p.x, ly);
+        if (p.hov > 0.05 || isAct) {
+          ctx.font = `400 11px "Instrument Sans", "Segoe UI", sans-serif`;
+          ctx.fillStyle = rgba("170,160,210", Math.max(p.hov, isAct ? 0.8 : 0) * orbitFade);
+          ctx.fillText(isAct && p.hov < 0.5 ? "answering" : role, p.x, ly + 14);
+        }
+        ctx.restore();
+      };
+
+      const sorted = [...planets].sort((a, b) => a.z - b.z);
+      drawOrbits(false);
+      for (const p of sorted) if (p.z < 0) drawPlanet(p);
+
+      // ---- the event horizon: nothing behind it gets through -----------
+      const occ = ctx.createRadialGradient(cx, cy, R * 0.8, cx, cy, R * 1.02);
+      occ.addColorStop(0, "rgba(0,0,0,1)");
+      occ.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = occ;
+      ctx.beginPath(); ctx.arc(cx, cy, R * 1.02, 0, Math.PI * 2); ctx.fill();
+
+      // ---- the film --------------------------------------------------------
+      const k = R / VR;
+      const filmRect = [cx - VCX * k, cy - VCY * k, VW * k, VH * k] as const;
+      ctx.filter = `brightness(${(0.78 + 0.26 * glow).toFixed(3)}) saturate(${(0.95 + 0.2 * (glow - 1)).toFixed(3)})`;
+      if (films) {
+        const loopReady = films.loop.readyState >= 2;
+        if (phase === "intro" && films.birth) {
+          if (films.birth.readyState >= 2) ctx.drawImage(films.birth, ...filmRect);
+        } else {
+          const mix = films.birth && films.revealT ? Math.min(1, (now - films.revealT) / 700) : 1;
+          if (mix < 1 && films.birth && films.birth.readyState >= 2) {
+            ctx.globalAlpha = 1 - mix;
+            ctx.drawImage(films.birth, ...filmRect);
+          }
+          if (loopReady) {
+            // no startup: the core fades up as soon as its film can play
+            if (!loopShownAt) loopShownAt = now;
+            ctx.globalAlpha = mix * Math.min(1, (now - loopShownAt) / 900);
+            ctx.drawImage(films.loop, ...filmRect);
+          }
+          ctx.globalAlpha = 1;
+          if (mix >= 1 && films.birth) { films.birth.pause(); films.birth = null; }
         }
       }
+      ctx.filter = "none";
+      ctx.globalAlpha = 1;
 
-      raf = requestAnimationFrame(draw);
+      // ---- light answering what AURA is doing --------------------------
+      ctx.globalCompositeOperation = "lighter";
+      if (st === "listening") {
+        const b = 0.5 + 0.5 * Math.sin(now / 1000 * 3.2);
+        ctx.strokeStyle = rgba(SIGNAL, 0.14 + 0.12 * b);
+        ctx.lineWidth = R * 0.05;
+        ctx.beginPath(); ctx.arc(cx, cy, R * 1.06, 0, Math.PI * 2); ctx.stroke();
+      }
+      const bloom = ctx.createRadialGradient(cx, cy, R * 0.9, cx, cy, R * 2.6);
+      bloom.addColorStop(0, rgba(VIOLET, 0.05 + 0.12 * Math.max(0, glow - 1) + near * 0.06));
+      bloom.addColorStop(1, rgba(VIOLET, 0));
+      ctx.fillStyle = bloom;
+      ctx.beginPath(); ctx.arc(cx, cy, R * 2.6, 0, Math.PI * 2); ctx.fill();
+
+      // gravity waves: a gentle one now and then, bigger when struck
+      if (!reduceMotion && phase === "done" && now > nextWave) {
+        waves.push({ at: now, strong: false });
+        nextWave = now + 9000 + Math.random() * 5000;
+      }
+      for (let i = waves.length - 1; i >= 0; i--) {
+        const w = waves[i];
+        const t = (now - w.at) / (w.strong ? 1700 : 2400);
+        if (t >= 1) { waves.splice(i, 1); continue; }
+        const e = 1 - Math.pow(1 - t, 2.2);
+        const rr = R * (1.05 + e * (w.strong ? 5.5 : 4.2));
+        const a = (w.strong ? 0.45 : 0.16) * (1 - t) * (1 - t);
+        ctx.strokeStyle = rgba("205,186,255", a);
+        ctx.lineWidth = w.strong ? 2 : 1.2;
+        ctx.beginPath(); ctx.ellipse(cx, cy, rr, rr * TILT, 0, 0, Math.PI * 2); ctx.stroke();
+        if (w.strong) {
+          ctx.strokeStyle = rgba(PHOTON, a * 0.7);
+          ctx.beginPath(); ctx.arc(cx, cy, R * (1.02 + e * 1.4), 0, Math.PI * 2); ctx.stroke();
+        }
+      }
+      ctx.globalCompositeOperation = "source-over";
+
+      drawOrbits(true);
+      for (const p of sorted) if (p.z >= 0) drawPlanet(p);
+      const labelOrder = [...planets].sort((a, b) =>
+        (b.hov + (b.id === activeId ? 2 : 0) + b.z * 0.5) - (a.hov + (a.id === activeId ? 2 : 0) + a.z * 0.5));
+      for (const p of labelOrder) drawLabel(p);
+
+      // ---- infall: light being pulled in and swallowed ------------------
+      if (!reduceMotion && phase !== "intro" && now > nextAmbient) {
+        // ambient dust drifting in from the outer disk, faster while thinking
+        const ang = Math.random() * Math.PI * 2;
+        const rr = R * (3 + Math.random() * 2);
+        motes.push({
+          x: cx + Math.cos(ang) * rr, y: cy + Math.sin(ang) * rr * TILT,
+          vx: -Math.sin(ang) * 60, vy: Math.cos(ang) * 60 * TILT,
+          delay: 0, life: 0, c: Math.random() < 0.3 ? PHOTON : "196,172,255",
+        });
+        nextAmbient = now + 1000 / Math.max(0.1, INFALL[st] * Math.max(0.2, live.density));
+      }
+      ctx.globalCompositeOperation = "lighter";
+      ctx.lineCap = "round";
+      for (let i = motes.length - 1; i >= 0; i--) {
+        const m = motes[i];
+        if (m.delay > 0) { m.delay -= dt; continue; }
+        m.life += dt;
+        const dx = cx - m.x, dy = cy - m.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        if (dist < R * 0.9 || m.life > 5) {
+          if (dist < R * 0.9) glowBoost = Math.min(0.6, glowBoost + 0.006);
+          motes.splice(i, 1);
+          continue;
+        }
+        // gravity with a little swirl: the light spirals in, tighter as it nears
+        const ux = dx / dist, uy = dy / dist;
+        const pull = 4200 * Math.pow(R / Math.max(dist, R), 1.2);
+        const swirl = 0.42;
+        m.vx += (ux * pull - uy * pull * swirl) * dt;
+        m.vy += (uy * pull + ux * pull * swirl) * dt;
+        const damp = Math.pow(0.18, dt);
+        m.vx *= damp; m.vy *= damp;
+        const px = m.x, py = m.y;
+        m.x += m.vx * dt; m.y += m.vy * dt;
+        const fade = Math.min(1, m.life * 5) * smooth(R * 0.92, R * 1.4, dist);
+        // a short, soft tail and a bright head
+        ctx.strokeStyle = rgba(m.c, 0.38 * fade);
+        ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.moveTo(px - (m.x - px) * 2.2, py - (m.y - py) * 2.2); ctx.lineTo(m.x, m.y); ctx.stroke();
+        const gs = 9 + 5 * fade;
+        ctx.globalAlpha = 0.9 * fade;
+        ctx.drawImage(glint(), m.x - gs / 2, m.y - gs / 2, gs, gs);
+        ctx.globalAlpha = 1;
+      }
+      ctx.globalCompositeOperation = "source-over";
     };
 
     raf = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(raf);
-    // `density` is a real dependency: particle arrays are sized once at setup,
-    // so changing it has to rebuild the scene rather than just re-render.
-    // `rosterKey` too: an installed planet needs its own texture and slot.
-  }, [size, density, rosterKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", fit);
+      offBus();
+      coreGeom.hot = false;
+    };
+    // The planet set and dust density shape the scene; everything else is
+    // read live through refs.
+  }, [rosterKey, density]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Dragging the core is only possible in edit mode (Core menu → Edit).
-  // Position persists on Save, so AURA is exactly where you left her on relaunch.
-  const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
-
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-
-    // Planet edit mode: grab a planet and drop it on ANY orbit.
-    if (pEditingRef.current) {
-      const px = e.clientX - rect.left, py = e.clientY - rect.top;
-      for (const pl of planetsRef.current) {
-        if (Math.hypot(px - pl.x, py - pl.y) <= (pl.curR || 12) + 10) {
-          e.preventDefault();
-          planetDragRef.current = pl.id;
-          return;
-        }
+  // ---- pointer: hover, click a planet, strike the core ---------------------
+  useEffect(() => {
+    const isUi = (el: EventTarget | null) =>
+      !!(el as Element | null)?.closest?.(
+        "button, a, input, textarea, select, label, [role='button'], [role='dialog'], " +
+        ".dock, .rail, .topbar, .menu, .homeline, .corestatus, .boot");
+    const onMove = (e: MouseEvent) => {
+      pointer.x = e.clientX; pointer.y = e.clientY;
+      pointer.ui = isUi(e.target);
+      coreGeom.pointer = true;
+    };
+    const onLeave = () => { coreGeom.pointer = false; };
+    const onClick = (e: MouseEvent) => {
+      if (isUi(e.target) || pEditingRef.current || coreCfgRef.current.editing) return;
+      const hid = hoverRef.current;
+      if (hid) {
+        sfx.tap();
+        window.dispatchEvent(new CustomEvent("aura:open-planet", { detail: hid }));
+        return;
       }
-    }
+      if (Math.hypot(e.clientX - coreGeom.x, e.clientY - coreGeom.y) < coreGeom.r * 1.15) {
+        sfx.shock();
+        emitCore({ kind: "shock", x: e.clientX, y: e.clientY });
+      }
+    };
+    window.addEventListener("mousemove", onMove);
+    document.documentElement.addEventListener("mouseleave", onLeave);
+    window.addEventListener("click", onClick);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      document.documentElement.removeEventListener("mouseleave", onLeave);
+      window.removeEventListener("click", onClick);
+    };
+  }, []);
 
+  // ---- edit modes: drag a planet to another orbit, or move the core --------
+  const coreDragRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const g = geomRef.current;
+    const px = e.clientX - g.left, py = e.clientY - g.top;
+    if (pEditingRef.current) {
+      let best: Planet | null = null;
+      for (const p of planetsRef.current) {
+        if (Math.hypot(px - p.x, py - p.y) <= p.pr + 10 && (!best || p.z > best.z)) best = p;
+      }
+      if (best) {
+        e.preventDefault();
+        planetDragRef.current = best.id;
+      }
+      return;
+    }
     if (!editing) return;
-    const dx = e.clientX - (rect.left + rect.width / 2);
-    const dy = e.clientY - (rect.top + rect.height / 2);
-    const horizonR = (size / REF) * HORIZON;
-    if (Math.hypot(dx, dy) > horizonR * 1.25) return; // only the core itself, not empty space
+    if (Math.hypot(px - g.cx, py - g.cy) > g.R * 1.3) return; // the core itself, not empty space
     e.preventDefault();
-    dragRef.current = { sx: e.clientX, sy: e.clientY, ox: posX, oy: posY };
+    coreDragRef.current = { sx: e.clientX, sy: e.clientY, ox: posX, oy: posY };
   };
 
-  // Planet drag: the pointer picks an orbit SLOT (nearest ring). On release,
-  // the planet takes that slot — and if another planet lived there, the two
-  // swap, so it's always one planet per orbit. Persisted by Save.
   useEffect(() => {
-    const nearestSlot = (r: number) => {
+    // A dragged planet follows the pointer around the orbital plane and
+    // snaps to the nearest orbit; dropping on a taken orbit swaps tenants.
+    const nearestSlot = (rEq: number) => {
       const g = geomRef.current;
+      const fracs = slotFracsRef.current;
       const mul = planetCfgRef.current.orbit || 1;
       let best = 0, bestD = Infinity;
-      const fracs = slotFracsRef.current;
       for (let si = 0; si < fracs.length; si++) {
-        const rr = Math.min(g.maxR, g.rMax * fracs[si] * mul);
-        const d = Math.abs(r - rr);
+        const rr = g.R * (INNER + SPAN * fracs[si]) * mul;
+        const d = Math.abs(rEq - rr);
         if (d < bestD) { bestD = d; best = si; }
       }
       return best;
     };
-
     const move = (e: MouseEvent) => {
+      const g = geomRef.current;
+      const cd = coreDragRef.current;
+      if (cd) {
+        const limX = Math.max(0, g.stageW / 2 - 40);
+        const limY = Math.max(0, g.stageH / 2 - 40);
+        setCfg({
+          x: Math.max(-limX, Math.min(limX, cd.ox + e.clientX - cd.sx)),
+          y: Math.max(-limY, Math.min(limY, cd.oy + e.clientY - cd.sy)),
+        });
+        return;
+      }
       const id = planetDragRef.current;
       if (!id) return;
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
-      const g = geomRef.current;
-      const px = e.clientX - rect.left - g.cx;
-      const py = e.clientY - rect.top - g.cy;
+      const px = e.clientX - g.left - g.cx;
+      const py = (e.clientY - g.top - g.cy) / TILT;
       const pl = planetsRef.current.find((p) => p.id === id);
       if (!pl) return;
       pl.a = Math.atan2(py, px);
       dragSlotRef.current = nearestSlot(Math.hypot(px, py));
     };
-
     const up = () => {
+      coreDragRef.current = null;
       const id = planetDragRef.current;
       if (!id) return;
       const target = dragSlotRef.current;
@@ -933,41 +888,16 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
       dragSlotRef.current = null;
       if (target === null) return;
       const resolve = (pid: string) =>
-        slotsRef.current[pid] ??
-        (planetsRef.current.find((p) => p.id === pid)?.def ?? 0);
+        slotsRef.current[pid] ?? (planetsRef.current.find((p) => p.id === pid)?.def ?? 0);
       const prev = resolve(id);
       if (prev === target) return;
       const next: Record<string, number> = { ...slotsRef.current };
-      // whoever held the target slot inherits the vacated one
       const occupant = planetsRef.current.find((p) => p.id !== id && resolve(p.id) === target);
       next[id] = target;
       if (occupant) next[occupant.id] = prev;
       slotsRef.current = next;
       setSlotsRef.current(next);
     };
-
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
-    return () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-    };
-  }, []);
-
-  useEffect(() => {
-    const move = (e: MouseEvent) => {
-      const d = dragRef.current;
-      if (!d) return;
-      const dx = e.clientX - d.sx, dy = e.clientY - d.sy;
-      // keep at least half the core inside the stage
-      const limX = Math.max(0, stageDims.current.w / 2 - 40);
-      const limY = Math.max(0, stageDims.current.h / 2 - 40);
-      setCfg({
-        x: Math.max(-limX, Math.min(limX, d.ox + dx)),
-        y: Math.max(-limY, Math.min(limY, d.oy + dy)),
-      });
-    };
-    const up = () => { dragRef.current = null; };
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", up);
     return () => {
@@ -977,23 +907,15 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
   }, [setCfg]);
 
   return (
-    <div
-      ref={wrapRef}
-      className="bh-wrap"
-      style={{ transform: `translate(calc(-50% + ${posX}px), calc(-50% + ${posY}px))` }}
-    >
+    <div ref={hostRef} className="bh-host">
       <canvas
         ref={canvasRef}
         className={"bh-canvas" + (editing || pEditing ? " bh-canvas--edit" : "")}
         onMouseDown={handleMouseDown}
-        title={
-          pEditing ? "Drag any planet to a new orbit"
-          : editing ? "Drag to move AURA core"
-          : undefined
-        }
+        title={pEditing ? "Drag any planet to a new orbit" : editing ? "Drag to move AURA's core" : undefined}
       />
-      {editing && <div className="bh-editbadge">EDIT MODE — drag to move</div>}
-      {!editing && pEditing && <div className="bh-editbadge">PLANET EDIT — drag planets onto any orbit</div>}
+      {editing && <div className="bh-editbadge">Drag the core to move it</div>}
+      {!editing && pEditing && <div className="bh-editbadge">Drag planets onto any orbit</div>}
     </div>
   );
 }

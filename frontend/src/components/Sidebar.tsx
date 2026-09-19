@@ -1,30 +1,29 @@
+import Icon, { type IconName } from "./Icon";
+import AuraOrb from "./AuraOrb";
+
 /**
- * The fixed glass sidebar — AURA OS navigation.
- *
- * Six destinations. "Aura Domain" is special: it doesn't swap the page, it
- * crosses the portal into the dedicated coding workspace. Collapsed mode is
- * icons-only; the width animates (CSS) and labels fade out, nothing snaps.
- * The bottom is reserved for identity: profile, version, plan.
+ * The rail — AURA's navigation. Slim by default (icons, names on hover);
+ * the orb at the top widens it to show names. "Aura Domain" doesn't swap the
+ * page, it crosses the portal into the coding workspace.
  */
 
 interface NavItem {
   id: string;
   label: string;
-  icon: string;
-  hint: string;
+  icon: IconName;
   domain?: boolean;
 }
 
 const NAV: NavItem[] = [
-  { id: "home", label: "Home", icon: "⌂", hint: "The AURA core" },
-  { id: "chats", label: "Chats", icon: "◈", hint: "Rooms · chats · history" },
-  { id: "domain", label: "Aura Domain", icon: "❖", hint: "Coding workspace", domain: true },
-  { id: "saved", label: "Saved Info", icon: "✦", hint: "Links · PDFs · files she read" },
-  { id: "memory", label: "Memory", icon: "❋", hint: "Timeline · search · bookmarks" },
-  { id: "tasks", label: "Tasks", icon: "✓", hint: "Today · projects · quests" },
-  { id: "models", label: "Models", icon: "◈", hint: "Planets · routing · orbits" },
-  { id: "settings", label: "Settings", icon: "⚙", hint: "Appearance · voice · keys" },
-  { id: "labs", label: "Labs", icon: "⚗", hint: "What's coming next" },
+  { id: "home", label: "Home", icon: "home" },
+  { id: "chats", label: "Chats", icon: "chats" },
+  { id: "domain", label: "Aura Domain", icon: "domain", domain: true },
+  { id: "saved", label: "Saved info", icon: "saved" },
+  { id: "memory", label: "Memory", icon: "memory" },
+  { id: "tasks", label: "Tasks", icon: "tasks" },
+  { id: "models", label: "Models", icon: "models" },
+  { id: "planets", label: "Planets", icon: "planets" },
+  { id: "labs", label: "Labs", icon: "labs" },
 ];
 
 interface Props {
@@ -36,58 +35,48 @@ interface Props {
   listening?: boolean;
 }
 
-export default function Sidebar({
-  active,
-  collapsed,
-  onNavigate,
-  onLaunchDomain,
-  onToggle,
-  listening = false,
-}: Props) {
+export default function Sidebar({ active, collapsed, onNavigate, onLaunchDomain, onToggle, listening = false }: Props) {
+  const item = (it: NavItem) => (
+    <button
+      key={it.id}
+      className={
+        "rail__item" +
+        (active === it.id && !it.domain ? " rail__item--on" : "") +
+        (it.domain ? " rail__item--portal" : "")
+      }
+      onClick={() => (it.domain ? onLaunchDomain() : onNavigate(it.id))}
+      aria-current={active === it.id && !it.domain ? "page" : undefined}
+      aria-label={it.label}
+      data-tip={collapsed ? it.label : undefined}
+    >
+      <Icon name={it.icon} size={19} />
+      <span className="rail__label">{it.label}</span>
+    </button>
+  );
+
   return (
-    <aside className={"osbar" + (collapsed ? " osbar--min" : "")}>
-      <div className="osbar__brand" onClick={onToggle} title={collapsed ? "Expand" : "Collapse"}>
-        <div className={"osbar__mark" + (listening ? " osbar__mark--live" : "")} />
-        <div className="osbar__brandtext">
-          <h1>A U R A</h1>
-          <span>Prime Core Online</span>
-        </div>
-        <span className="osbar__fold">{collapsed ? "»" : "«"}</span>
-      </div>
+    <aside className={"rail" + (collapsed ? " rail--slim" : "")}>
+      <button
+        className="rail__brand"
+        onClick={onToggle}
+        aria-label={collapsed ? "Show page names" : "Hide page names"}
+        data-tip={collapsed ? "Show names" : undefined}
+      >
+        <AuraOrb size={34} live={listening} />
+        <span className="rail__word">AURA</span>
+        <Icon name={collapsed ? "right" : "left"} size={14} className="rail__fold" />
+      </button>
 
-      <nav className="osbar__nav">
-        {NAV.map((item) => (
-          <button
-            key={item.id}
-            className={
-              "osbar__item" +
-              (active === item.id && !item.domain ? " osbar__item--active" : "") +
-              (item.domain ? " osbar__item--domain" : "")
-            }
-            onClick={() => (item.domain ? onLaunchDomain() : onNavigate(item.id))}
-            title={collapsed ? item.label : undefined}
-          >
-            <span className="osbar__icon">{item.icon}</span>
-            <span className="osbar__meta">
-              <span className="osbar__label">{item.label}</span>
-              <span className="osbar__hint">{item.hint}</span>
-            </span>
-            {active === item.id && !item.domain && <span className="osbar__glowline" />}
-          </button>
-        ))}
-      </nav>
+      <nav className="rail__nav">{NAV.map(item)}</nav>
 
-      <div className="osbar__foot">
-        <div className="osbar__profile" title="Shaurya">
-          <span className="osbar__avatar">S</span>
-          <span className="osbar__meta">
-            <span className="osbar__label">Shaurya</span>
-            <span className="osbar__hint">Companion linked</span>
+      <div className="rail__foot">
+        {item({ id: "settings", label: "Settings", icon: "settings" })}
+        <div className="rail__me" data-tip={collapsed ? "Shaurya" : undefined}>
+          <span className="rail__avatar">S</span>
+          <span className="rail__who">
+            <span>Shaurya</span>
+            <small>Supernova</small>
           </span>
-        </div>
-        <div className="osbar__plan">
-          <span className="osbar__planbadge">SUPERNOVA</span>
-          <span className="osbar__version">v3.0</span>
         </div>
       </div>
     </aside>

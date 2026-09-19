@@ -4,21 +4,27 @@ import { api } from "../api";
 import { useRoster } from "../stores/rosterStore";
 
 /**
- * The one small widget Home keeps — a quiet system readout, not a dashboard.
- * Current model · connection · memory · the next task, if one exists.
+ * The quiet readout under the greeting: link, which model is answering,
+ * how much AURA remembers, and the next task if there is one.
  */
 
 interface Props {
   status: ConnStatus;
   activeModelId?: string | null;
-  mode?: string;
 }
 
-export default function HomeStatusCard({ status, activeModelId, mode = "CHAT" }: Props) {
+const LINK: Record<string, string> = {
+  open: "Connected",
+  connecting: "Connecting",
+  closed: "Brain offline",
+  error: "Brain offline",
+};
+
+export default function HomeStatusCard({ status, activeModelId }: Props) {
   const [factCount, setFactCount] = useState<number | null>(null);
   const [nextTask, setNextTask] = useState<string | null>(null);
 
-  // One gentle poll — refreshed when the connection (re)opens, never spammy.
+  // One gentle fetch — refreshed when the connection (re)opens.
   useEffect(() => {
     if (status !== "open") return;
     api.getFacts().then((f) => setFactCount(f.length)).catch(() => setFactCount(null));
@@ -34,38 +40,20 @@ export default function HomeStatusCard({ status, activeModelId, mode = "CHAT" }:
   const model = roster.find((m) => m.id === activeModelId);
 
   return (
-    <aside className="syscard">
-      <div className="syscard__row">
-        <span className={"syscard__dot syscard__dot--" + status} />
-        <span className="syscard__key">Link</span>
-        <span className="syscard__val">{status === "open" ? "connected" : status}</span>
-      </div>
-      <div className="syscard__row">
-        <span className="syscard__orb" style={{ background: model?.color ?? "#7d3cff" }} />
-        <span className="syscard__key">Model</span>
-        <span className="syscard__val">{model ? model.name : "auto-routing"}</span>
-      </div>
-      <div className="syscard__row">
-        <span className="syscard__spark">❋</span>
-        <span className="syscard__key">Memory</span>
-        <span className="syscard__val">
-          {factCount === null ? "—" : factCount + " facts held"}
-        </span>
-      </div>
-      {mode && mode !== "CHAT" && (
-        <div className="syscard__row">
-          <span className="syscard__spark">◎</span>
-          <span className="syscard__key">Mode</span>
-          <span className="syscard__val">{mode.toLowerCase()}</span>
-        </div>
+    <p className="homeline" aria-live="polite">
+      <span className={"homeline__item homeline__link homeline__link--" + status}>
+        <i />{LINK[status] ?? status}
+      </span>
+      <span className="homeline__item">
+        <i style={{ background: model?.color ?? "var(--horizon)" }} />
+        {model ? `${model.name} answering` : "Picking the best model per message"}
+      </span>
+      {factCount !== null && (
+        <span className="homeline__item">{factCount} things remembered</span>
       )}
       {nextTask && (
-        <div className="syscard__row syscard__row--task" title={nextTask}>
-          <span className="syscard__spark">✓</span>
-          <span className="syscard__key">Up next</span>
-          <span className="syscard__val">{nextTask}</span>
-        </div>
+        <span className="homeline__item homeline__task" title={nextTask}>Next: {nextTask}</span>
       )}
-    </aside>
+    </p>
   );
 }

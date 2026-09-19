@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 export interface Clock {
   time: string; // 10:42 PM
   date: string; // May 19, 2025 | Monday
-  greeting: string; // Good Evening
+  greeting: string; // Good evening
 }
 
 function format(now: Date): Clock {
@@ -19,7 +19,7 @@ function format(now: Date): Clock {
   });
   const weekday = now.toLocaleDateString("en-US", { weekday: "long" });
   const h = now.getHours();
-  const greeting = h < 12 ? "Good Morning" : h < 17 ? "Good Afternoon" : "Good Evening";
+  const greeting = h < 5 ? "Still up" : h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
   return { time, date: date + "  |  " + weekday, greeting };
 }
 

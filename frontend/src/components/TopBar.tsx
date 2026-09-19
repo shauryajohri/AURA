@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { type ReactNode } from "react";
 import { useClock } from "../hooks/useClock";
 import { useCoreStore } from "../stores/coreStore";
 import { usePlanetStore } from "../stores/planetStore";
 import { useNotifyStore } from "../stores/notifyStore";
 import { useRoster } from "../stores/rosterStore";
+import Icon, { type IconName } from "./Icon";
 
-const KIND_ICON: Record<string, string> = {
-  route: "◈", memory: "❋", task: "✓", quest: "❖", build: "⚙", done: "●", info: "◎",
+const KIND_ICON: Record<string, IconName> = {
+  route: "models", memory: "memory", task: "tasks", quest: "spark", build: "domain", done: "check", info: "spark",
 };
 
 function timeAgo(ts: number): string {
@@ -23,12 +24,46 @@ const USER = "Shaurya";
 
 interface Props {
   mode?: string;
+  /** The one-line system readout under the greeting. */
+  children?: ReactNode;
 }
 
-export default function TopBar({ mode = "CHAT" }: Props) {
+function Slider({ label, value, min, max, step, disabled, onChange }: {
+  label: string; value: number; min: number; max: number; step: number; disabled: boolean;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label className="menu__row">
+      <span>{label}</span>
+      <input type="range" min={min} max={max} step={step} value={value} disabled={disabled}
+             onChange={(e) => onChange(Number(e.target.value))} />
+      <em>{value}%</em>
+    </label>
+  );
+}
+
+function EditActions({ editing, onEdit, onSave, onCancel, onReset }: {
+  editing: boolean; onEdit: () => void; onSave: () => void; onCancel: () => void; onReset: () => void;
+}) {
+  return (
+    <div className="menu__actions">
+      {!editing ? (
+        <button className="btn btn--primary" onClick={onEdit}>Edit</button>
+      ) : (
+        <>
+          <button className="btn btn--primary" onClick={onSave}>Save</button>
+          <button className="btn" onClick={onCancel}>Cancel</button>
+          <button className="btn btn--quiet" onClick={onReset}>Reset</button>
+        </>
+      )}
+    </div>
+  );
+}
+
+export default function TopBar({ mode = "CHAT", children }: Props) {
   const roster = useRoster();
-  const { time, date, greeting } = useClock();
-  const [focus, setFocus] = useState(true);
+  const { time, greeting } = useClock();
+  const day = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
 
   const menuOpen = useCoreStore((s) => s.menuOpen);
   const setMenuOpen = useCoreStore((s) => s.setMenuOpen);
@@ -62,220 +97,115 @@ export default function TopBar({ mode = "CHAT" }: Props) {
   const clearNotices = useNotifyStore((s) => s.clear);
   const unread = notices.filter((n) => !n.read).length;
 
+  // one menu at a time
+  const open = (which: "core" | "planets" | "bell") => {
+    setMenuOpen(which === "core" ? !menuOpen : false);
+    pSetMenuOpen(which === "planets" ? !pMenuOpen : false);
+    setBellOpen(which === "bell" ? !bellOpen : false);
+  };
+
   return (
     <header className="topbar">
       <div className="topbar__greet">
         <h2>
-          {greeting}, {USER} <span className="topbar__spark">{"✦"}</span>
-          {mode && mode !== "CHAT" && <span className="modechip">{mode} mode</span>}
+          {greeting}, {USER}
+          {mode && !["CHAT", "NORMAL"].includes(mode.toUpperCase()) && (
+            <span className="modechip">{mode.toLowerCase()} mode</span>
+          )}
         </h2>
-        <p>I'm here, ready to help you achieve more today.</p>
-      </div>
-
-      <div className="clock">
-        <div className="clock__time">
-          <span className="clock__moon">{"☾"}</span> {time}
-        </div>
-        <div className="clock__date">{date}</div>
+        {children}
       </div>
 
       <div className="topbar__right">
-        <div className="coremenu-wrap">
-          <button
-            className={"corebtn " + (menuOpen ? "corebtn--open" : "")}
-            onClick={() => setMenuOpen(!menuOpen)}
-            title="AURA core settings">
-            <span className="corebtn__orb" />
-            <span className="corebtn__label">Core</span>
-            <span className="corebtn__caret">{menuOpen ? "▴" : "▾"}</span>
+        <div className="topbar__time">
+          <span>{time}</span>
+          <small>{day}</small>
+        </div>
+
+        <div className="menuwrap">
+          <button className={"iconbtn" + (menuOpen ? " iconbtn--on" : "")} onClick={() => open("core")}
+                  aria-expanded={menuOpen} aria-label="Adjust the core" data-tip="Core">
+            <Icon name="core" />
           </button>
-
           {menuOpen && (
-            <div className="coremenu">
-              <div className="coremenu__head">
-                <span>CORE ADJUST</span>
-                {editing && <em className="coremenu__editing">editing</em>}
+            <div className="menu" role="dialog" aria-label="Core">
+              <div className="menu__head">
+                <span>Core</span>
+                {editing && <em className="menu__flag">Editing</em>}
               </div>
-
-              <label className="coremenu__row">
-                <span>Size</span>
-                <input
-                  type="range" min={50} max={150} step={5} value={scale}
-                  disabled={!editing}
-                  onChange={(e) => setCfg({ scale: Number(e.target.value) })}
-                />
-                <em>{scale}%</em>
-              </label>
-              <label className="coremenu__row">
-                <span>Glow</span>
-                <input
-                  type="range" min={40} max={160} step={5} value={glow}
-                  disabled={!editing}
-                  onChange={(e) => setCfg({ glow: Number(e.target.value) })}
-                />
-                <em>{glow}%</em>
-              </label>
-
-              {editing && <p className="coremenu__hint">Drag the black hole to reposition it.</p>}
-
-              <div className="coremenu__actions">
-                {!editing ? (
-                  <button className="coremenu__btn coremenu__btn--primary" onClick={startEdit}>
-                    Edit
-                  </button>
-                ) : (
-                  <>
-                    <button className="coremenu__btn coremenu__btn--primary" onClick={save}>
-                      Save
-                    </button>
-                    <button className="coremenu__btn" onClick={cancel}>
-                      Cancel
-                    </button>
-                    <button className="coremenu__btn" onClick={resetSpec}>
-                      Reset
-                    </button>
-                  </>
-                )}
-              </div>
+              <Slider label="Size" value={scale} min={50} max={150} step={5} disabled={!editing}
+                      onChange={(v) => setCfg({ scale: v })} />
+              <Slider label="Glow" value={glow} min={40} max={160} step={5} disabled={!editing}
+                      onChange={(v) => setCfg({ glow: v })} />
+              {editing && <p className="menu__hint">Drag the black hole to move it.</p>}
+              <EditActions editing={editing} onEdit={startEdit} onSave={save} onCancel={cancel} onReset={resetSpec} />
             </div>
           )}
         </div>
 
-        <div className="coremenu-wrap">
-          <button
-            className={"corebtn " + (pMenuOpen ? "corebtn--open" : "")}
-            onClick={() => pSetMenuOpen(!pMenuOpen)}
-            title="Planet system settings"
-          >
-            <span className="corebtn__orb corebtn__orb--planet" />
-            <span className="corebtn__label">Planets</span>
-            <span className="corebtn__caret">{pMenuOpen ? "▴" : "▾"}</span>
+        <div className="menuwrap">
+          <button className={"iconbtn" + (pMenuOpen ? " iconbtn--on" : "")} onClick={() => open("planets")}
+                  aria-expanded={pMenuOpen} aria-label="Adjust the planets" data-tip="Orbits">
+            <Icon name="models" />
           </button>
-
           {pMenuOpen && (
-            <div className="coremenu">
-              <div className="coremenu__head">
-                <span>PLANET ADJUST</span>
-                {pEditing && <em className="coremenu__editing">editing</em>}
+            <div className="menu" role="dialog" aria-label="Planets">
+              <div className="menu__head">
+                <span>Orbits</span>
+                {pEditing && <em className="menu__flag">Editing</em>}
               </div>
-
-              <label className="coremenu__row">
-                <span>Orbit</span>
-                <input
-                  type="range" min={20} max={300} step={5} value={pOrbit}
-                  disabled={!pEditing}
-                  onChange={(e) => pSetCfg({ orbit: Number(e.target.value) })}
-                />
-                <em>{pOrbit}%</em>
-              </label>
-              <label className="coremenu__row">
-                <span>Size</span>
-                <input
-                  type="range" min={50} max={600} step={10} value={pSize}
-                  disabled={!pEditing}
-                  onChange={(e) => pSetCfg({ size: Number(e.target.value) })}
-                />
-                <em>{pSize}%</em>
-              </label>
-              <label className="coremenu__row">
-                <span>Speed</span>
-                <input
-                  type="range" min={25} max={300} step={5} value={pSpeed}
-                  disabled={!pEditing}
-                  onChange={(e) => pSetCfg({ speed: Number(e.target.value) })}
-                />
-                <em>{pSpeed}%</em>
-              </label>
-              <label className="coremenu__row">
-                <span>Rings</span>
-                <input
-                  type="range" min={60} max={300} step={10} value={pRingsV}
-                  disabled={!pEditing}
-                  onChange={(e) => pSetCfg({ rings: Number(e.target.value) })}
-                />
-                <em>{pRingsV}%</em>
-              </label>
-
+              <Slider label="Orbit" value={pOrbit} min={20} max={300} step={5} disabled={!pEditing}
+                      onChange={(v) => pSetCfg({ orbit: v })} />
+              <Slider label="Size" value={pSize} min={50} max={600} step={10} disabled={!pEditing}
+                      onChange={(v) => pSetCfg({ size: v })} />
+              <Slider label="Speed" value={pSpeed} min={25} max={300} step={5} disabled={!pEditing}
+                      onChange={(v) => pSetCfg({ speed: v })} />
+              <Slider label="Rings" value={pRingsV} min={60} max={300} step={10} disabled={!pEditing}
+                      onChange={(v) => pSetCfg({ rings: v })} />
               {pEditing && (
                 <>
-                  <p className="coremenu__hint">
-                    Drag a planet onto any orbit — one planet per orbit, the old
-                    tenant swaps to the vacated one.
+                  <p className="menu__hint">
+                    Drag a planet onto any orbit. If one already lives there, they swap.
                   </p>
-                  <div className="coremenu__planets">
+                  <div className="menu__planets">
                     {roster.map((m) => (
-                      <div key={m.id} className="coremenu__planetrow">
-                        <span className="coremenu__dot" style={{ background: m.color }} />
-                        <input
-                          className="coremenu__namein"
-                          value={pMeta[m.id]?.name ?? m.name}
-                          onChange={(e) => pSetMeta(m.id, { name: e.target.value })}
-                          placeholder={m.name}
-                          title="Planet name"
-                        />
-                        <input
-                          className="coremenu__rolein"
-                          value={pMeta[m.id]?.role ?? m.role}
-                          onChange={(e) => pSetMeta(m.id, { role: e.target.value })}
-                          placeholder={m.role}
-                          title="What this planet is for"
-                        />
+                      <div key={m.id} className="menu__planetrow">
+                        <span className="menu__dot" style={{ background: m.color }} />
+                        <input className="menu__name" value={pMeta[m.id]?.name ?? m.name}
+                               onChange={(e) => pSetMeta(m.id, { name: e.target.value })}
+                               placeholder={m.name} aria-label={`Name for ${m.name}`} />
+                        <input className="menu__role" value={pMeta[m.id]?.role ?? m.role}
+                               onChange={(e) => pSetMeta(m.id, { role: e.target.value })}
+                               placeholder={m.role} aria-label={`What ${m.name} is for`} />
                       </div>
                     ))}
                   </div>
                 </>
               )}
-
-              <div className="coremenu__actions">
-                {!pEditing ? (
-                  <button className="coremenu__btn coremenu__btn--primary" onClick={pStartEdit}>
-                    Edit
-                  </button>
-                ) : (
-                  <>
-                    <button className="coremenu__btn coremenu__btn--primary" onClick={pSave}>
-                      Save
-                    </button>
-                    <button className="coremenu__btn" onClick={pCancel}>
-                      Cancel
-                    </button>
-                    <button className="coremenu__btn" onClick={pResetSpec}>
-                      Reset
-                    </button>
-                  </>
-                )}
-              </div>
+              <EditActions editing={pEditing} onEdit={pStartEdit} onSave={pSave} onCancel={pCancel} onReset={pResetSpec} />
             </div>
           )}
         </div>
 
-        <div className="coremenu-wrap">
-          <button
-            className={"bell" + (bellOpen ? " bell--open" : "")}
-            onClick={() => setBellOpen(!bellOpen)}
-            title="Notifications"
-          >
-            {"🔔"}
-            {unread > 0 && <span className="bell__badge">{unread > 9 ? "9+" : unread}</span>}
+        <div className="menuwrap">
+          <button className={"iconbtn" + (bellOpen ? " iconbtn--on" : "")} onClick={() => open("bell")}
+                  aria-expanded={bellOpen} aria-label={`Notifications${unread ? `, ${unread} new` : ""}`} data-tip="Notifications">
+            <Icon name="bell" />
+            {unread > 0 && <span className="iconbtn__badge">{unread > 9 ? "9+" : unread}</span>}
           </button>
-
           {bellOpen && (
-            <div className="coremenu bellmenu">
-              <div className="coremenu__head">
-                <span>NOTIFICATIONS</span>
-                {notices.length > 0 && (
-                  <button className="bellmenu__clear" onClick={clearNotices}>clear</button>
-                )}
+            <div className="menu menu--wide" role="dialog" aria-label="Notifications">
+              <div className="menu__head">
+                <span>Notifications</span>
+                {notices.length > 0 && <button className="menu__clear" onClick={clearNotices}>Clear all</button>}
               </div>
-              <div className="bellmenu__list">
-                {notices.length === 0 && (
-                  <p className="bellmenu__empty">All quiet — AURA will log what she does here.</p>
-                )}
+              <div className="notes">
+                {notices.length === 0 && <p className="notes__empty">Nothing yet. What AURA does in the background shows up here.</p>}
                 {notices.slice(0, 30).map((n) => (
-                  <div key={n.id} className={"bellmenu__row" + (n.read ? "" : " bellmenu__row--new")}>
-                    <span className="bellmenu__icon">{KIND_ICON[n.kind] ?? "◎"}</span>
-                    <span className="bellmenu__text">{n.text}</span>
-                    <span className="bellmenu__when">{timeAgo(n.ts)}</span>
+                  <div key={n.id} className={"notes__row" + (n.read ? "" : " notes__row--new")}>
+                    <Icon name={KIND_ICON[n.kind] ?? "spark"} size={14} className="notes__icon" />
+                    <span className="notes__text">{n.text}</span>
+                    <span className="notes__when">{timeAgo(n.ts)}</span>
                   </div>
                 ))}
               </div>
@@ -283,23 +213,12 @@ export default function TopBar({ mode = "CHAT" }: Props) {
           )}
         </div>
 
-        <button
-          className={"focus " + (focus ? "focus--on" : "")}
-          onClick={() => setFocus((f) => !f)}
-        >
-          <span className="focus__icon">{"✧"}</span>
-          <div className="focus__text">
-            <span className="focus__label">Focus Mode</span>
-            <span className="focus__state">{focus ? "● ON" : "● OFF"}</span>
-          </div>
-        </button>
-
         <div className="winctl">
-          <button className="winctl__btn" title="Minimize" onClick={() => window.aura?.minimize?.()}>
-            {"—"}
+          <button className="iconbtn iconbtn--flat" aria-label="Minimize" onClick={() => window.aura?.minimize?.()}>
+            <Icon name="minimize" />
           </button>
-          <button className="winctl__btn winctl__btn--close" title="Close" onClick={() => window.aura?.close?.()}>
-            {"✕"}
+          <button className="iconbtn iconbtn--flat iconbtn--close" aria-label="Close" onClick={() => window.aura?.close?.()}>
+            <Icon name="close" />
           </button>
         </div>
       </div>

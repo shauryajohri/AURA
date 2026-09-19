@@ -90,6 +90,41 @@ Reasoning models leak their deliberation as ordinary content ("So answer: …", 
 
 Fenced code is lifted out before filtering and restored byte-for-byte — a filter that flattens a C++ answer into one line is worse than the leak.
 
+### Saved Info — share it, she reads it
+
+Paste a link in chat, or drop a PDF / Word file / image on the dock (📎 works too), and AURA saves it, reads it and files a title, summary, key points and tags (`core/saved_info.py`). Web pages, GitHub repos (README + metadata), YouTube videos, PDF links and uploads are all understood.
+
+- **Just the link** ("save this https://…") → an instant "saved — here's what it is", no model call beyond the summary.
+- **A question with it** ("what does this argue? https://…") → answered from the page's actual text.
+- **Later** — "what did that pdf say about X?" pulls the saved item back into context; the tool loop can look it up too.
+- The **Saved Info** page (sidebar ✦) lists everything: search, filter by kind, **Open original**, **Ask AURA about it** (she explains it in the chat, out loud if voice is on), pin, re-read, delete.
+
+Files live in `memory/saved_files/`, rows in the `saved_info` table.
+
+### Install a planet from a key or a link
+
+Paste an API key in chat — or say "install" with a GitHub, docs or model link — and AURA (`core/integrations.py`):
+
+1. works out the service from the key's prefix or the link (unknown key → she asks which service, as a dropdown);
+2. checks it live and lists what it offers, ranking free models first;
+3. marks what each model is best at (Coding / Research / Chat / Vision / Background) and pre-ticks her pick;
+4. asks you to confirm in a card — which models, which jobs, first pick or backup;
+5. test-calls every ticked model; each one that answers **is born at the event horizon and spirals out to its orbit**, and the router uses it for exactly those jobs.
+
+It's configuration, not generated code: almost every LLM API speaks the OpenAI chat-completions dialect, so an install records `{base URL, key, model, jobs}` and `ai_router` reads it. Known services: OpenRouter, Groq, Gemini, Mistral, Cerebras, GitHub Models, Hugging Face, NVIDIA NIM, SambaNova, Together, DeepSeek, OpenAI, Anthropic, xAI, Fireworks, Perplexity, Ollama and LM Studio (local), any OpenAI-compatible URL — plus Tavily / Brave / Serper, which install as **web search** for research questions. A key already in `.env` is reused when you only paste a link.
+
+Keys never reach a model or the chat log: messages with a key are intercepted before the Director, stored masked (`gsk_…Wx9Q`), and the key itself stays in the local database. Retune or remove installed planets under **Models → Installed**.
+
+### The floating orb
+
+When AURA is out of sight — minimized, or another window is on top of her — a small always-on-top orb appears in the corner of the screen (`frontend/electron/orb.cjs`). It's a pocket version of the core: violet when idle, brighter while she thinks, pulsing while she speaks, cyan while the mic is live, and an amber mark if she said something while you were away (hover to read it).
+
+- **Click** — AURA comes back to the front, and the orb steps aside.
+- **Drag** — it glides to the nearest screen edge and remembers the spot.
+- **Right-click** — size, *Keep the orb on screen*, *Hide until AURA is minimized again*, Quit.
+
+It never takes focus from what you're doing, and it only hides once AURA is really visible — Chromium's occlusion tracking is the judge, not just the focus events.
+
 ---
 
 ## AURA Domain — the development OS
@@ -139,6 +174,12 @@ GET  /api/recaps · DELETE /api/recaps/{id}  session snapshots
 GET/POST/PUT/DELETE  /api/quests            daily commitments + screen verification
 GET  /api/models · POST /api/models/{n}/toggle    model lock
 GET  /api/links · /api/stats · /api/nature · /api/settings
+GET  /api/saved · /api/saved/{id} · /api/saved/{id}/file     Saved Info
+POST /api/saved (link) · /api/saved/upload (base64) · /{id}/rescan
+PATCH/DELETE /api/saved/{id}
+GET  /api/integrations · /api/planets                       installed planets
+POST /api/integrations/proposals/{uid}/identify · confirm · dismiss
+PATCH/DELETE /api/integrations/models/{id} · DELETE /api/integrations/{id}
 POST /api/voice/transcribe                  WAV → text fallback
 GET  /api/v3/snapshot · /session · /mistakes       developer state
 POST /api/v3/explain · /api/v3/build              error intelligence

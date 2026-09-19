@@ -12,12 +12,12 @@ interface Delegation {
 }
 
 const DELEGATIONS: Delegation[] = [
-  { agent: "laguna", job: "Implement Domain workspace shell", state: "reasoning" },
-  { agent: "claude", job: "Review portal transition timing", state: "reasoning" },
+  { agent: "north", job: "Implement Domain workspace shell", state: "reasoning" },
+  { agent: "laguna", job: "Review portal transition timing", state: "reasoning" },
   { agent: "nemotron", job: "Research: local vector memory options", state: "queued" },
   { agent: "gemma", job: "Draft companion-mode copy", state: "queued" },
   { agent: "llama8b", job: "Index yesterday's session", state: "done" },
-  { agent: "gpt4o", job: "Summarize repo changes", state: "done" },
+  { agent: "qwen", job: "Summarize repo changes", state: "done" },
 ];
 
 export default function AgentsView() {
@@ -49,7 +49,7 @@ export default function AgentsView() {
                   boxShadow: active ? `0 0 ${14 + ((pulse + i) % 2) * 6}px ${m.color}` : "none",
                 }}
               />
-              <span className="dagents__name">{m.name.split(" ")[0]}</span>
+              <span className="dagents__name">{m.short}</span>
               <span className="dagents__role">{m.role}</span>
             </div>
           );

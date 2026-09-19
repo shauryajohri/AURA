@@ -8,6 +8,7 @@ const { spawn } = require("child_process");
 const path = require("path");
 const net = require("net");
 const fs = require("fs");
+const { createOrb } = require("./orb.cjs");
 
 const isDev = !app.isPackaged && process.env.AURA_PROD !== "1";
 
@@ -68,6 +69,22 @@ function stopBrain() {
 // ---------------------------------------------------------------------------
 Menu.setApplicationMenu(null); // AURA owns its chrome: no OS titlebar, no menu bar.
 
+let mainWin = null;
+let orb = null;
+
+/** Bring AURA's window back to the front — the orb's click. */
+function summonMain() {
+  if (!mainWin || mainWin.isDestroyed()) return;
+  if (mainWin.isMinimized()) mainWin.restore();
+  if (!mainWin.isVisible()) mainWin.show();
+  // Windows may refuse to hand over focus; a moment of always-on-top puts the
+  // window in front regardless, and dropping it again leaves it there.
+  mainWin.setAlwaysOnTop(true);
+  mainWin.moveTop();
+  mainWin.focus();
+  mainWin.setAlwaysOnTop(false);
+}
+
 function createWindow() {
   const iconPath = path.join(__dirname, "aura.ico");
   const win = new BrowserWindow({
@@ -91,8 +108,31 @@ function createWindow() {
   win.once("ready-to-show", () => {
     win.maximize();
     win.show();
+    // Opened behind another window (launched from a script, say)? Then she's
+    // already out of sight and the orb should say so.
+    setTimeout(() => orb?.checkInitialFocus(), 1500);
   });
   win.on("unmaximize", () => win.maximize());
+
+  // The floating orb stands in for AURA whenever she's out of sight:
+  // minimized, or another window came in front of her.
+  mainWin = win;
+  orb = createOrb({
+    getMain: () => mainWin,
+    summon: summonMain,
+    quit: () => app.quit(),
+  });
+  win.on("minimize", () => orb?.onMainHidden());
+  win.on("hide", () => orb?.onMainHidden());
+  win.on("blur", () => orb?.onMainBlurred());
+  win.on("focus", () => orb?.onMainShown());
+  win.on("restore", () => orb?.onMainShown());
+  // Closing AURA closes the orb too — otherwise it would keep the app alive.
+  win.on("closed", () => {
+    orb?.destroy();
+    orb = null;
+    mainWin = null;
+  });
 
   // Belt and braces for links. The renderer routes clicks through the preload
   // bridge, but anything that still tries to open a window or navigate the app

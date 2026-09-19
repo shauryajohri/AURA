@@ -20,17 +20,22 @@ const SKILLS: Skill[] = [
   {
     icon: "⌨", name: "Write & debug code",
     blurb: "Writes, explains, refactors and debugs across Python, JS/TS, C++ and more. Reads your project files for context and classifies errors by severity.",
-    routes: "Laguna M.1", live: true,
+    routes: "North Mini Code → Laguna XS 2.1 → Qwen3.8 27B", live: true,
   },
   {
     icon: "◎", name: "Research anything",
     blurb: "Digs into a topic and reports back — direct answer first, detail second. Long-form mode for full write-ups.",
-    routes: "Nemotron 3 Super", live: true,
+    routes: "Nemotron 3 Super → Dots 3 Note", live: true,
+  },
+  {
+    icon: "◌", name: "Chat with you",
+    blurb: "Everyday conversation, opinions and brainstorming — in the nature you picked, with your shared history in mind.",
+    routes: "Gemma 4 31B → Nex N2.5 Pro", live: true,
   },
   {
     icon: "❋", name: "Remember you",
     blurb: "Durable facts about you, conversation history and session recaps. She actually recalls — nothing is faked.",
-    routes: "GPT-OSS 20B", live: true,
+    routes: "GPT-OSS 20B → Qwen3.8 27B", live: true,
   },
   {
     icon: "✓", name: "Manage tasks",
@@ -39,28 +44,28 @@ const SKILLS: Skill[] = [
   },
   {
     icon: "◈", name: "Route between minds",
-    blurb: "Classifies intent, picks the specialist model, falls back automatically when one is rate-limited, and honours your locks.",
+    blurb: "Classifies intent, picks the specialist model, falls back automatically when one is rate-limited, and honours your locks. Every job has at least two free models.",
     routes: "core router", live: true,
   },
   {
     icon: "♪", name: "Talk & listen",
     blurb: "Speaks replies aloud with a natural speech plan, listens for the wake word, and knows when to stay quiet.",
-    routes: "local voice", live: true,
+    routes: "hears: Whisper v3 Turbo → Whisper v3 → Google · speaks: edge-tts → Windows voice", live: true,
   },
   {
     icon: "◉", name: "Watch your screen",
     blurb: "Reads what's on screen when asked, notices patterns in what you're working on, and comments only when it helps.",
-    routes: "local vision/OCR", live: true,
+    routes: "local OCR · image checks: Gemma 4 31B → Nemotron Nano Omni → Ling 3.0 Flash VL", live: true,
   },
   {
     icon: "✦", name: "Speak up on her own",
     blurb: "Proactive nudges, curiosity and attention — she starts conversations when something's worth saying.",
-    routes: "GPT-OSS 120B", live: true,
+    routes: "GPT-OSS 120B / 20B → Qwen3.8 27B", live: true,
   },
   {
     icon: "▣", name: "Plan & organise projects",
     blurb: "Breaks goals into plans, keeps projects, boards, notes and code together in the Domain workspace.",
-    routes: "Nemotron 3 Super", live: true,
+    routes: "Nemotron 3 Super → Dots 3 Note", live: true,
   },
   {
     icon: "❖", name: "Generate images",
@@ -70,15 +75,17 @@ const SKILLS: Skill[] = [
 ];
 
 const MODEL_DETAIL: Record<string, { best: string; speed: string; provider: string }> = {
-  laguna:   { best: "Writing and fixing code", speed: "Fast", provider: "OpenRouter" },
-  nemotron: { best: "Research and long reasoning", speed: "Medium", provider: "OpenRouter" },
-  gemma:    { best: "Everyday conversation", speed: "Fast", provider: "OpenRouter" },
-  llama:    { best: "General fallback, proactive lines", speed: "Very fast", provider: "Groq" },
+  north:    { best: "Writing and fixing code", speed: "Fast", provider: "OpenRouter" },
+  laguna:   { best: "Coding when North is busy", speed: "Medium", provider: "OpenRouter" },
+  qwen:     { best: "Third coder, backup for background jobs", speed: "Very fast", provider: "Groq" },
+  nemotron: { best: "Research and long reasoning", speed: "Fast", provider: "OpenRouter" },
+  dots:     { best: "Research when Nemotron is busy", speed: "Fast", provider: "OpenRouter" },
+  gemma:    { best: "Everyday conversation and image checks", speed: "Fast", provider: "OpenRouter" },
+  nex:      { best: "Conversation when Gemma is busy", speed: "Slow", provider: "OpenRouter" },
+  omni:     { best: "Image checks backup", speed: "Fast", provider: "OpenRouter" },
+  ling:     { best: "Image checks, last resort", speed: "Fast", provider: "OpenRouter" },
+  llama:    { best: "Safety net for every job, proactive lines", speed: "Very fast", provider: "Groq" },
   llama8b:  { best: "Background jobs, classifying, memory", speed: "Instant", provider: "Groq" },
-  gpt4o:    { best: "Balanced all-rounder", speed: "Fast", provider: "not routed yet" },
-  gemini:   { best: "Research with wide context", speed: "Fast", provider: "not routed yet" },
-  claude:   { best: "Deep analysis and writing", speed: "Medium", provider: "not routed yet" },
-  grok:     { best: "Real-time, blunt takes", speed: "Fast", provider: "not routed yet" },
 };
 
 export default function SkillsView() {
@@ -138,7 +145,7 @@ export default function SkillsView() {
           {MODELS.map((m) => {
             const d = MODEL_DETAIL[m.id];
             const locked = isLocked(m.name);
-            const active = lastModel && (lastModel.includes(m.id) || m.name === lastModel);
+            const active = lastModel === m.modelId;
             return (
               <div key={m.id} className={"mrow" + (locked ? " mrow--locked" : "")}>
                 <span className="mrow__orb" style={{ background: m.color, boxShadow: `0 0 12px ${m.color}` }} />

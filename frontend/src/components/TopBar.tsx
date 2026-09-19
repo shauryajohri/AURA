@@ -3,7 +3,7 @@ import { useClock } from "../hooks/useClock";
 import { useCoreStore } from "../stores/coreStore";
 import { usePlanetStore } from "../stores/planetStore";
 import { useNotifyStore } from "../stores/notifyStore";
-import { MODELS } from "../data/models";
+import { useRoster } from "../stores/rosterStore";
 
 const KIND_ICON: Record<string, string> = {
   route: "◈", memory: "❋", task: "✓", quest: "❖", build: "⚙", done: "●", info: "◎",
@@ -26,6 +26,7 @@ interface Props {
 }
 
 export default function TopBar({ mode = "CHAT" }: Props) {
+  const roster = useRoster();
   const { time, date, greeting } = useClock();
   const [focus, setFocus] = useState(true);
 
@@ -202,7 +203,7 @@ export default function TopBar({ mode = "CHAT" }: Props) {
                     tenant swaps to the vacated one.
                   </p>
                   <div className="coremenu__planets">
-                    {MODELS.map((m) => (
+                    {roster.map((m) => (
                       <div key={m.id} className="coremenu__planetrow">
                         <span className="coremenu__dot" style={{ background: m.color }} />
                         <input

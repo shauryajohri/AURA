@@ -3,6 +3,7 @@ import re
 import requests
 from dotenv import load_dotenv
 from core.personality import DONNA_SYSTEM_PROMPT, INTENT_PERSONALITY_ADJUSTMENTS
+from core import model_router
 
 load_dotenv()  # must be before os.getenv
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")  # get from console.groq.com
@@ -19,13 +20,16 @@ GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
 
 # Explicit registry of Groq-hosted model ids. Provider USED to be inferred
 # from the id shape ("contains a slash" => OpenRouter), but Groq's current
-# ids ("openai/gpt-oss-120b", "qwen/qwen3.6-27b") contain slashes too, so
+# ids ("openai/gpt-oss-120b", "qwen/qwen3.8-27b") contain slashes too, so
 # that heuristic would silently send Groq traffic to OpenRouter with the
 # wrong key. Anything not listed here is treated as OpenRouter.
+# qwen/qwen3.6-27b was swapped for 3.8: Groq caps 3.6 at 1000 output tokens a
+# minute (less than one 2048-token coding reply) and it rejects
+# reasoning_effort="low".
 GROQ_MODEL_IDS = {
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
-    "qwen/qwen3.6-27b",
+    "qwen/qwen3.8-27b",
 }
 
 # OpenRouter — OpenAI-compatible, so the same request/response shape works;
@@ -35,17 +39,17 @@ GROQ_MODEL_IDS = {
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")  # shared/default fallback
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-# Per-model OpenRouter keys — AURA uses a SEPARATE key for each model so work
-# is spread across three independent free-tier quotas instead of exhausting
-# one. Each falls back to the shared OPENROUTER_API_KEY if its own key is
-# blank, so a single key still works too. Model ids mirror core/model_router.
+# Per-job OpenRouter keys — OPENROUTER_KEY_CODING / _RESEARCH / _CHAT. Every
+# model in a job uses that job's key (model_router.OPENROUTER_KEY_SLOT), and a
+# blank one falls back to the shared OPENROUTER_API_KEY, so a single key still
+# works too.
+_OPENROUTER_SLOT_KEYS = {
+    slot: os.getenv(f"OPENROUTER_KEY_{slot}") or OPENROUTER_API_KEY
+    for slot in ("CODING", "RESEARCH", "CHAT")
+}
 _OPENROUTER_MODEL_KEYS = {
-    "poolside/laguna-m.1:free":
-        os.getenv("OPENROUTER_KEY_CODING") or OPENROUTER_API_KEY,
-    "nvidia/nemotron-3-super-120b-a12b:free":
-        os.getenv("OPENROUTER_KEY_RESEARCH") or OPENROUTER_API_KEY,
-    "google/gemma-4-31b-it:free":
-        os.getenv("OPENROUTER_KEY_CHAT") or OPENROUTER_API_KEY,
+    model_id: _OPENROUTER_SLOT_KEYS[slot]
+    for model_id, slot in model_router.OPENROUTER_KEY_SLOT.items()
 }
 
 RATE_LIMIT_COOLDOWN_SECONDS = 20
@@ -61,16 +65,45 @@ _last_model_used = GROQ_MODEL
 def _provider_for(model_id: str) -> str:
     """Groq ids are the ones in GROQ_MODEL_IDS; everything else is an
     OpenRouter id. Do NOT go back to sniffing for a "/" — Groq ids have
-    slashes now too."""
+    slashes now too. Installed planets ("ext:<n>", core/integrations) report
+    their request style: openrouter / groq / compat / anthropic."""
     if not model_id:
         return "groq"
+    if model_id.startswith("ext:"):
+        ep = _ext_endpoint(model_id)
+        return ep[0] if ep else "compat"
     return "groq" if model_id in GROQ_MODEL_IDS else "openrouter"
+
+
+def _ext_endpoint(model_id: str):
+    try:
+        from core import integrations
+        return integrations.endpoint(model_id)
+    except Exception as e:  # noqa: BLE001
+        print(f"[AURA] installed planet {model_id} unavailable: {e}")
+        return None
+
+
+def _wire_id(model_id: str) -> str:
+    """The id the provider expects in the request body. Installed planets are
+    routed as "ext:<n>" so they can never collide with a built-in model, but
+    the API wants its own name for the model."""
+    if model_id and model_id.startswith("ext:"):
+        try:
+            from core import integrations
+            return integrations.wire_id(model_id)
+        except Exception:  # noqa: BLE001
+            return model_id
+    return model_id
 
 
 def _endpoint_for(model_id: str):
     """Return (provider, url, api_key) for a model id. OpenRouter models use
     their own per-model key (see _OPENROUTER_MODEL_KEYS) so each draws from a
     separate free quota."""
+    if model_id and model_id.startswith("ext:"):
+        ep = _ext_endpoint(model_id)
+        return ep if ep else ("compat", "", "")
     if _provider_for(model_id) == "openrouter":
         key = _OPENROUTER_MODEL_KEYS.get(model_id, OPENROUTER_API_KEY)
         return "openrouter", OPENROUTER_URL, key
@@ -78,9 +111,26 @@ def _endpoint_for(model_id: str):
 
 
 def _cooldown_key(provider: str, model_id: str) -> str:
-    """Cooldown is tracked PER OpenRouter model (each has its own key/quota),
-    but shared for Groq. So a 429 on one model's quota never pauses another."""
-    return model_id if provider == "openrouter" else "groq"
+    """Cooldown is tracked PER MODEL on both providers. OpenRouter models each
+    have their own quota, and Groq's rate limits are per model too — the old
+    shared "groq" cooldown meant one 429 on GPT-OSS 120B also froze GPT-OSS
+    20B and Qwen, so the Groq backups never got a turn."""
+    return model_id
+
+
+# A call that never produced an answer — the cue to try the next model.
+_UNAVAILABLE = ("RATE_LIMIT", "CONNECTION_ERROR")
+
+
+def _with_backups(model_id: str) -> list:
+    """`model_id`, then its Groq backups (model_router.GROQ_BACKUPS), then any
+    installed planet ticked for Background work. Models without backups come
+    back alone — intent chains do their own fallback."""
+    chain = [model_id] + model_router.GROQ_BACKUPS.get(model_id, [])
+    if model_id in model_router.GROQ_BACKUPS:
+        first, backup = model_router.installed_for("Background")
+        chain += [mid for _, mid in first + backup if mid not in chain]
+    return chain
 
 
 def _headers(provider: str, api_key: str) -> dict:
@@ -89,6 +139,9 @@ def _headers(provider: str, api_key: str) -> dict:
         # Optional but recommended by OpenRouter for attribution.
         h["HTTP-Referer"] = "https://aura.local"
         h["X-Title"] = "AURA"
+    elif provider == "anthropic":
+        h["x-api-key"] = api_key
+        h["anthropic-version"] = "2023-06-01"
     return h
 
 
@@ -104,9 +157,12 @@ def _apply_reasoning_policy(body: dict, provider: str) -> dict:
     """
     if provider == "openrouter":
         body["reasoning"] = {"exclude": True}
-    else:
+    elif provider == "groq":
         body["reasoning_format"] = "hidden"
         body.setdefault("reasoning_effort", "low")
+    # Any other OpenAI-compatible API (installed planets) gets the plain
+    # request: Groq's reasoning flags are a 400 on most of them.
+    body["model"] = _wire_id(body.get("model", ""))
     return body
 
 
@@ -202,11 +258,11 @@ def resolve_model(intent: str):
 def _resolve_candidates(intent: str, explicit_model: str | None) -> list:
     """Ordered [(name, id)] to try, with LOCKED models removed entirely.
     A locked model is never used, no matter what. When an explicit model is
-    given (from the plan engine), it leads, then the Groq fallback chain."""
-    from core import model_router, model_lock
+    given (from the plan engine), it leads, then the intent's normal chain."""
+    from core import model_lock
     if explicit_model:
         lead_name = model_router.name_for_id(explicit_model) or explicit_model
-        base = [(lead_name, explicit_model)] + model_router.groq_fallbacks()
+        base = [(lead_name, explicit_model)] + model_router.candidates_for(intent)
     else:
         base = model_router.candidates_for(intent)
 
@@ -414,12 +470,15 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
     # never arrives as content — the real root fix, not the regex band-aid
     # below.
     _apply_reasoning_policy(body, provider)
+    timeout = 60 if (is_longform or is_explain) else 30
+    if url.startswith(("http://localhost", "http://127.0.0.1")):
+        timeout = 150   # an installed local planet (Ollama, LM Studio) may be loading the model
     try:
         response = requests.post(
             url,
             headers=_headers(provider, api_key),
             json=body,
-            timeout=60 if (is_longform or is_explain) else 30,
+            timeout=timeout,
             stream=True
         )
         if response.status_code == 429:
@@ -437,7 +496,15 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
                 if line.startswith("data: ") and line != "data: [DONE]":
                     import json
                     chunk = json.loads(line[6:])
-                    delta = chunk["choices"][0]["delta"]
+                    # OpenRouter also streams chunks with no choices (usage
+                    # totals, upstream errors). Indexing those blindly raised
+                    # "list index out of range" and threw away a live stream.
+                    choices = chunk.get("choices") or []
+                    if not choices:
+                        if chunk.get("error"):
+                            print(f"[AURA] {provider} stream error from {model_id}: {str(chunk['error'])[:200]}")
+                        continue
+                    delta = choices[0].get("delta") or {}
                     # Some reasoning models stream thinking in a separate
                     # `reasoning`/`reasoning_content` field — never yield it.
                     content = delta.get("content", "")
@@ -456,13 +523,26 @@ _CLASSIFIER_SYSTEM = "You are a classifier. Output ONLY the requested single wor
 
 def call_claude(prompt: str, system: str = DONNA_SYSTEM_PROMPT) -> str:
     """Meta-call alias used by think/anticipate/knowledge/tasks/curiosity —
-    routed to the LIGHT model so it never competes with chat for 70B quota."""
+    routed to the LIGHT model so it never competes with chat for 70B quota
+    (call_groq hands over to Qwen when it's rate-limited)."""
     return call_groq(prompt, system, intent="CASUAL", model=GROQ_MODEL_LIGHT)
 
 
 def call_classifier(prompt: str) -> str:
-    """Lightweight call for classification tasks (intent, anticipate, should_respond) — no personality prompt."""
-    if _in_rate_limit_cooldown():
+    """Lightweight call for classification tasks (intent, anticipate, should_respond) — no personality prompt.
+    GPT-OSS 20B first, then its Groq backup, so one model's rate limit
+    doesn't leave AURA unable to classify."""
+    result = ""
+    for model_id in _with_backups(GROQ_MODEL_LIGHT):
+        result = _call_classifier_once(prompt, model_id)
+        if result not in ("", "CONNECTION_ERROR"):
+            return result
+    return result
+
+
+def _call_classifier_once(prompt: str, model_id: str) -> str:
+    cd_key = _cooldown_key("groq", model_id)
+    if _in_rate_limit_cooldown(cd_key):
         return ""
     try:
         response = requests.post(
@@ -472,7 +552,7 @@ def call_classifier(prompt: str) -> str:
                 "Content-Type": "application/json"
             },
             json=_apply_reasoning_policy({
-                "model": GROQ_MODEL_LIGHT,   # 1-word task — never burn heavy quota
+                "model": model_id,   # 1-word task — never burn heavy quota
                 "messages": [
                     {"role": "system", "content": _CLASSIFIER_SYSTEM},
                     {"role": "user", "content": prompt}
@@ -488,16 +568,16 @@ def call_classifier(prompt: str) -> str:
             timeout=15
         )
         if response.status_code == 429:
-            _start_rate_limit_cooldown()
+            _start_rate_limit_cooldown(cd_key)
             return ""
         data = response.json()
         if "choices" not in data:
-            print(f"[AURA] Groq classifier API error (status {response.status_code}): {data}")
+            print(f"[AURA] Groq classifier API error ({model_id}, status {response.status_code}): {data}")
             return "CONNECTION_ERROR"
         raw = data["choices"][0]["message"]["content"]
         return clean_response(raw)
     except Exception as e:
-        print(f"[AURA] Groq classifier error: {e}")
+        print(f"[AURA] Groq classifier error ({model_id}): {e}")
         return "CONNECTION_ERROR"
 
 
@@ -514,7 +594,9 @@ def route(intent: str, prompt: str) -> str:
             activity.emit(f"Routing to {name}…", "route")
         except Exception:  # noqa: BLE001
             pass
-        result = call_groq(prompt, system, intent=intent, model=mid)
+        # One model per step: this loop IS the fallback chain, so call_groq's
+        # own Groq backups would only repeat the chain's tail.
+        result = _call_groq_once(prompt, system, intent, mid)
         if result in ("RATE_LIMIT", "CONNECTION_ERROR"):
             last = result
             print(f"[AURA] ⚠ {name} unavailable ({result}) — falling back")
@@ -718,7 +800,8 @@ _META_STRONG_RE = _re_mod.compile(
     # A subjectless imperative IS self-instruction — nobody says "Must start
     # directly." to another person. Anchored to the sentence start.
     r"(?:^|[.!?])\s*must\s+"
-    r"(?:start|begin|open|be|use|keep|avoid|not|stay|end|answer|reply|respond)\b|"
+    r"(?:start|begin|open|be|use|keep|avoid|not|stay|end|answer|reply|respond|"
+    r"follow|obey|comply|adhere)\b|"
     r"\bstart(?:ing)? directly\b|"
     # Contraction form of the planning markers. The spelled-out "we can not"
     # was covered; "we can't say" was not. Kept narrow — a QUOTE must follow,
@@ -739,7 +822,7 @@ _META_STRONG_RE = _re_mod.compile(
     # explicit planning / self-instruction about the answer
     r"we (?:must|should|need to|can|have to|are) not\b|"
     r"we need to (?:respond|answer|produce|give|write|say|follow|avoid|infer)|"
-    r"we (?:must|should) (?:not |avoid |produce |respond |answer |follow )|"
+    r"we (?:must|should) (?:not |avoid |produce |respond |answer |follow |obey |comply )|"
     r"thus we (?:need|must|should)|so we (?:need|must) to|"
     r"our (?:response|reply|answer) (?:should|must|needs)|"
     # deliberating about HOW to answer — "Should we ask clarifying?",
@@ -773,6 +856,15 @@ _META_STRONG_RE = _re_mod.compile(
     # Same seam, worn as a guess instead of a conclusion.
     r"(?:^|[.!?])\s*(?:probably|perhaps|maybe|likely|something like|"
     r"i'?d say|response|reply|output)\s*:|"
+    # NATURE / WEB-DEMO ECHO (2026-09-13, nvidia/nemotron in the web demo). The
+    # model recited its own locks before answering: "Must follow nature: Savage
+    # (roast mode). Also we must obey the public web demo constraints: we have
+    # no memory etc. Just answer." A sentence that is only "Just answer." is the
+    # model telling itself to stop thinking; nobody says it to another person.
+    r"\bnature lock\b|\b(?:follow|obey|keep|stay in) (?:the )?nature\s*:|"
+    r"\bweb demo (?:constraints|rules|instructions)\b|"
+    r"^\s*(?:ok(?:ay)?[,.]?\s*)?(?:now\s+)?just (?:answer|respond|reply)"
+    r"(?: it| now| directly| briefly)?\s*[.!]*\s*$|"
     r"as an ai|chain[- ]of[- ]thought"
     r")"
 )
@@ -780,6 +872,9 @@ _META_STRONG_RE = _re_mod.compile(
 _META_WEAK_RE = _re_mod.compile(
     r"(?i)("
     r"we need to|we must|we should|answer the question|sentence [12]\b|"
+    # "They didn't ask for code." opening a reply is the model checking the
+    # request against its rules. Leading-only: mid-answer it can be real advice.
+    r"^\W*they (?:didn['’]?t|did not|haven['’]?t|have not) (?:ask|request)\b|"
     r"they(?:'ve| have| are|'re| were) (?:been )?(?:discussing|talking about|asking|working on|building|mentioned)|"
     r"looking at (?:the |our )?(?:conversation|chat|history|context|previous message|screen)|"
     r"(?:the |our )?conversation history|based on (?:the |our )?(?:context|conversation|history|chat|prior|previous|above|earlier)|"
@@ -1006,9 +1101,21 @@ def sanitize_text(text: str, query: str = "") -> str:
         return _code_only()
 
     # 3. Drop any remaining strongly-meta sentences wherever they sit.
-    kept = [s for s in rest if not _strong(s)]
+    # A dropped sentence can take the whitespace that separated its neighbours
+    # with it ("...saved in this session.If you want..."), so a space is put
+    # back only where something was removed. Kept neighbours are joined as they
+    # were, or "3.14" would split into "3. 14".
+    joined, dropped = "", False
+    for sent in rest:
+        if _strong(sent):
+            dropped = True
+            continue
+        if dropped and joined and not joined[-1].isspace() and not sent[:1].isspace():
+            joined += " "
+        joined += sent
+        dropped = False
     # Whitespace-normalise the PROSE only, then put the code back verbatim.
-    prose = re.sub(r"[ \t]*\n[ \t]*", "\n", "".join(kept))
+    prose = re.sub(r"[ \t]*\n[ \t]*", "\n", joined)
     prose = re.sub(r"[ \t]{2,}", " ", prose).strip()
     # Whatever survived has to actually say something. If the filters ate every
     # word and left punctuation behind, that's the same case as an all-reasoning
@@ -1172,29 +1279,36 @@ def clean_proactive_line(line: str) -> str | None:
 
 
 # ── Vision ──────────────────────────────────────────────────────────────────
-# Gemma 4 31B is already in the roster (it answers CASUAL/PERSONAL) and it is
-# multimodal — text AND image in, on the free tier. So screenshot verification
-# needs no new key and no new quota: it reuses OPENROUTER_KEY_CHAT.
-# Overridable in .env for when a better free vision model shows up.
-VISION_MODEL = os.getenv("AURA_VISION_MODEL", "google/gemma-4-31b-it:free")
-# Second free multimodal model on OpenRouter. Gemma's free tier gets rate-
-# limited fast (shared quota across everyone on the no-cost tier, not just
-# AURA's usage) — when that happens verification shouldn't just fail, it
+# Three free multimodal models, tried in order (model_router.VISION_CHAIN):
+# Gemma 4 31B, Nemotron Nano Omni, Ling 3.0 Flash VL. Gemma's free tier gets
+# rate-limited fast (shared quota across everyone on the no-cost tier, not
+# just AURA's usage) — when that happens verification shouldn't just fail, it
 # should quietly try a different model before telling shaurya it couldn't
-# look. Same OPENROUTER_KEY_CHAT key covers this one too; no new key needed.
+# look. All three use OPENROUTER_KEY_CHAT; no new key needed. Each is
+# overridable in .env for when a better free vision model shows up.
+# The backup used to be nvidia/nemotron-3-nano-omni-30b:free — an id OpenRouter
+# no longer serves, so the fallback was dead until this chain replaced it.
+VISION_MODEL = os.getenv(
+    "AURA_VISION_MODEL", model_router.MODELS[model_router.VISION_CHAIN[0]])
 VISION_FALLBACK_MODEL = os.getenv(
-    "AURA_VISION_FALLBACK_MODEL", "nvidia/nemotron-3-nano-omni-30b:free"
-)
+    "AURA_VISION_FALLBACK_MODEL", model_router.MODELS[model_router.VISION_CHAIN[1]])
+VISION_THIRD_MODEL = os.getenv(
+    "AURA_VISION_THIRD_MODEL", model_router.MODELS[model_router.VISION_CHAIN[2]])
+
+
+def _vision_models() -> list:
+    """The vision chain in order — read at call time so tests can swap ids.
+    Installed planets ticked for Vision slot in front ("first") or behind."""
+    first, backup = model_router.installed_for("Vision")
+    return ([mid for _, mid in first]
+            + [VISION_MODEL, VISION_FALLBACK_MODEL, VISION_THIRD_MODEL]
+            + [mid for _, mid in backup])
 
 
 def vision_available() -> bool:
-    """False when there's no key for EITHER vision model — callers fall back
+    """False when there's no key for ANY vision model — callers fall back
     rather than erroring."""
-    _, _, key = _endpoint_for(VISION_MODEL)
-    if key:
-        return True
-    _, _, key2 = _endpoint_for(VISION_FALLBACK_MODEL)
-    return bool(key2)
+    return any(_endpoint_for(model_id)[2] for model_id in _vision_models())
 
 
 def _call_vision_one(model_id: str, prompt: str, image_b64: str, system: str,
@@ -1222,7 +1336,7 @@ def _call_vision_one(model_id: str, prompt: str, image_b64: str, system: str,
         response = requests.post(
             url,
             headers=_headers(provider, api_key),
-            json={"model": model_id, "messages": messages,
+            json={"model": _wire_id(model_id), "messages": messages,
                   "max_tokens": max_tokens, "temperature": 0.1},
             timeout=timeout,
         )
@@ -1244,21 +1358,22 @@ def call_vision(prompt: str, image_b64: str, system: str = "",
                 max_tokens: int = 400, timeout: int = 60) -> str:
     """Ask a vision model about one image.
 
-    Tries VISION_MODEL first, and if that comes back rate-limited (or has no
-    key) falls through to VISION_FALLBACK_MODEL before giving up — the two
-    free-tier quotas are independent, so a Gemma 429 doesn't have to mean
-    "can't verify right now" if Nemotron's omni model is free.
+    Walks the vision chain — VISION_MODEL, VISION_FALLBACK_MODEL, then
+    VISION_THIRD_MODEL — until one answers. The free-tier quotas are
+    independent, so a Gemma 429 doesn't have to mean "can't verify right now"
+    while another vision model is free.
 
     `image_b64` is raw base64 (no data: prefix). Returns the model's text, or
     one of the usual sentinels — RATE_LIMIT / CONNECTION_ERROR / NO_VISION_KEY
     — so the caller can tell "it said no" apart from "it never ran", which for
     a verification feature is the difference between rejecting your work and
     admitting AURA couldn't look. The sentinel returned is only ever RATE_LIMIT
-    or NO_VISION_KEY if BOTH models failed that way.
+    or NO_VISION_KEY if EVERY model failed that way.
     """
+    models = _vision_models()
     tried = []
     last = "NO_VISION_KEY"
-    for model_id in (VISION_MODEL, VISION_FALLBACK_MODEL):
+    for model_id in models:
         if model_id in tried:
             continue
         tried.append(model_id)
@@ -1269,14 +1384,87 @@ def call_vision(prompt: str, image_b64: str, system: str = "",
                 last = result
             elif last == "NO_VISION_KEY":
                 last = result
-            print(f"[AURA vision] {model_id} unavailable ({result}) — "
-                  f"trying next model" if model_id == VISION_MODEL else
-                  f"[AURA vision] {model_id} also unavailable ({result})")
+            more = "trying next model" if model_id != models[-1] else "no vision model left"
+            print(f"[AURA vision] {model_id} unavailable ({result}) — {more}")
             continue
-        if model_id != VISION_MODEL:
+        if model_id != models[0]:
             print(f"[AURA vision] answered by fallback model {model_id}")
         return result
     return last
+
+
+# ── Speech-to-text ──────────────────────────────────────────────────────────
+# Groq serves Whisper on the free tier. Turbo first (fastest), full large-v3
+# as its backup — Groq's limits are per model, so a 429 on one leaves the
+# other. Callers (server /api/voice/transcribe, modules/voice_input) fall back
+# to Google's keyless recognizer when this returns None.
+WHISPER_MODELS = ["whisper-large-v3-turbo", "whisper-large-v3"]
+GROQ_STT_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
+
+# Whisper never answers silence with nothing — it invents a stock line.
+# Measured 2026-09-14: two seconds of digital silence came back "Thank you.",
+# faint noise came back ".". An always-on mic would reply to both.
+_SILENT_RMS = 100   # 16-bit level below which there is nothing to hear
+_QUIET_RMS = 500    # below this, a stock phrase is treated as a phantom
+_WHISPER_PHANTOMS = {"thank you", "thanks for watching", "thank you for watching",
+                     "you", "bye", "so", "okay"}
+
+
+def _wav_rms(audio: bytes):
+    """RMS level of 16-bit PCM WAV bytes, or None if it isn't one."""
+    import array
+    import io
+    import wave
+    try:
+        with wave.open(io.BytesIO(audio)) as w:
+            if w.getsampwidth() != 2:
+                return None
+            samples = array.array("h", w.readframes(w.getnframes()))
+    except (wave.Error, EOFError):
+        return None
+    if not samples:
+        return 0.0
+    return (sum(s * s for s in samples) / len(samples)) ** 0.5
+
+
+def transcribe_whisper(audio: bytes, filename: str = "speech.wav"):
+    """Transcribe WAV `audio` with Groq Whisper. Returns the text ("" when
+    there's nothing real to hear), or None when no Whisper model could run —
+    the caller's cue to use another recognizer."""
+    if not _key_is_real(GROQ_API_KEY):
+        return None
+    rms = _wav_rms(audio)
+    if rms is not None and rms < _SILENT_RMS:
+        return ""
+    for model_id in WHISPER_MODELS:
+        if _in_rate_limit_cooldown(model_id):
+            continue
+        try:
+            response = requests.post(
+                GROQ_STT_URL,
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                files={"file": (filename, audio, "audio/wav")},
+                data={"model": model_id, "language": "en", "response_format": "json"},
+                timeout=30,
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"[AURA stt] {model_id}: {e}")
+            continue
+        if response.status_code == 429:
+            _start_rate_limit_cooldown(model_id)
+            continue
+        if response.status_code >= 400:
+            print(f"[AURA stt] {model_id} error {response.status_code}: {response.text[:200]}")
+            continue
+        try:
+            text = (response.json().get("text") or "").strip()
+        except ValueError:
+            continue
+        words = re.sub(r"[^\w\s']", "", text).strip().lower()
+        if not words or (words in _WHISPER_PHANTOMS and rms is not None and rms < _QUIET_RMS):
+            return ""
+        return text
+    return None
 
 
 def route_streaming(intent: str, prompt: str, system_prompt: str | None = None, model: str | None = None):
@@ -1329,12 +1517,26 @@ def route_streaming(intent: str, prompt: str, system_prompt: str | None = None, 
         yield from _sanitize_reasoning_stream(_combined())
         return
     yield last_sentinel
+
+
 def call_groq_raw(prompt: str, system: str, max_tokens: int = 1024,
                   temperature: float = 0.4, model: str = None) -> str:
     """Clean single call — NO personality addon, NO 2-sentence limit,
     NO response cleaning. Used by the Prompt Maker (/prompt_end) and any
-    future session mode that needs full-length structured output."""
-    model_id = model or GROQ_MODEL
+    future session mode that needs full-length structured output.
+
+    A rate-limited or failing Groq model hands over to its Groq backups
+    (model_router.GROQ_BACKUPS) before the caller ever sees a sentinel."""
+    result = "CONNECTION_ERROR"
+    for model_id in _with_backups(model or GROQ_MODEL):
+        result = _call_groq_raw_once(prompt, system, max_tokens, temperature, model_id)
+        if result not in _UNAVAILABLE:
+            return result
+    return result
+
+
+def _call_groq_raw_once(prompt: str, system: str, max_tokens: int,
+                        temperature: float, model_id: str) -> str:
     provider, url, api_key = _endpoint_for(model_id)
     cd_key = _cooldown_key(provider, model_id)
     if _in_rate_limit_cooldown(cd_key):
@@ -1377,10 +1579,21 @@ def call_planner(prompt: str, system: str, model: str = None) -> str:
     `failed_generation` field still carries the call the model wanted. We
     reconstruct it as a plain `FETCH: <name> <json>` line so the shim reads
     it the same as any other. Anything unrecoverable comes back as a sentinel.
+
+    Like the other direct Groq calls, a rate-limited or failing model hands
+    over to its Groq backup first.
     """
+    result = "CONNECTION_ERROR"
+    for model_id in _with_backups(model or GROQ_MODEL_LIGHT):
+        result = _call_planner_once(prompt, system, model_id)
+        if result not in _UNAVAILABLE:
+            return result
+    return result
+
+
+def _call_planner_once(prompt: str, system: str, model_id: str) -> str:
     import json as _json
 
-    model_id = model or GROQ_MODEL_LIGHT
     provider, url, api_key = _endpoint_for(model_id)
     cd_key = _cooldown_key(provider, model_id)
     if _in_rate_limit_cooldown(cd_key):
@@ -1435,7 +1648,18 @@ def call_planner(prompt: str, system: str, model: str = None) -> str:
 
 
 def call_groq(prompt: str, system: str = DONNA_SYSTEM_PROMPT, intent: str = "CASUAL", model: str = None) -> str:
-    model_id = model or GROQ_MODEL
+    """One non-streaming reply. A rate-limited or failing Groq model hands over
+    to its Groq backups (model_router.GROQ_BACKUPS) — background callers pass
+    GPT-OSS 20B/120B directly and have no chain of their own."""
+    result = "CONNECTION_ERROR"
+    for model_id in _with_backups(model or GROQ_MODEL):
+        result = _call_groq_once(prompt, system, intent, model_id)
+        if result not in _UNAVAILABLE:
+            return result
+    return result
+
+
+def _call_groq_once(prompt: str, system: str, intent: str, model_id: str) -> str:
     provider, url, api_key = _endpoint_for(model_id)
     cd_key = _cooldown_key(provider, model_id)
     if _in_rate_limit_cooldown(cd_key):
@@ -1461,8 +1685,8 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
 - NO emoji. Zero.
 - NO "OMG", "Whoopsie", "Let's", "Together", "Great question", "Certainly"
 - NO made-up context. Only refer to what's in the conversation.
-- NEVER guess or make up content about videos, URLs, or links you cannot access.
-- If asked about a URL say: "can't open that directly — paste the key points and I'll work with it."
+- NEVER guess or make up content about videos, URLs, or links whose text isn't in front of you
+  (shared links and files arrive above the message as WHAT THEY SHARED / FROM THEIR SAVED INFO).
 - Talk like a sharp friend texting. Dry. Direct. No hype.
 - NEVER end with a question unless you have zero info to work with.
 """

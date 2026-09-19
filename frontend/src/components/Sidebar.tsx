@@ -19,6 +19,7 @@ const NAV: NavItem[] = [
   { id: "home", label: "Home", icon: "⌂", hint: "The AURA core" },
   { id: "chats", label: "Chats", icon: "◈", hint: "Rooms · chats · history" },
   { id: "domain", label: "Aura Domain", icon: "❖", hint: "Coding workspace", domain: true },
+  { id: "saved", label: "Saved Info", icon: "✦", hint: "Links · PDFs · files she read" },
   { id: "memory", label: "Memory", icon: "❋", hint: "Timeline · search · bookmarks" },
   { id: "tasks", label: "Tasks", icon: "✓", hint: "Today · projects · quests" },
   { id: "models", label: "Models", icon: "◈", hint: "Planets · routing · orbits" },

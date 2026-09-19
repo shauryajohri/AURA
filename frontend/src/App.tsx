@@ -2,6 +2,9 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react"
 import { useAuraSocket } from "./hooks/useAuraSocket";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 import { useSettingsStore } from "./stores/settingsStore";
+import { useSavedStore } from "./stores/savedStore";
+import { useRosterStore } from "./stores/rosterStore";
+import type { SavedItem } from "./types";
 import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
 import Stage from "./components/Stage";
@@ -23,6 +26,7 @@ const ModelsPage = lazy(() => import("./views/ModelsPage"));
 const SettingsView = lazy(() => import("./views/SettingsView"));
 const LabsPage = lazy(() => import("./views/LabsPage"));
 const ChatsPage = lazy(() => import("./views/ChatsPage"));
+const SavedInfoPage = lazy(() => import("./views/SavedInfoPage"));
 
 /** Shown for the instant a lazy page is fetched — a calm pulse, never a jolt. */
 function PageLoading() {
@@ -50,7 +54,7 @@ const LEGACY: Record<string, string> = {
   skills: "models",
   analytics: "models",
 };
-const PAGES = ["home", "chats", "memory", "tasks", "models", "settings", "labs"];
+const PAGES = ["home", "chats", "saved", "memory", "tasks", "models", "settings", "labs"];
 
 export default function App() {
   const { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, activity, send,
@@ -74,8 +78,28 @@ export default function App() {
 
   // Pull saved appearance/voice settings from the brain once at startup and
   // push them into the visual stores (core, planets, background).
+  // The floating orb (desktop app) glows with whatever AURA is doing.
+  useEffect(() => { window.aura?.orbState?.(auraState); }, [auraState]);
+  // …and appears whenever this page can't be seen. Chromium reports real
+  // occlusion on Windows, so "another window is on top of AURA" lands here
+  // even when the OS focus events don't say so.
+  useEffect(() => {
+    const report = () => window.aura?.orbVisible?.(document.visibilityState === "visible");
+    report();
+    document.addEventListener("visibilitychange", report);
+    return () => document.removeEventListener("visibilitychange", report);
+  }, []);
+
   const loadSettings = useSettingsStore((s) => s.load);
   useEffect(() => { loadSettings(); }, [loadSettings]);
+
+  // Saved Info and installed planets: loaded once here, then kept live by the
+  // socket's "saved" / "planets" frames.
+  const loadSaved = useSavedStore((s) => s.load);
+  const loadRoster = useRosterStore((s) => s.load);
+  useEffect(() => { void loadSaved(); void loadRoster(); }, [loadSaved, loadRoster]);
+  // The brain may boot after the window — retry the roster when it connects.
+  useEffect(() => { if (status === "open") void loadRoster(); }, [status, loadRoster]);
 
   // ---- AURA Domain: the workspace beyond the portal -----------------------
   const [domainOpen, setDomainOpen] = useState(false);
@@ -86,11 +110,23 @@ export default function App() {
 
   const goHome = useCallback(() => setView("home"), [setView]);
 
+  // Saved Info → "Ask AURA about it": back to Home, where the answer streams
+  // into the dock (and is spoken, if voice is on).
+  const askAbout = useCallback((item: SavedItem) => {
+    setView("home");
+    send(`Tell me about “${item.title}” from my Saved Info.`, {
+      attachments: [{ id: item.id, name: item.title, kind: item.kind }],
+      intent: "EXPLAIN",
+    });
+  }, [setView, send]);
+
   const renderPage = () => {
     switch (view) {
       case "chats":
         // Same socket as the dock — one conversation, two places to see it.
         return <ChatsPage onSend={send} />;
+      case "saved":
+        return <SavedInfoPage onAsk={askAbout} />;
       case "memory":
         return <MemoryPage />;
       case "tasks":

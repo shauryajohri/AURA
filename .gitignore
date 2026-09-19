@@ -8,7 +8,10 @@ env/
 
 # Personal data — never publish (conversation history, relationship state)
 memory/aura_memory.db
+memory/aura_memory.db-*
 memory/*.json
+# Links, PDFs and files shared with AURA (Saved Info)
+memory/saved_files/
 .aura_index.pkl
 
 # FUSE leftovers. When a file is deleted while still open, the mount renames

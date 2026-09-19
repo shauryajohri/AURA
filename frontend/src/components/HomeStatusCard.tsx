@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ConnStatus } from "../types";
 import { api } from "../api";
-import { MODELS } from "../data/models";
+import { useRoster } from "../stores/rosterStore";
 
 /**
  * The one small widget Home keeps — a quiet system readout, not a dashboard.
@@ -30,7 +30,8 @@ export default function HomeStatusCard({ status, activeModelId, mode = "CHAT" }:
       .catch(() => setNextTask(null));
   }, [status]);
 
-  const model = MODELS.find((m) => m.id === activeModelId);
+  const roster = useRoster();
+  const model = roster.find((m) => m.id === activeModelId);
 
   return (
     <aside className="syscard">

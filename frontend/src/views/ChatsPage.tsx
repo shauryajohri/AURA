@@ -23,7 +23,7 @@ const BLANK: Partial<Room> = {
 
 interface Props {
   /** Send a message on the shared socket — one conversation, two places. */
-  onSend?: (text: string) => void;
+  onSend?: (text: string) => boolean | void;
 }
 
 export default function ChatsPage({ onSend }: Props) {

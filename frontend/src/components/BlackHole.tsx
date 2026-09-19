@@ -3,7 +3,7 @@ import type { AuraState } from "../types";
 import { useCoreStore } from "../stores/coreStore";
 import { usePlanetStore } from "../stores/planetStore";
 import { useSettingsStore } from "../stores/settingsStore";
-import { MODELS } from "../data/models";
+import { useRoster, useRosterStore } from "../stores/rosterStore";
 
 // ============================================================================
 // AURA CORE — Black Hole, built 1:1 from the design spec:
@@ -40,7 +40,20 @@ const REF = 680;         // reference composition size (px)
 // dropping a planet on a taken slot swaps the occupant onto the vacated one.
 // Pushed outward so the enlarged horizon keeps generous clearance to the
 // first orbit even at bigger Core / Planet sizes.
-const SLOT_FRACS = [0.74, 0.82, 0.9, 0.98, 1.06, 1.14, 1.22, 1.3, 1.38];
+// One slot per model (never fewer than the original nine), spread over the
+// same 0.74–1.38 band so a bigger roster packs tighter instead of growing
+// past the stage. With nine models this is exactly the old hand-set list.
+// The roster grows when a planet is installed, so the slots are computed
+// from it (slotFracsFor) rather than fixed at import.
+const slotFracsFor = (n: number) => {
+  const count = Math.max(9, n);
+  return Array.from({ length: count }, (_, i) => 0.74 + (0.64 * i) / (count - 1));
+};
+// A newly installed planet is born at the event horizon and spirals out to
+// its orbit — once per planet per app session.
+const BIRTH_MS = 2800;
+const BIRTH_WINDOW_MS = 5 * 60_000;
+const BIRTHS_PLAYED = new Set<string>();
 const MAX = 420;         // on-screen cap — keeps the core compact in the stage
 const HORIZON = 168;     // event-horizon radius (≈40% larger — cinematic redesign)
 const RINGS = 12;        // orbital guide count, per spec
@@ -65,6 +78,16 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
   stateRef.current = state;
   const activeRef = useRef<string | null>(activeModelId);
   activeRef.current = activeModelId;
+
+  // Built-in + installed planets. The scene rebuilds only when the SET of
+  // planets changes (an install or an uninstall), not on every roster fetch.
+  const roster = useRoster();
+  const rosterKey = roster.map((m) => m.id).join("|");
+  const born = useRosterStore((st) => st.born);
+  const bornRef = useRef(born);
+  bornRef.current = born;
+  const slotFracsRef = useRef(slotFracsFor(roster.length));
+  slotFracsRef.current = slotFracsFor(roster.length);
 
   // Planet settings (Planets menu in the top bar) — read live via ref so the
   // sliders act instantly without restarting the render loop.
@@ -286,26 +309,35 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
       ring: boolean; tilt: number;
       ringA: number; ringW: number;
       ringDust: Array<{ ang: number; rf: number; sz: number; al: number; t: string }>;
+      birthAt: number; // performance.now() when its birth started, 0 = none
       // card-design extras: faint local orbit circles + tiny travelling dots,
       // and one small grey moon of its own
       loc: number[];
       locDots: Array<{ ri: number; a: number; w: number }>;
       moonA: number; moonW: number; moonD: number; moonS: number;
     }
-    const planets: Planet[] = MODELS.map((m, i) => ({
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    const SLOT_FRACS = slotFracsRef.current;
+    const planets: Planet[] = roster.map((m, i) => ({
       id: m.id,
       name: m.name,
       role: m.role,
       c: hexRgb(m.color),
-      a: (i * Math.PI * 2) / MODELS.length + 0.4, // equal spacing start
+      a: (i * Math.PI * 2) / roster.length + 0.4, // equal spacing start
       def: i % SLOT_FRACS.length,                  // default orbit slot
+      birthAt: (() => {
+        const t = bornRef.current[m.id];
+        if (!t || reduceMotion || BIRTHS_PLAYED.has(m.id) || Date.now() - t > BIRTH_WINDOW_MS) return 0;
+        BIRTHS_PLAYED.add(m.id);
+        return performance.now();
+      })(),
       w: (Math.PI * 2) / (70 + (i % 5) * 12),     // 70–118s per revolution
       pr: 11 + (i % 3) * 3,                        // bigger, like the cards
       tex: makeTexture(hexRgb(m.color)),
       rot: Math.random() * Math.PI * 2,
       rw: (Math.PI * 2) / (25 + (i % 4) * 6),      // self-rotation 25–43s
       x: 0, y: 0, curR: 0,                          // live position (hit-testing)
-      ring: !!m.ring,                                // paid LLMs wear rings
+      ring: !!m.ring,                                // models that see images wear rings
       tilt: -0.45 + (i % 3) * 0.35,
       ringA: Math.random() * Math.PI * 2,
       ringW: (Math.PI * 2) / (14 + (i % 4) * 4),     // ring revolves in 14–26s
@@ -588,7 +620,7 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
       const pcfg = planetCfgRef.current;
       const editMode = pEditingRef.current;
       const slotR = (si: number) =>
-        Math.min(D / 2 - 28 * s, rMax * SLOT_FRACS[si] * pcfg.orbit);
+        Math.min(D / 2 - 28 * s, rMax * SLOT_FRACS[si % SLOT_FRACS.length] * pcfg.orbit);
 
       // visible orbit rings — one slot per planet. Styled by the Orbit Lines
       // settings; edit mode overrides them (you need to SEE where to drop a
@@ -618,11 +650,38 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
         const si = dragging && dragSlotRef.current !== null
           ? dragSlotRef.current
           : (slotsRef.current[pl.id] ?? pl.def);
-        const orbitR = slotR(si);
-        const x = cx + orbitR * Math.cos(pl.a);
-        const y = cy + orbitR * Math.sin(pl.a);
-        const pr = pl.pr * s * pcfg.size * (isAct ? 1.25 : 1);
+        let orbitR = slotR(si);
+        let ang = pl.a;
+        let grow = 1;
+        let birthT = 1;
+        if (pl.birthAt) {
+          birthT = Math.min(1, (performance.now() - pl.birthAt) / BIRTH_MS);
+          if (birthT >= 1) pl.birthAt = 0;
+          const e = 1 - Math.pow(1 - birthT, 3);             // ease-out: fast launch, gentle arrival
+          orbitR = R * 1.02 + (orbitR - R * 1.02) * e;       // out of the event horizon…
+          ang = pl.a - (1 - e) * Math.PI * 1.4;              // …on a spiral, not a straight line
+          grow = 0.15 + 0.85 * e;
+        }
+        const x = cx + orbitR * Math.cos(ang);
+        const y = cy + orbitR * Math.sin(ang);
+        const pr = pl.pr * s * pcfg.size * (isAct ? 1.25 : 1) * grow;
         pl.x = x; pl.y = y; pl.curR = pr; // published for hit-testing
+
+        if (birthT < 1) {
+          // the flash it leaves the horizon with, and a widening ring as it settles
+          ctx.globalCompositeOperation = "lighter";
+          const glowR = Math.max(pr, 6 * s) * 11;
+          const fl = ctx.createRadialGradient(x, y, 0, x, y, glowR);
+          fl.addColorStop(0, rgba(WHITE, 0.9 * (1 - birthT)));
+          fl.addColorStop(0.18, rgba(pl.c, 0.6 * (1 - birthT)));
+          fl.addColorStop(1, rgba(pl.c, 0));
+          ctx.fillStyle = fl;
+          ctx.beginPath(); ctx.arc(x, y, glowR, 0, Math.PI * 2); ctx.fill();
+          ctx.strokeStyle = rgba(pl.c, 0.95 * (1 - birthT));
+          ctx.lineWidth = 2 * s;
+          ctx.beginPath(); ctx.arc(x, y, Math.max(pr, 6 * s) * (1.6 + birthT * 7), 0, Math.PI * 2); ctx.stroke();
+          ctx.globalCompositeOperation = "source-over";
+        }
 
         // atmosphere glow
         ctx.globalCompositeOperation = "lighter";
@@ -803,7 +862,8 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
     return () => cancelAnimationFrame(raf);
     // `density` is a real dependency: particle arrays are sized once at setup,
     // so changing it has to rebuild the scene rather than just re-render.
-  }, [size, density]);
+    // `rosterKey` too: an installed planet needs its own texture and slot.
+  }, [size, density, rosterKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Dragging the core is only possible in edit mode (Core menu → Edit).
   // Position persists on Save, so AURA is exactly where you left her on relaunch.
@@ -841,8 +901,9 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
       const g = geomRef.current;
       const mul = planetCfgRef.current.orbit || 1;
       let best = 0, bestD = Infinity;
-      for (let si = 0; si < SLOT_FRACS.length; si++) {
-        const rr = Math.min(g.maxR, g.rMax * SLOT_FRACS[si] * mul);
+      const fracs = slotFracsRef.current;
+      for (let si = 0; si < fracs.length; si++) {
+        const rr = Math.min(g.maxR, g.rMax * fracs[si] * mul);
         const d = Math.abs(r - rr);
         if (d < bestD) { bestD = d; best = si; }
       }

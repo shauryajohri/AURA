@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import traceback
 import warnings
 from contextlib import asynccontextmanager
@@ -217,6 +218,13 @@ def _init_v3() -> None:
         print("[AURA bridge] Activity sink attached")
     except Exception:  # noqa: BLE001
         traceback.print_exc()
+    try:
+        from core import integrations, saved_info
+        saved_info.set_sink(lambda payload: broadcast({"type": "saved", "payload": payload}))
+        integrations.set_sink(lambda payload: broadcast({"type": "planets", "payload": payload}))
+        print("[AURA bridge] Saved Info + planet install sinks attached")
+    except Exception:  # noqa: BLE001
+        traceback.print_exc()
 
 
 def _init_director() -> None:
@@ -354,39 +362,64 @@ async def api_delete_task(task_id: int) -> dict[str, Any]:
     return {"ok": True}
 
 
-# The models shown in the constellation + their live lock state.
+# The planets shown in the constellation + their live lock state. Every entry
+# is a real, free model from core/model_router.MODELS — names are the
+# model_lock keys, so locking one removes it from routing. Node ids match the
+# frontend's data/models.ts; the old ids are kept so saved orbit slots and
+# domain cards still resolve.
 _MODELS = [
-    # Live roster — names match core/model_router.MODELS = the model_lock
-    # keys, so locking these actually removes them from routing.
-    {"id": "laguna", "name": "Laguna M.1"},
+    {"id": "north", "name": "North Mini Code"},
+    {"id": "laguna", "name": "Laguna XS 2.1"},
+    {"id": "qwen", "name": "Qwen3.8 27B"},
     {"id": "nemotron", "name": "Nemotron 3 Super"},
+    {"id": "dots", "name": "Dots 3 Note"},
     {"id": "gemma", "name": "Gemma 4 31B"},
+    {"id": "nex", "name": "Nex N2.5 Pro"},
+    {"id": "omni", "name": "Nemotron Nano Omni"},
+    {"id": "ling", "name": "Ling 3.0 Flash VL"},
     {"id": "llama", "name": "GPT-OSS 120B"},
     {"id": "llama8b", "name": "GPT-OSS 20B"},
-    # Display-only constellation planets (not currently routed).
-    {"id": "gpt4o", "name": "GPT-4o"},
-    {"id": "gemini", "name": "Gemini 1.5 Pro"},
-    {"id": "claude", "name": "Claude 3.5"},
-    {"id": "grok", "name": "Grok 2 (xAI)"},
 ]
 
 
 @app.get("/api/models")
 async def api_models() -> dict[str, Any]:
-    from core import model_lock
+    from core import model_lock, model_router
+    groq_ids, last = set(), ""
+    try:
+        from core.ai_router import GROQ_MODEL_IDS, last_model_used
+        groq_ids, last = GROQ_MODEL_IDS, last_model_used()
+    except Exception:  # noqa: BLE001
+        pass
     out = []
     for m in _MODELS:
         try:
             locked = model_lock.is_locked(m["name"])
         except Exception:  # noqa: BLE001
             locked = False
-        out.append({**m, "locked": bool(locked)})
-    last = ""
+        model_id = model_router.MODELS.get(m["name"], "")
+        out.append({
+            **m,
+            "locked": bool(locked),
+            "model_id": model_id,
+            "provider": "Groq" if model_id in groq_ids else "OpenRouter",
+            "jobs": model_router.jobs_for(m["name"]),
+        })
+    # Planets installed from a pasted key or link (core/integrations).
     try:
-        from core.ai_router import last_model_used
-        last = last_model_used()
+        from core import integrations
+        for m in integrations.installed_models():
+            out.append({
+                "id": m["planet_id"], "name": m["name"],
+                "locked": bool(model_lock.is_locked(m["name"])),
+                "model_id": m["wire"], "provider": m["label"],
+                "jobs": model_router.jobs_for(m["name"]), "installed": True,
+                "color": m["color"],
+            })
     except Exception:  # noqa: BLE001
-        pass
+        traceback.print_exc()
+    if last.startswith("ext:"):
+        last = model_router.name_for_id(last) or last
     return {"models": out, "last_model": last}
 
 
@@ -513,6 +546,208 @@ async def api_delete_link(link_id: int) -> dict[str, Any]:
     from memory import store
     store.delete_link(link_id)
     return {"ok": True}
+
+
+# ── Saved Info: links, PDFs and files AURA read for you (core/saved_info) ────
+# Items are created by sharing in chat or from the page itself; scans run on
+# worker threads and announce themselves as {"type": "saved"} websocket frames.
+@app.get("/api/saved")
+async def api_saved(kind: str = "") -> dict[str, Any]:
+    from core import saved_info
+    return {"items": saved_info.list_items(kind or None)}
+
+
+@app.get("/api/saved/{item_id}")
+async def api_saved_item(item_id: int) -> dict[str, Any]:
+    from core import saved_info
+    item = saved_info.get_item(item_id, with_content=True)
+    return {"ok": bool(item), "item": item}
+
+
+@app.post("/api/saved")
+async def api_saved_add(req: Request) -> dict[str, Any]:
+    """Save a link from the page. The scan runs in the background."""
+    from core import saved_info
+    body = await req.json()
+    raw = str(body.get("url") or "").strip()
+    urls = saved_info.extract_urls(raw if "://" in raw or raw.startswith("www.") else "https://" + raw)
+    if not urls:
+        return {"ok": False, "error": "that isn't a public web link"}
+    item = saved_info.save_link(urls[0], origin="page")
+    saved_info.scan_async(item["id"])
+    return {"ok": True, "item": item}
+
+
+@app.post("/api/saved/upload")
+async def api_saved_upload(req: Request) -> dict[str, Any]:
+    """A file from the dock or the page, as base64 JSON (no multipart
+    dependency). Returns at once with status 'scanning'."""
+    import base64 as _b64
+    from core import saved_info
+    body = await req.json()
+    name = str(body.get("name") or "file").strip()[:160]
+    raw = str(body.get("data") or "")
+    if "," in raw[:80] and raw.lstrip().startswith("data:"):
+        raw = raw.split(",", 1)[1]
+    try:
+        data = _b64.b64decode(raw, validate=False)
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "error": "the file didn't arrive intact"}
+    if not data:
+        return {"ok": False, "error": "that file is empty"}
+    try:
+        item = saved_info.save_upload(name, data, str(body.get("mime") or ""),
+                                      origin=str(body.get("origin") or "upload"))
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    saved_info.scan_async(item["id"])
+    return {"ok": True, "item": item}
+
+
+@app.post("/api/saved/{item_id}/rescan")
+async def api_saved_rescan(item_id: int) -> dict[str, Any]:
+    from core import saved_info
+    item = saved_info.rescan(item_id)
+    if not item:
+        return {"ok": False, "error": "no such item"}
+    return {"ok": True, "item": item}
+
+
+@app.patch("/api/saved/{item_id}")
+async def api_saved_update(item_id: int, req: Request) -> dict[str, Any]:
+    from core import saved_info
+    body = await req.json()
+    item = saved_info.update_item(item_id, title=body.get("title"), pinned=body.get("pinned"),
+                                  tags=body.get("tags"))
+    return {"ok": bool(item), "item": item}
+
+
+@app.delete("/api/saved/{item_id}")
+async def api_saved_delete(item_id: int) -> dict[str, Any]:
+    from core import saved_info
+    return {"ok": saved_info.delete_item(item_id)}
+
+
+@app.post("/api/saved/{item_id}/opened")
+async def api_saved_opened(item_id: int) -> dict[str, Any]:
+    from core import saved_info
+    saved_info.mark_opened(item_id)
+    return {"ok": True}
+
+
+@app.get("/api/saved/{item_id}/file")
+async def api_saved_file(item_id: int):
+    """The stored copy of an uploaded (or downloaded) file, shown inline so a
+    PDF opens in the browser's viewer."""
+    from fastapi.responses import FileResponse, JSONResponse
+    from core import saved_info
+    found = saved_info.file_for(item_id)
+    if not found:
+        return JSONResponse({"ok": False, "error": "no stored file"}, status_code=404)
+    path, name, mime = found
+    saved_info.mark_opened(item_id)
+    return FileResponse(path, media_type=mime, filename=name, content_disposition_type="inline")
+
+
+# ── Planet installs: keys and links pasted in chat (core/integrations) ──────
+@app.get("/api/integrations")
+async def api_integrations() -> dict[str, Any]:
+    from core import integrations
+    return {"integrations": integrations.list_integrations(), "planets": integrations.planets(),
+            "jobs": integrations.JOBS}
+
+
+@app.get("/api/planets")
+async def api_planets() -> dict[str, Any]:
+    from core import integrations
+    return {"planets": integrations.planets()}
+
+
+@app.post("/api/integrations/proposals/{uid}/identify")
+async def api_integration_identify(uid: str, req: Request) -> dict[str, Any]:
+    """The card's follow-up answers — which service, a key, a base URL. The
+    key travels here, never through the chat."""
+    from core import integrations
+    body = await req.json()
+    try:
+        prop = await asyncio.to_thread(
+            integrations.identify, uid, body.get("provider") or None,
+            body.get("key"), body.get("base_url") or None)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    finally:
+        # Clears the "Checking …" line on the core — no chat turn ends this.
+        broadcast({"type": "state", "payload": {"state": "idle"}})
+    return {"ok": True, "proposal": prop}
+
+
+@app.post("/api/integrations/proposals/{uid}/confirm")
+async def api_integration_confirm(uid: str, req: Request) -> dict[str, Any]:
+    from core import integrations
+    body = await req.json()
+    try:
+        result = await asyncio.to_thread(
+            integrations.confirm, uid, body.get("models") or [],
+            str(body.get("position") or "backup"), body.get("search_jobs"))
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    finally:
+        broadcast({"type": "state", "payload": {"state": "idle"}})
+    msg = result.get("message") or ""
+    if msg:
+        # The outcome belongs in the conversation too, spoken like any reply.
+        try:
+            from memory import store
+            store.save_conversation("aura", msg)
+        except Exception:  # noqa: BLE001
+            pass
+        broadcast_push(msg, "install")
+        if _voice_is_on():
+            loop = asyncio.get_running_loop()
+            loop.run_in_executor(None, lambda: _speak_reply(msg))
+    return result
+
+
+@app.post("/api/integrations/proposals/{uid}/dismiss")
+async def api_integration_dismiss(uid: str) -> dict[str, Any]:
+    from core import integrations
+    return {"ok": integrations.dismiss(uid)}
+
+
+@app.get("/api/integrations/proposals/{uid}")
+async def api_integration_proposal(uid: str) -> dict[str, Any]:
+    from core import integrations
+    prop = integrations.get_proposal(uid)
+    return {"ok": bool(prop), "proposal": prop}
+
+
+@app.delete("/api/integrations/{integration_id}")
+async def api_integration_uninstall(integration_id: int) -> dict[str, Any]:
+    from core import integrations
+    return {"ok": integrations.uninstall(integration_id)}
+
+
+@app.post("/api/integrations/{integration_id}/test")
+async def api_integration_retest(integration_id: int) -> dict[str, Any]:
+    from core import integrations
+    return {"ok": True, "results": await asyncio.to_thread(integrations.retest, integration_id)}
+
+
+@app.patch("/api/integrations/models/{row_id}")
+async def api_integration_model_update(row_id: int, req: Request) -> dict[str, Any]:
+    from core import integrations
+    body = await req.json()
+    try:
+        integrations.update_model(row_id, jobs=body.get("jobs"), position=body.get("position"))
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, "planets": integrations.planets()}
+
+
+@app.delete("/api/integrations/models/{row_id}")
+async def api_integration_model_delete(row_id: int) -> dict[str, Any]:
+    from core import integrations
+    return {"ok": integrations.remove_model(row_id)}
 
 
 # ── Task edit (title/priority in place) ─────────────────────────────────────
@@ -823,6 +1058,16 @@ async def api_transcribe(req: Request) -> dict[str, Any]:
         return {"ok": False, "text": "", "error": "audio is not valid base64"}
 
     def _run() -> dict[str, Any]:
+        # Groq Whisper first (free tier: large-v3-turbo, then large-v3); None
+        # means neither could run, so Google's keyless recognizer takes over.
+        try:
+            from core.ai_router import transcribe_whisper
+            text = transcribe_whisper(wav)
+        except Exception as e:  # noqa: BLE001
+            print(f"[AURA stt] whisper skipped: {e}")
+            text = None
+        if text is not None:
+            return {"ok": True, "text": text, "error": ""}
         try:
             import speech_recognition as sr
         except Exception:
@@ -1243,8 +1488,133 @@ def _route_room(text: str) -> None:
         print(f"[AURA bridge] room routing skipped: {e}")
 
 
-async def _dispatch(ws: WebSocket, text: str) -> None:
+async def _say(ws: WebSocket, text: str) -> None:
+    """Speak a reply that didn't come through _run_streaming, holding the
+    speaking state so the mic doesn't hear her."""
+    if not text or not _voice_is_on():
+        return
+    loop = asyncio.get_running_loop()
+    await _send(ws, {"type": "state", "payload": {"state": "speaking"}})
+    try:
+        await loop.run_in_executor(None, lambda: _speak_reply(text))
+    except Exception:  # noqa: BLE001
+        traceback.print_exc()
+
+
+async def _maybe_install(ws: WebSocket, text: str) -> bool:
+    """An API key, or "install <link>", becomes an install card.
+
+    Runs before anything else sees the message: a key must never reach the
+    Director, a model, the room router or the chat log in the clear. The log
+    gets a masked copy; the key itself goes into the pending proposal only.
+    """
+    try:
+        from core import integrations
+        req = integrations.detect_request(text)
+    except Exception:  # noqa: BLE001
+        traceback.print_exc()
+        return False
+    if not req:
+        return False
+    print(f"[AURA bridge] install request: {req['masked_text'][:80]}")
+    await _send(ws, {"type": "state", "payload": {"state": "thinking"}})
+    try:
+        prop = await asyncio.to_thread(integrations.propose, req)
+    except Exception as exc:  # noqa: BLE001
+        traceback.print_exc()
+        prop = {"message": f"I couldn't set that up — {exc}", "stage": "error"}
+    message = prop.pop("message", "") or "Here's what I found."
+    try:
+        from memory import store
+        store.save_conversation("user", req["masked_text"])
+        store.save_conversation("aura", message)
+    except Exception:  # noqa: BLE001
+        pass
+    card = prop if prop.get("id") and prop.get("stage") != "not_installable" else None
+    await _send(ws, {"type": "install", "payload": {"text": message, "proposal": card,
+                                                    "masked": req["masked_text"]}})
+    await _say(ws, message)
+    await _send(ws, {"type": "state", "payload": {"state": "idle"}})
+    return True
+
+
+def _canned(user_text: str, reply: str, on_chunk: Callable[[str], None]) -> str:
+    """A reply that needs no model — still logged and streamed like one."""
+    try:
+        from memory import store
+        store.save_conversation("user", user_text)
+        store.save_conversation("aura", reply)
+    except Exception:  # noqa: BLE001
+        pass
+    on_chunk(reply)
+    return reply
+
+
+_CODE_ASK = re.compile(
+    r"(?i)\b(code|function|class|bug|error|implement|refactor|debug|compile|script|"
+    r"port it|rewrite|unit test|stack ?trace)\b")
+
+
+async def _capture_shared(ws: WebSocket, text: str, attachments: list,
+                          asked: bool = False) -> str | None:
+    """Save + read any links in the message and pick up attached uploads.
+
+    Returns None when nothing was shared, "done" when the message was only
+    the shared thing (answered here, no model needed), or an intent for the
+    model turn that should follow ("EXPLAIN" / "CODING").
+    """
+    from core import saved_info
+    urls = saved_info.extract_urls(text)
+    ids = []
+    for a in attachments or []:
+        try:
+            ids.append(int(a))
+        except (TypeError, ValueError):
+            pass
+    if not urls and not ids:
+        return None
+    await _send(ws, {"type": "state", "payload": {"state": "thinking"}})
+    items = await asyncio.to_thread(saved_info.capture, urls, ids[:5], 25.0)
+    if not items:
+        return None
+    names = [n for it in items for n in (it.get("file_name"), it.get("title")) if n]
+    if not asked and saved_info.is_bare_share(text, urls, names):
+        reply = saved_info.share_reply(items)
+        await _run_streaming(ws, lambda oc, occ: _canned(text, reply, oc))
+        return "done"
+    saved_info.arm_turn([it["id"] for it in items])
+    return "CODING" if _CODE_ASK.search(text) else "EXPLAIN"
+
+
+async def _dispatch(ws: WebSocket, text: str, attachments: list | None = None,
+                    intent: str | None = None) -> None:
     """Route one user message through the Director, then act on the directive."""
+    # 1. Keys and "install this" — before anything else can see the message.
+    if await _maybe_install(ws, text):
+        return
+
+    # 2. Links and files shared with the message land in Saved Info.
+    shared_intent = None
+    try:
+        shared_intent = await _capture_shared(ws, text, attachments or [], asked=intent == "EXPLAIN")
+    except Exception:  # noqa: BLE001 — a failed save must not cost the reply
+        traceback.print_exc()
+    if shared_intent == "done":
+        return
+
+    # "Ask AURA" on a Saved Info item, or a question about something just
+    # shared: answer it straight from the material. Skipping the Director
+    # matters — its vague-ask guard would meet "what's this about?" with a
+    # clarifying question when the thing is sitting right there. A workspace
+    # mode (/research, /code …) still wins, so its framing applies.
+    in_mode = DIRECTOR is not None and getattr(DIRECTOR, "mode", "NORMAL") not in ("NORMAL", "CHAT")
+    pinned = "EXPLAIN" if intent == "EXPLAIN" else shared_intent
+    if pinned and not in_mode:
+        _route_room(text)
+        await _run_streaming(ws, lambda oc, occ: process_streaming(
+            text, on_chunk=oc, on_code=occ, intent_hint=pinned))
+        return
+
     _route_room(text)
 
     if DIRECTOR is None:
@@ -1342,11 +1712,18 @@ async def ws_endpoint(ws: WebSocket) -> None:
             if mtype == "ping":
                 await _send(ws, {"type": "pong"})
             elif mtype == "message":
-                text = (data.get("payload") or {}).get("text", "").strip()
+                payload = data.get("payload") or {}
+                text = str(payload.get("text", "")).strip()
+                attachments = payload.get("attachments") or []
+                if not isinstance(attachments, list):
+                    attachments = []
+                # Only "EXPLAIN" can be pinned from the client (Saved Info's
+                # Ask AURA) — the rest of routing stays the brain's call.
+                intent = "EXPLAIN" if payload.get("intent") == "EXPLAIN" else None
                 if not text:
                     await _send(ws, {"type": "error", "payload": {"message": "empty message"}})
                 else:
-                    await _dispatch(ws, text)
+                    await _dispatch(ws, text, attachments, intent)
             else:
                 await _send(ws, {"type": "error", "payload": {"message": f"unknown type: {mtype}"}})
     except WebSocketDisconnect:

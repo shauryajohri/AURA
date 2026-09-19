@@ -4,6 +4,9 @@ modules/voice_input.py
 Speech-to-text. Mic + recognizer are initialized LAZILY (first use), not at
 import time — importing this module can never crash the app on a machine
 without a working microphone/PortAudio.
+
+Recognition: Groq Whisper first (free tier, large-v3-turbo then large-v3),
+Google's keyless recognizer as the backup when neither Whisper model can run.
 """
 
 import threading
@@ -40,6 +43,21 @@ def mic_available() -> bool:
     return ensure_mic()
 
 
+def _recognize(audio) -> str:
+    """Text for one captured phrase ("" for silence). Whisper first; if no
+    Whisper model could run, Google — which raises sr.UnknownValueError /
+    sr.RequestError exactly as before, so callers handle it unchanged."""
+    try:
+        from core.ai_router import transcribe_whisper
+        text = transcribe_whisper(audio.get_wav_data(convert_rate=16000, convert_width=2))
+    except Exception as e:  # noqa: BLE001
+        print(f"[AURA stt] whisper skipped: {e}")
+        text = None
+    if text is not None:
+        return text
+    return recognizer.recognize_google(audio)
+
+
 def listen_continuous(callback, stop_event: threading.Event = None):
     """
     Always-on listening — calls callback(text) with every sentence heard.
@@ -71,7 +89,7 @@ def listen_continuous(callback, stop_event: threading.Event = None):
                 if stop_event.is_set():
                     break
                 try:
-                    text = recognizer.recognize_google(audio)
+                    text = _recognize(audio)
                     if text:
                         callback(text)
                 except sr.UnknownValueError:
@@ -97,7 +115,7 @@ def listen(timeout: float = 1) -> str | None:
     with mic as source:
         try:
             audio = recognizer.listen(source, timeout=timeout, phrase_time_limit=10)
-            return recognizer.recognize_google(audio)
+            return _recognize(audio) or None
         except sr.WaitTimeoutError:
             return None
         except sr.UnknownValueError:

@@ -144,46 +144,14 @@ def guard_output(response: str, max_sentences: int = 2) -> str:
         response = ". ".join(sentences[:max_sentences]) + "."
     return response
 
-# A CODING verdict is only trusted if the message actually asks for code to be
-# produced/modified. "get me info for dna storage system" sounds technical, so
-# the LLM classifier sometimes mislabels it CODING → wrong (Laguna coding)
-# model. These cues gate that.
-_CODE_ACTION_CUES = (
-    "write ", "code", "implement", "refactor", "rewrite", "debug", "fix ",
-    "patch", "compile", "function", "class ", "def ", "script", "program",
-    "snippet", "syntax", "```", "leetcode", "regex", "algorithm to",
-    ".py", ".js", ".ts", ".cpp", ".java", ".cs", ".go", ".rs", ".html", ".css",
+# The rule layer over the classifier lives in core/intent_rules so the public
+# web demo can apply the exact same corrections without importing the brain.
+from core.intent_rules import (
+    CODE_ACTION_CUES as _CODE_ACTION_CUES,
+    INFO_CUES as _INFO_CUES,
+    STRONG_INFO_CUES as _STRONG_INFO_CUES,
+    correct_intent as _correct_intent,
 )
-# Broad info cues — used ONLY to pick SEARCH vs CASUAL when downgrading a wrong
-# CODING verdict. "what is/are" included; bare "what's" is left out because it
-# overlaps greetings ("what's up").
-_INFO_CUES = (
-    "info", "information", "tell me about", "what is", "what are", "who is",
-    "how does", "how do", "how to", "explain", "overview", "details",
-    "research", "find out", "look up", "learn about", "difference between",
-    "meaning of", "summary of", "facts about", "get me info", "give me info",
-)
-# Narrow, unambiguous info cues — safe to UPGRADE a CASUAL verdict to SEARCH
-# without stealing greetings/small-talk.
-_STRONG_INFO_CUES = (
-    "info", "information", "tell me about", "get me info", "give me info",
-    "explain", "research", "look up", "find out", "learn about",
-    "details about", "overview of", "summary of", "facts about",
-)
-
-
-def _correct_intent(query: str, intent: str) -> str:
-    """Deterministic safety net over the LLM classifier. Stops technical-
-    sounding INFORMATION requests from being routed to the coding model."""
-    q = query.lower()
-    has_code_cue = any(c in q for c in _CODE_ACTION_CUES)
-    if intent == "CODING" and not has_code_cue:
-        # CODING with no "produce code" cue → it's really an info/general ask.
-        return "SEARCH" if any(c in q for c in _INFO_CUES) else "CASUAL"
-    if intent == "CASUAL" and not has_code_cue and any(c in q for c in _STRONG_INFO_CUES):
-        # Route genuine info requests to the research model, not small-talk.
-        return "SEARCH"
-    return intent
 
 
 def classify_intent(query: str) -> str:
@@ -736,10 +704,21 @@ def build_context_prompt(query: str, intent: str, thought_context: str, comeback
             + looked_up.strip()
         )
 
+    # Saved Info (core/saved_info): a link or file shared WITH this message
+    # arrives already read; a later "what did that pdf say" pulls the saved
+    # item back in. Either way the model answers from the real text.
+    saved_section = ""
+    try:
+        from core import saved_info
+        saved_section = saved_info.consume_turn_block() or saved_info.context_for(query)
+    except Exception as e:  # noqa: BLE001 — context is a bonus, never a blocker
+        print(f"[AURA] saved info skipped: {e}")
+
     background = "\n".join(
         part for part in (
             _now_block(),
             room_section,
+            saved_section,
             looked_up_section,
             history_block,
             facts_section,
@@ -1133,8 +1112,19 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
                     full_prompt = f"{query}\n\nWHAT YOU KNOW ABOUT THE WORK:\n{block}"
         except Exception:
             pass
+        # Something shared alongside a workspace-mode message still has to
+        # reach the model, or /research on a pasted paper researches nothing.
+        try:
+            from core import saved_info
+            shared = saved_info.consume_turn_block()
+            if shared:
+                full_prompt = f"{full_prompt}\n\n{shared}"
+        except Exception:
+            pass
     elif _re.search(r'https?://', query):
-        intent = "SEARCH"
+        # A pinned intent wins: a question about a shared link is usually an
+        # explanation (Saved Info has already read the page for the prompt).
+        intent = intent_hint or "SEARCH"
         full_prompt = build_context_prompt(query, intent, "", comeback=comeback_hint)
     else:
         # An explicit hint from the Conversation Director pins the intent —

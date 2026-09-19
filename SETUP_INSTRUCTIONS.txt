@@ -85,16 +85,17 @@ Step 2 — open ".env" in any text editor and fill in:
                                  Get a free key at:
                                  https://console.picovoice.ai/
 
-    OPENROUTER_API_KEY=      <- Optional. Unlocks extra models
-                                 (Laguna / Nemotron / Gemma) alongside
+    OPENROUTER_API_KEY=      <- Optional. Unlocks the free OpenRouter
+                                 models (North Mini Code, Laguna XS,
+                                 Nemotron, Gemma, Nex, Ling) alongside
                                  Groq. Without it, AURA just runs on
                                  Groq for everything.
                                  Get a free key at:
                                  https://openrouter.ai/keys
 
-    OPENROUTER_KEY_CODING=   <- Optional. Separate per-model OpenRouter
-    OPENROUTER_KEY_RESEARCH=    keys so each model draws its own free
-    OPENROUTER_KEY_CHAT=        quota. Leave blank to just use the
+    OPENROUTER_KEY_CODING=   <- Optional. Separate per-job OpenRouter
+    OPENROUTER_KEY_RESEARCH=    keys — every model in that job uses
+    OPENROUTER_KEY_CHAT=        it. Leave blank to just use the
                                  single OPENROUTER_API_KEY above for all
                                  three.
 

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; media-src 'self'; style-src 'unsafe-inline'" />
+  <title>AURA orb</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; user-select: none; }
+    canvas { display: block; width: 100vw; height: 100vh; cursor: pointer; outline: none; }
+    canvas:focus-visible { outline: 2px solid rgba(56, 225, 255, 0.7); outline-offset: -4px; border-radius: 50%; }
+  </style>
+</head>
+<body>
+  <canvas id="orb" tabindex="0" role="button" aria-label="Open AURA"></canvas>
+  <script src="orb.js"></script>
+</body>
+</html>

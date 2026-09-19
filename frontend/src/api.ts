@@ -1,5 +1,8 @@
 // REST client for the AURA bridge (memory/store.py + model_lock).
-const BASE = "http://127.0.0.1:8760";
+import type { InstallProposal, InstallResult, Job, SavedItem } from "./types";
+import type { ModelNode } from "./data/models";
+
+export const BASE = "http://127.0.0.1:8760";
 
 export interface Task {
   id: number;
@@ -39,6 +42,11 @@ export interface ModelInfo {
   id: string;
   name: string;
   locked: boolean;
+  /** Backend model id, e.g. "cohere/north-mini-code:free". */
+  model_id?: string;
+  provider?: string;
+  /** Every job this model is in the chain for; rank 1 is tried first. */
+  jobs?: { job: string; rank: number }[];
 }
 
 export interface Fact {
@@ -253,6 +261,48 @@ export interface ErrorClassification {
   repeat_count: number;
   total_count: number;
   serious: boolean;
+}
+
+/** An installed integration as the Models page lists it. */
+export interface Integration {
+  id: number;
+  uid: string;
+  provider: string;
+  label: string;
+  kind: "llm" | "search";
+  base_url: string;
+  key_masked: string;
+  key_from: string;
+  status: "installed" | "pending";
+  position: "first" | "backup";
+  created_at: string | null;
+  installed_at: string | null;
+  about: string;
+  cost: string;
+  models: InstalledModel[];
+  search_jobs: string[];
+  /** Pending installs carry their card so they can be finished later. */
+  proposal: InstallProposal | null;
+}
+
+export interface InstalledModel {
+  row_id: number;
+  id: string;
+  planet_id: string;
+  wire: string;
+  name: string;
+  jobs: Job[];
+  position: "first" | "backup";
+  vision: boolean;
+  cost: string;
+  context: string;
+  color: string;
+  role: string;
+  best_for: Job[];
+  status: "ok" | "failed";
+  error: string;
+  latency_ms: number;
+  label: string;
 }
 
 async function j<T>(path: string, init?: RequestInit): Promise<T> {
@@ -488,6 +538,61 @@ export const api = {
     }
     return URL.createObjectURL(await res.blob());
   },
+
+  // Saved Info — links, PDFs and files AURA read (core/saved_info)
+  getSaved: () => j<{ items: SavedItem[] }>("/api/saved").then((r) => r.items),
+  getSavedItem: (id: number) =>
+    j<{ ok: boolean; item: SavedItem | null }>(`/api/saved/${id}`).then((r) => r.item),
+  saveLink: (url: string) =>
+    j<{ ok: boolean; item?: SavedItem; error?: string }>("/api/saved", {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    }),
+  /** `data` is bare base64 (no data: prefix). Returns at once — the scan
+   *  finishes in the background and arrives as a "saved" socket frame. */
+  uploadSaved: (name: string, data: string, mime: string, origin = "upload") =>
+    j<{ ok: boolean; item?: SavedItem; error?: string }>("/api/saved/upload", {
+      method: "POST",
+      body: JSON.stringify({ name, data, mime, origin }),
+    }),
+  rescanSaved: (id: number) =>
+    j<{ ok: boolean; item?: SavedItem }>(`/api/saved/${id}/rescan`, { method: "POST" }),
+  updateSaved: (id: number, patch: { title?: string; pinned?: boolean; tags?: string[] }) =>
+    j<{ ok: boolean; item: SavedItem | null }>(`/api/saved/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  deleteSaved: (id: number) => j<{ ok: boolean }>(`/api/saved/${id}`, { method: "DELETE" }),
+  markSavedOpened: (id: number) => j(`/api/saved/${id}/opened`, { method: "POST" }),
+  savedFileUrl: (id: number) => `${BASE}/api/saved/${id}/file`,
+
+  // Planet installs (core/integrations)
+  getIntegrations: () =>
+    j<{ integrations: Integration[]; planets: ModelNode[]; jobs: Job[] }>("/api/integrations"),
+  getPlanets: () => j<{ planets: ModelNode[] }>("/api/planets").then((r) => r.planets),
+  identifyInstall: (uid: string, body: { provider?: string; key?: string; base_url?: string }) =>
+    j<{ ok: boolean; proposal?: InstallProposal; error?: string }>(
+      `/api/integrations/proposals/${uid}/identify`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  confirmInstall: (uid: string, body: { models: { id: string; jobs: Job[] }[]; position: string; search_jobs?: string[] }) =>
+    j<{ ok: boolean; proposal?: InstallProposal; results?: InstallResult[]; message?: string; error?: string }>(
+      `/api/integrations/proposals/${uid}/confirm`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  dismissInstall: (uid: string) =>
+    j<{ ok: boolean }>(`/api/integrations/proposals/${uid}/dismiss`, { method: "POST" }),
+  uninstall: (id: number) => j<{ ok: boolean }>(`/api/integrations/${id}`, { method: "DELETE" }),
+  retestIntegration: (id: number) =>
+    j<{ ok: boolean; results: { name: string; ok: boolean; why: string; ms: number }[] }>(
+      `/api/integrations/${id}/test`, { method: "POST" }),
+  updatePlanet: (rowId: number, patch: { jobs?: Job[]; position?: "first" | "backup" }) =>
+    j<{ ok: boolean; error?: string }>(`/api/integrations/models/${rowId}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  removePlanet: (rowId: number) =>
+    j<{ ok: boolean }>(`/api/integrations/models/${rowId}`, { method: "DELETE" }),
 
   // App settings
   getSettings: () => j<{ settings: Settings }>("/api/settings").then((r) => r.settings),

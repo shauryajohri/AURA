@@ -4,6 +4,14 @@ import SettingsOverlay, { SettingsCategory, CATEGORY_META } from "../components/
 import { Layout, DEFAULT_LAYOUT } from "../components/Home/layoutTypes";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useSettingsStore } from "../stores/settingsStore";
+import { setPref, usePrefs, type Pref } from "../stores/prefsStore";
+import Icon from "../components/Icon";
+
+const DEVICE: Array<{ key: Pref; name: string; desc: string }> = [
+  { key: "intro", name: "Startup animation", desc: "The black hole forms each time AURA opens" },
+  { key: "sfx", name: "Interface sounds", desc: "Soft tones when you type, send, click and get a reply" },
+  { key: "cursor", name: "AURA cursor", desc: "The photon-and-ring pointer. Off uses your system cursor" },
+];
 
 // Settings — a menu → focused editor flow. Pick a category, edit it with a
 // live preview, save, and you're back here. Grouped into sections so fourteen
@@ -23,6 +31,7 @@ export default function SettingsView() {
   const applySettings = useSettingsStore((s) => s.apply);
   // Sanctuary layout is edited here too — same store the sanctuary reads.
   const [layout, setLayout] = useLocalStorage<Layout>("aura.sanctuary", DEFAULT_LAYOUT);
+  const prefs = usePrefs();
 
   useEffect(() => {
     api.getSettings().then(setSettings).catch(() => setOffline(true));
@@ -34,6 +43,27 @@ export default function SettingsView() {
         <h2>Settings</h2>
         <p>Tune AURA's world. Each area opens with a live preview.</p>
       </div>
+
+      <section className="setview__section">
+        <h3 className="memtl__title">This device</h3>
+        <div className="devprefs">
+          {DEVICE.map((d) => (
+            <button
+              key={d.key}
+              role="switch"
+              aria-checked={prefs[d.key]}
+              className={"devpref" + (prefs[d.key] ? " devpref--on" : "")}
+              onClick={() => setPref(d.key, !prefs[d.key])}
+            >
+              <span className="devpref__text">
+                <span className="devpref__name">{d.name}</span>
+                <span className="devpref__desc">{d.desc}</span>
+              </span>
+              <span className="devpref__track"><span className="devpref__knob" /></span>
+            </button>
+          ))}
+        </div>
+      </section>
 
       {SECTIONS.map((sec) => (
         <section key={sec.title} className="setview__section">
@@ -51,7 +81,7 @@ export default function SettingsView() {
                   <span className="san-setopt__name">{CATEGORY_META[cat].title}</span>
                   <span className="san-setopt__desc">{CATEGORY_META[cat].desc}</span>
                 </span>
-                <span className="san-setopt__go">→</span>
+                <span className="san-setopt__go"><Icon name="right" size={16} /></span>
               </button>
             ))}
           </div>

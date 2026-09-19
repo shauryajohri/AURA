@@ -353,7 +353,7 @@ const SEED: Project = {
       id: "progress", title: "In Progress",
       cards: [
         { id: uid(), title: "Domain workspace shell", tag: "ui", agent: "laguna" },
-        { id: uid(), title: "Portal transition polish", tag: "ui", agent: "claude" },
+        { id: uid(), title: "Portal transition polish", tag: "ui", agent: "north" },
       ],
     },
     {

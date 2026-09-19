@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AuraState, ChatTurn, ConnStatus } from "../types";
+import type { AuraState, ChatTurn, ConnStatus, TurnAttachment } from "../types";
+import type { SendOptions } from "../hooks/useAuraSocket";
 import { useVoiceInput } from "../hooks/useVoiceInput";
+import { useSavedStore } from "../stores/savedStore";
+import { isDocument, uploadToSaved } from "../lib/files";
+import InstallCard from "./InstallCard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useSettingsStore } from "../stores/settingsStore";
 import ChatHistory from "./ChatHistory";
 import RoomPicker from "./RoomPicker";
 import MicCheck from "./MicCheck";
 import { renderMarkdown } from "./Markdown";
+import Icon from "./Icon";
+import { coreSignals, emitCore } from "../lib/coreBus";
+import { sfx } from "../lib/sfx";
 
 /**
  * The chat dock — conversation lives at the BOTTOM of Home now, in one large
@@ -19,7 +26,7 @@ import { renderMarkdown } from "./Markdown";
 interface Props {
   status: ConnStatus;
   turns: ChatTurn[];
-  onSend: (text: string) => void;
+  onSend: (text: string, opts?: SendOptions) => boolean | void;
   /** Mute the mic while AURA is talking so she can't hear herself. */
   auraState?: AuraState;
   /** Replace the transcript when a saved chat is reopened. */
@@ -43,6 +50,24 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
   const [logOpen, setLogOpen] = useLocalStorage<boolean>("aura.dockLog", true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const measureRef = useRef<CanvasRenderingContext2D | null>(null);
+
+  // Where the caret is on screen — each keystroke throws a spark from there
+  // into the core.
+  const caretPoint = () => {
+    const el = inputRef.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    if (!measureRef.current) measureRef.current = document.createElement("canvas").getContext("2d");
+    const m = measureRef.current;
+    if (!m) return null;
+    m.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    const upto = el.value.slice(0, el.selectionStart ?? el.value.length);
+    const w = m.measureText(upto).width - el.scrollLeft;
+    return { x: r.left + parseFloat(cs.paddingLeft) + Math.max(0, Math.min(w, r.width - 24)), y: r.top + r.height / 2 };
+  };
 
   // ── Speak on/off ──────────────────────────────────────────────────────
   // Backed by the same `voice.enabled` app-setting the Sanctuary slider
@@ -94,6 +119,11 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
     muted: auraState === "speaking",
   });
   const { toggle: toggleVoice, stop: stopVoice, listening } = voice;
+  // The floating orb turns cyan while the mic is live.
+  useEffect(() => {
+    window.aura?.orbListening?.(listening);
+    coreSignals.mic = listening;
+  }, [listening]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -107,6 +137,39 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
     if (listening) { stopVoice(); return; }
     if (!micChecked) { setShowCheck(true); return; }
     toggleVoice();
+  };
+
+  // ── Files for Saved Info ─────────────────────────────────────────────
+  // PDFs, Word files and images upload straight away and wait as chips above
+  // the composer; AURA reads them while you type, and they go with the next
+  // message. Text and code files still go inline, as they always have.
+  const [pending, setPending] = useState<TurnAttachment[]>([]);
+  const [uploading, setUploading] = useState(0);
+  const [attachErr, setAttachErr] = useState("");
+  const [dropping, setDropping] = useState(false);
+  const saved = useSavedStore((s) => s.items);
+  const upsertSaved = useSavedStore((s) => s.upsert);
+  const statusOf = (id: number) => saved.find((x) => x.id === id)?.status ?? "scanning";
+
+  const upload = async (f: File) => {
+    setAttachErr("");
+    setUploading((n) => n + 1);
+    try {
+      const item = await uploadToSaved(f, "chat");
+      upsertSaved(item);
+      setPending((cur) => [...cur, { id: item.id, name: f.name, kind: item.kind }]);
+    } catch (e) {
+      setAttachErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setUploading((n) => n - 1);
+    }
+  };
+
+  const takeFiles = (files: FileList | File[]) => {
+    for (const f of Array.from(files).slice(0, 5)) {
+      if (isDocument(f)) void upload(f);
+      else attach(f);
+    }
   };
 
   const attach = (f: File) => {
@@ -125,18 +188,41 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim()) return;
-    onSend(input);
+    if (!input.trim() && pending.length === 0) return;
+    const text = input.trim() || `Shared ${pending.map((p) => p.name).join(", ")}`;
+    const sent = onSend(text, pending.length ? { attachments: pending } : undefined);
+    if (sent === false) return;     // socket down — keep what they typed
+    // the message streams into the core
+    const r = inputRef.current?.getBoundingClientRect();
+    if (r) emitCore({ kind: "feed", x: r.left, y: r.top, w: Math.min(r.width, 18 + input.length * 7.5), h: r.height });
+    sfx.send();
     setInput("");
+    setPending([]);
   };
 
   const last = turns[turns.length - 1];
 
   return (
     <section
-      className={"dock" + (logOpen ? " dock--open" : "") + (dragging ? " dock--dragging" : "")}
+      className={"dock" + (logOpen ? " dock--open" : "") + (dragging ? " dock--dragging" : "")
+        + (dropping ? " dock--drop" : "")}
       style={{ "--dock-vh": `${dockVh}vh` } as React.CSSProperties}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes("Files") || status !== "open") return;
+        e.preventDefault();
+        setDropping(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false);
+      }}
+      onDrop={(e) => {
+        if (!e.dataTransfer.files.length) return;
+        e.preventDefault();
+        setDropping(false);
+        takeFiles(e.dataTransfer.files);
+      }}
     >
+      {dropping && <div className="dock__dropzone">Drop to share it with AURA — she'll read it and keep it in Saved Info</div>}
       {/* Drag the top edge to resize; double-click to snap tall. */}
       <div
         className="dock__grip"
@@ -162,7 +248,7 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
         <div className="dock__log" ref={scrollRef}>
           {turns.length === 0 && (
             <p className="dock__empty">
-              {status === "open" ? "AURA is here. Say something to begin." : "Connecting to AURA..."}
+              {status === "open" ? "AURA is listening. Type below, or press the mic to talk." : "Waiting for AURA's brain. Start server.py if it isn't running."}
             </p>
           )}
           {turns.map((t) => (
@@ -178,6 +264,16 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
                 {renderMarkdown(t.text)}
                 {t.streaming && <span className="caret" />}
               </div>
+              {t.attachments && t.attachments.length > 0 && (
+                <div className="bubble__files">
+                  {t.attachments.map((a) => (
+                    <span key={a.id} className={"filechip filechip--" + a.kind}>
+                      <span className="filechip__ring" aria-hidden />{a.name}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {t.card && <InstallCard proposal={t.card} inChat />}
             </div>
           ))}
         </div>
@@ -185,7 +281,7 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
         last && (
           <button className="dock__peek" onClick={() => setLogOpen(true)} title="Show conversation">
             <span className="dock__peekwho">{last.role === "user" ? "You" : "AURA"}</span>
-            <span className="dock__peektext">{last.text.slice(0, 120) || "…"}</span>
+            <span className="dock__peektext">{last.text.replace(/\*\*|__|`/g, "").slice(0, 120) || "…"}</span>
           </button>
         )
       )}
@@ -230,6 +326,27 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
 
       {voice.error && <div className="voicebar__err">{voice.error}</div>}
 
+      {(pending.length > 0 || uploading > 0 || attachErr) && (
+        <div className="dock__files" aria-live="polite">
+          {pending.map((a) => {
+            const st = statusOf(a.id);
+            return (
+              <span key={a.id} className={"filechip filechip--" + a.kind + " is-" + st}>
+                <span className="filechip__ring" aria-hidden />
+                {a.name}
+                <span className="filechip__state">
+                  {st === "scanning" ? "reading…" : st === "error" ? "couldn't read" : "read"}
+                </span>
+                <button type="button" className="filechip__x" aria-label={`Don't send ${a.name}`}
+                        onClick={() => setPending((cur) => cur.filter((x) => x.id !== a.id))}>✕</button>
+              </span>
+            );
+          })}
+          {uploading > 0 && <span className="filechip is-scanning"><span className="filechip__ring" aria-hidden />uploading…</span>}
+          {attachErr && <span className="dock__fileerr" role="alert">{attachErr}</span>}
+        </div>
+      )}
+
       <form className={"composer composer--dock" + (listening ? " composer--voice" : "")} onSubmit={submit}>
         <button
           type="button"
@@ -237,7 +354,7 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
           onClick={() => setLogOpen(!logOpen)}
           title={logOpen ? "Tuck conversation away" : "Show conversation"}
         >
-          {logOpen ? "▾" : "▴"}
+          <Icon name={logOpen ? "down" : "up"} />
         </button>
 
         <button
@@ -247,7 +364,7 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
           title="Chats — open an old one and AURA picks up its context"
           aria-expanded={historyOpen}
         >
-          {"\u2630"}
+          <Icon name="history" />
         </button>
 
         {/* Pick the room AURA works in \u2014 loads that room's brief so the reply
@@ -262,31 +379,42 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
           className="composer__attach"
           onClick={() => fileRef.current?.click()}
           disabled={status !== "open"}
-          title="Attach a file"
+          title="Attach a file — PDFs, Word files and images are saved to Saved Info"
         >
-          {"📎"}
+          <Icon name="attach" />
         </button>
         <input
           ref={fileRef}
           type="file"
           hidden
+          multiple
           onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) attach(f);
+            if (e.target.files?.length) takeFiles(e.target.files);
             e.target.value = "";
           }}
         />
 
         <div className="composer__field">
           <input
+            ref={inputRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              const grew = e.target.value.length > input.length;
+              setInput(e.target.value);
+              if (grew) {
+                sfx.key();
+                requestAnimationFrame(() => {
+                  const pt = caretPoint();
+                  if (pt) emitCore({ kind: "spark", x: pt.x, y: pt.y });
+                });
+              }
+            }}
             placeholder={
               listening
                 ? "Speak — or type to interrupt"
                 : status === "open"
-                  ? "Talk or type a message..."
-                  : "Connecting to brain..."
+                  ? "Ask AURA anything"
+                  : "Waiting for AURA's brain to connect"
             }
             disabled={status !== "open"}
             autoFocus
@@ -306,8 +434,7 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
           aria-label={speakOn ? "Voice on — AURA speaks her replies" : "Voice off — replies are text only"}
           title={speakOn ? "Voice on — click for text only" : "Text only — click to let AURA speak"}
         >
-          <span className="speakswitch__icon">{speakOn ? "🔊" : "🔇"}</span>
-          <span className="speakswitch__track"><span className="speakswitch__knob" /></span>
+          <Icon name={speakOn ? "speaker" : "mute"} />
         </button>
 
         <button
@@ -318,10 +445,12 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
           title={listening ? "Stop listening" : "Start always-on voice"}
           aria-pressed={listening}
         >
-          {"🎙"}
+          <Icon name="mic" />
         </button>
-        <button type="submit" className="composer__send" disabled={status !== "open" || !input.trim()}>
-          {"➤"}
+        <button type="submit" className="composer__send"
+                disabled={status !== "open" || (!input.trim() && pending.length === 0)}
+                aria-label="Send">
+          <Icon name="send" />
         </button>
       </form>
     </section>

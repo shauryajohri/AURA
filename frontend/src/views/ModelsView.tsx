@@ -22,15 +22,24 @@ export default function ModelsView() {
       <p className="view__hint">Locked models are never used by the router. Click a model to lock or unlock it.</p>
 
       <ul className="modellist">
-        {models.map((m) => (
-          <li key={m.id} className={"modelrow " + (m.locked ? "modelrow--locked" : "")}>
-            <span className="modelrow__orb" />
-            <span className="modelrow__name">{m.name}</span>
-            <button className={"modelrow__lock " + (m.locked ? "modelrow__lock--on" : "")} onClick={() => toggle(m)}>
-              {m.locked ? "Locked" : "Active"}
-            </button>
-          </li>
-        ))}
+        {models.map((m) => {
+          // "OpenRouter · Coding #1 · Vision #2" — where this model sits in each job's chain.
+          const detail = [m.provider, ...(m.jobs ?? []).map((j) => `${j.job} #${j.rank}`)]
+            .filter(Boolean)
+            .join(" · ");
+          return (
+            <li key={m.id} className={"modelrow " + (m.locked ? "modelrow--locked" : "")}>
+              <span className="modelrow__orb" />
+              <span className="modelrow__name">
+                {m.name}
+                {detail && <span className="modelrow__jobs">{detail}</span>}
+              </span>
+              <button className={"modelrow__lock " + (m.locked ? "modelrow__lock--on" : "")} onClick={() => toggle(m)}>
+                {m.locked ? "Locked" : "Active"}
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

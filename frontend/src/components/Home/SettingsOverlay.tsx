@@ -54,14 +54,12 @@ const KEYS: Record<Exclude<SettingsCategory, "layout" | "keys">, string[]> = {
 };
 
 // Providers AURA can talk to. Keys live in .env on the machine — this panel
-// only reports what's wired, it never displays or edits secrets.
+// only reports what's wired, it never displays or edits secrets. Both are free
+// tiers; AURA routes to no paid model.
 const PROVIDERS = [
-  { name: "Groq", env: "GROQ_API_KEY", note: "GPT-OSS 120B / 20B — the always-on fallback" },
-  { name: "OpenRouter", env: "OPENROUTER_API_KEY", note: "Laguna, Nemotron, Gemma" },
-  { name: "OpenAI", env: "OPENAI_API_KEY", note: "GPT-4o" },
-  { name: "Anthropic", env: "ANTHROPIC_API_KEY", note: "Claude 3.5" },
-  { name: "Google", env: "GOOGLE_API_KEY", note: "Gemini 1.5 Pro" },
-  { name: "xAI", env: "XAI_API_KEY", note: "Grok 2" },
+  { name: "Groq", env: "GROQ_API_KEY", note: "Required — GPT-OSS 120B / 20B, Qwen3.8 27B, Whisper speech-to-text" },
+  { name: "OpenRouter", env: "OPENROUTER_API_KEY", note: "North Mini Code, Laguna XS 2.1, Nemotron 3 Super / Nano Omni, Dots 3 Note, Gemma 4 31B, Nex N2.5 Pro, Ling 3.0 Flash VL" },
+  { name: "OpenRouter per job", env: "OPENROUTER_KEY_CODING · _RESEARCH · _CHAT", note: "Optional — give a job its own key; blank ones use OPENROUTER_API_KEY" },
 ];
 
 const ORBIT_STYLES = ["dashed", "solid", "dotted", "hidden"] as const;
@@ -215,8 +213,8 @@ export default function SettingsOverlay({
       case "planets": {
         const dur = 26 - (n("planets.orbit_speed") / 100) * 22; // 26s → 4s
         const planets = [
-          { name: "Laguna", color: "#6C6BFF", r: 52, ring: false },
-          { name: "Claude", color: "#B18BFF", r: 78, ring: true },
+          { name: "North", color: "#6C6BFF", r: 52, ring: false },
+          { name: "Gemma", color: "#F472B6", r: 78, ring: true },
           { name: "Nemotron", color: "#38E1FF", r: 104, ring: false },
         ];
         return (

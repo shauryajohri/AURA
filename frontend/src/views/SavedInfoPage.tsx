@@ -164,9 +164,7 @@ export default function SavedInfoPage({ onAsk }: Props) {
     <div className="saved">
       <header className="saved__head">
         <div className="saved__intro">
-          <h2>Saved Info</h2>
-          <p>Links, PDFs and files you've shared. AURA reads each one and keeps what matters,
-            so you can come back to it — or ask her about it.</p>
+          <h2>Saved info</h2>
         </div>
         <form className="saved__intake" onSubmit={addLink}
               onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }}

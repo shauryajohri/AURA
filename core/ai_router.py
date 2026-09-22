@@ -1742,3 +1742,108 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
     except Exception as e:
         print(f"[AURA] {provider} error: {e}")
         return "CONNECTION_ERROR"
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Raw calls — the model, exactly the system prompt given, nothing added.
+#
+# Every other entry point in this file layers AURA's voice on top: the 2-
+# sentence clamp, the coding-mode fence rules, the reasoning filter. That is
+# right for talking and fatal for structure. When AURA is asked for a JSON
+# plan or a whole rewritten file, one stray "Here you go!" makes the reply
+# unparseable, so these two functions bypass the personality entirely.
+# ════════════════════════════════════════════════════════════════════════════
+
+def _raw_once(prompt: str, system: str, model_id: str,
+              max_tokens: int, temperature: float, timeout: int) -> str:
+    provider, url, api_key = _endpoint_for(model_id)
+    cd_key = _cooldown_key(provider, model_id)
+    if _in_rate_limit_cooldown(cd_key):
+        return "RATE_LIMIT"
+    try:
+        response = requests.post(
+            url,
+            headers=_headers(provider, api_key),
+            json=_apply_reasoning_policy({
+                "model": model_id,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "stream": False,
+            }, provider),
+            timeout=timeout,
+        )
+        if response.status_code == 429:
+            _start_rate_limit_cooldown(cd_key)
+            return "RATE_LIMIT"
+        data = response.json()
+        if "choices" not in data:
+            print(f"[AURA] {provider} raw API error (status {response.status_code}): {data}")
+            return "CONNECTION_ERROR"
+        choice = data["choices"][0]
+        raw = choice.get("message", {}).get("content") or ""
+        # A reasoning model that runs out of room emits its hidden thinking and
+        # no answer. That is not a reply — it is a truncated one, and passing it
+        # on is how thinking leaks into the product. Treat it as a failed try so
+        # the chain moves to the next model.
+        if choice.get("finish_reason") == "length" and not raw.strip():
+            return "CONNECTION_ERROR"
+        return raw
+    except Exception as e:  # noqa: BLE001
+        print(f"[AURA] {provider} raw error ({model_id}): {e}")
+        return "CONNECTION_ERROR"
+
+
+def _is_degenerate(text: str) -> bool:
+    """A small model that doesn't know what to do sometimes repeats one line
+    until it runs out of tokens. That is not an answer, and passing it to a
+    parser only turns it into a confusing error further down."""
+    lines = [ln.strip() for ln in text.splitlines() if len(ln.strip()) > 20]
+    if len(lines) < 8:
+        return False
+    return len(set(lines)) <= len(lines) // 4
+
+
+def call_raw(prompt: str, system: str, intent: str = "CODING",
+             max_tokens: int = 8000, temperature: float = 0.2,
+             model: str | None = None, timeout: int = 120,
+             validate=None) -> str:
+    """One completion with EXACTLY `system` as the system prompt.
+
+    Walks the same free-model chain as route(), so a rate-limited or sulking
+    model falls through to the next instead of failing the job. Returns the
+    model's text verbatim — no cleaning, no clamping. On total failure returns
+    "" so callers can tell "nothing came back" from "the model said nothing".
+
+    `validate(reply) -> bool` lets the caller say what a usable answer looks
+    like. A reply that fails it is treated exactly like a model that errored:
+    the chain moves on. Without this, the first model to produce confident
+    nonsense ends the job, and on a roster of small free models that happens
+    often enough to matter.
+    """
+    candidates = _resolve_candidates(intent, model)
+    if not candidates:
+        return ""
+    best = ""
+    for name, mid in candidates:
+        try:
+            from core import activity
+            activity.emit(f"Routing to {name}…", "route")
+        except Exception:  # noqa: BLE001
+            pass
+        out = _raw_once(prompt, system, mid, max_tokens, temperature, timeout)
+        if out in ("RATE_LIMIT", "CONNECTION_ERROR") or not out.strip():
+            continue
+        if _is_degenerate(out):
+            print(f"[AURA] {name} looped on itself — trying the next model")
+            continue
+        if validate and not validate(out):
+            print(f"[AURA] {name} answered in the wrong shape — trying the next model")
+            best = best or out       # keep it only to report if everything fails
+            continue
+        _set_last_model(mid)
+        return out
+    return best

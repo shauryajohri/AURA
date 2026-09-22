@@ -139,7 +139,7 @@ function LayoutTab() {
         <div className="dset__field">
           <span>Background</span>
           <div className="dset__seg">
-            {(["video", "gradient", "flat"] as const).map((b) => (
+            {(["flat", "gradient"] as const).map((b) => (
               <button
                 key={b}
                 className={layout.background === b ? "on" : ""}

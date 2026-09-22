@@ -13,6 +13,16 @@ memory/*.json
 # Links, PDFs and files shared with AURA (Saved Info)
 memory/saved_files/
 .aura_index.pkl
+# Proposed and applied code changes, with the backups that make rollback work,
+# and the database copies taken before a reset. Both hold your source and your
+# history — neither belongs in this repo.
+memory/patches/
+memory/resets/
+
+# Repos cloned from your connected GitHub sources. They are other projects
+# that happen to live inside this folder; without this, working on one shows
+# its entire tree as untracked files in AURA's own git status.
+domain_projects/
 
 # FUSE leftovers. When a file is deleted while still open, the mount renames
 # it to .fuse_hidden* instead of unlinking. sqlite opens/closes aura_memory.db

@@ -63,13 +63,12 @@ export default function TasksPage({ questEvent }: Props) {
   return (
     <PageShell
       title="Tasks"
-      tagline="The backlog you think in, the quests you commit to, the progress you keep."
       storeKey="aura.page.tasks"
       tabs={[
-        { id: "board", label: "Task Board", body: <TaskBoard /> },
-        { id: "assistant", label: "✦ AI Assistant", body: <TaskAssistant /> },
+        { id: "board", label: "Board", body: <TaskBoard /> },
+        { id: "assistant", label: "AI assistant", body: <TaskAssistant /> },
         { id: "milestones", label: "Milestones", body: <MilestonesPane /> },
-        { id: "today", label: "Today's Quests", body: <QuestsView event={questEvent} /> },
+        { id: "today", label: "Today's quests", body: <QuestsView event={questEvent} /> },
         { id: "progress", label: "Progress", body: <ProgressPane /> },
       ]}
     />

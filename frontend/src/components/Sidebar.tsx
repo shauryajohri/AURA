@@ -1,10 +1,13 @@
 import Icon, { type IconName } from "./Icon";
 import AuraOrb from "./AuraOrb";
+import { NotifyBell } from "./Chrome";
 
 /**
- * The rail — AURA's navigation. Slim by default (icons, names on hover);
- * the orb at the top widens it to show names. "Aura Domain" doesn't swap the
- * page, it crosses the portal into the coding workspace.
+ * The rail — AURA's navigation, drawn straight onto space (no panel). Slim by
+ * default (icons, names on hover); the orb at the top widens it to show names.
+ * Pages are grouped by what they hold: your things, AURA's models, and the
+ * portal to the Domain, which doesn't swap the page but crosses into the
+ * coding workspace.
  */
 
 interface NavItem {
@@ -14,16 +17,21 @@ interface NavItem {
   domain?: boolean;
 }
 
-const NAV: NavItem[] = [
-  { id: "home", label: "Home", icon: "home" },
-  { id: "chats", label: "Chats", icon: "chats" },
-  { id: "domain", label: "Aura Domain", icon: "domain", domain: true },
-  { id: "saved", label: "Saved info", icon: "saved" },
-  { id: "memory", label: "Memory", icon: "memory" },
-  { id: "tasks", label: "Tasks", icon: "tasks" },
-  { id: "models", label: "Models", icon: "models" },
-  { id: "planets", label: "Planets", icon: "planets" },
-  { id: "labs", label: "Labs", icon: "labs" },
+const GROUPS: NavItem[][] = [
+  [
+    { id: "home", label: "Home", icon: "home" },
+    { id: "chats", label: "Chats", icon: "chats" },
+    { id: "saved", label: "Saved info", icon: "saved" },
+    { id: "memory", label: "Memory", icon: "memory" },
+    { id: "tasks", label: "Tasks", icon: "tasks" },
+  ],
+  [
+    { id: "models", label: "Models", icon: "models" },
+    { id: "planets", label: "Planets", icon: "planets" },
+    { id: "labs", label: "Labs", icon: "labs" },
+    { id: "upgrade", label: "Upgrade", icon: "upgrade" },
+  ],
+  [{ id: "domain", label: "Aura Domain", icon: "domain", domain: true }],
 ];
 
 interface Props {
@@ -49,7 +57,7 @@ export default function Sidebar({ active, collapsed, onNavigate, onLaunchDomain,
       aria-label={it.label}
       data-tip={collapsed ? it.label : undefined}
     >
-      <Icon name={it.icon} size={19} />
+      <span className="rail__iconwrap"><Icon name={it.icon} size={19} /></span>
       <span className="rail__label">{it.label}</span>
     </button>
   );
@@ -62,14 +70,18 @@ export default function Sidebar({ active, collapsed, onNavigate, onLaunchDomain,
         aria-label={collapsed ? "Show page names" : "Hide page names"}
         data-tip={collapsed ? "Show names" : undefined}
       >
-        <AuraOrb size={34} live={listening} />
+        <AuraOrb size={28} live={listening} />
         <span className="rail__word">AURA</span>
-        <Icon name={collapsed ? "right" : "left"} size={14} className="rail__fold" />
       </button>
 
-      <nav className="rail__nav">{NAV.map(item)}</nav>
+      <nav className="rail__nav">
+        {GROUPS.map((g, i) => (
+          <div key={i} className="rail__group">{g.map(item)}</div>
+        ))}
+      </nav>
 
       <div className="rail__foot">
+        <NotifyBell slim={collapsed} />
         {item({ id: "settings", label: "Settings", icon: "settings" })}
         <div className="rail__me" data-tip={collapsed ? "Shaurya" : undefined}>
           <span className="rail__avatar">S</span>

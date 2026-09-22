@@ -7,7 +7,9 @@ import FileTree from "../code/FileTree";
 import QuickOpen from "../code/QuickOpen";
 import { LANG_LABEL } from "../code/highlight";
 import { fileIcon } from "../code/icons";
+import CodePrompt from "../code/CodePrompt";
 import TerminalView from "./TerminalView";
+import { useWorkspaceRoot } from "../useWorkspaceRoot";
 
 // ============================================================================
 // Code — a VS Code-shaped workspace over your chosen working set.
@@ -94,6 +96,13 @@ export default function CodePane() {
   const [searching, setSearching] = useState(false);
 
   const sources = useMemo(() => project?.sources ?? [], [project]);
+  // Which tree AURA is allowed to change: the repo opened from Sources if there
+  // is one, otherwise the first folder in the workspace.
+  const { root: workspaceRoot, label: workspaceLabel } = useWorkspaceRoot();
+  const promptRoot = useMemo(
+    () => workspaceRoot || sources.find((s) => s.dir)?.path || "",
+    [workspaceRoot, sources],
+  );
   const active = tabs.find((t) => t.path === openPath) ?? null;
   const dirty = active ? active.content !== active.saved : false;
   const dirtyCount = tabs.filter((t) => t.content !== t.saved).length;
@@ -113,6 +122,23 @@ export default function CodePane() {
     },
     [tabs]
   );
+
+  // AURA applying a change edits files on disk underneath the editor. Any tab
+  // showing one of them is re-read, so what's on screen is what's in the file
+  // — silently leaving a stale buffer open is how an approved change gets
+  // overwritten by the next save.
+  const reloadTabs = useCallback(async (paths: string[]) => {
+    const touched = paths.map((p) => p.replace(/\\/g, "/").toLowerCase());
+    const stale = tabs.filter((t) =>
+      touched.some((p) => t.path.replace(/\\/g, "/").toLowerCase().endsWith(p)));
+    for (const t of stale) {
+      const r = await domainApi.read(t.path);
+      if (!r.ok) continue;
+      setTabs((prev) => prev.map((x) =>
+        x.path === t.path ? { ...x, content: r.content ?? "", saved: r.content ?? "" } : x));
+    }
+    setRefreshToken((n) => n + 1);
+  }, [tabs]);
 
   const save = useCallback(async () => {
     const t = tabs.find((x) => x.path === openPath);
@@ -643,6 +669,14 @@ export default function CodePane() {
             </div>
           </>
         )}
+
+        {/* ---------- build with AURA ---------- */}
+        <CodePrompt
+          root={promptRoot}
+          label={workspaceLabel || project.name}
+          openFiles={tabs.map((t) => t.path)}
+          onApplied={reloadTabs}
+        />
 
         {/* ---------- status bar ---------- */}
         <div className="vsc-status">

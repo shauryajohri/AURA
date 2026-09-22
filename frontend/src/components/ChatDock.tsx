@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { AuraState, ChatTurn, ConnStatus, TurnAttachment } from "../types";
 import type { SendOptions } from "../hooks/useAuraSocket";
 import { useVoiceInput } from "../hooks/useVoiceInput";
@@ -16,11 +16,10 @@ import { coreSignals, emitCore } from "../lib/coreBus";
 import { sfx } from "../lib/sfx";
 
 /**
- * The chat dock — conversation lives at the BOTTOM of Home now, in one large
- * rounded glass container under the core. No side panel, no floating windows.
- * The composer is intentionally almost identical to the old one (voice, text,
- * send) plus attachments; the log floats above it and can be tucked away so
- * the black hole owns the screen.
+ * The conversation pane — the right-hand side of Home, full height, beside
+ * the sky. It never changes size as the conversation grows, so the black hole
+ * next to it never moves: a long answer scrolls here instead of pushing the
+ * core up. The composer is one box: the message on top, its tools beneath.
  */
 
 interface Props {
@@ -33,21 +32,15 @@ interface Props {
   onLoadTurns?: (msgs: { role: string; text: string; created_at: string | null }[]) => void;
   /** Empty the transcript when a new chat is started. */
   onClearTurns?: () => void;
+  /** The pane's head — the greeting on Home. */
+  head?: ReactNode;
 }
 
 const MAX_ATTACH = 200 * 1024; // read text attachments up to 200 KB inline
 
-// How tall the conversation may get, as a share of the viewport. The dock used
-// to be pinned at 46vh, which is fine for one-liners and useless for anything
-// worth reading — reading the answer matters more than admiring the black hole.
-const MIN_DOCK_VH = 24;
-const MAX_DOCK_VH = 92;
-const DEFAULT_DOCK_VH = 46;
-
-export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns, onClearTurns }: Props) {
+export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns, onClearTurns, head }: Props) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [input, setInput] = useState("");
-  const [logOpen, setLogOpen] = useLocalStorage<boolean>("aura.dockLog", true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -76,41 +69,6 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
   const applySettings = useSettingsStore((s) => s.apply);
   const toggleSpeak = () => { void applySettings({ "voice.enabled": !speakOn }); };
 
-  // ── Resizable dock ────────────────────────────────────────────────────
-  // Drag the grip at the top edge; the height persists across restarts.
-  const [storedVh, setDockVh] = useLocalStorage<number>("aura.dockVh", DEFAULT_DOCK_VH);
-  const [dragging, setDragging] = useState(false);
-  const clampVh = (v: number) => Math.min(MAX_DOCK_VH, Math.max(MIN_DOCK_VH, v));
-  // Guard the persisted value: a stale or hand-edited localStorage entry
-  // shouldn't be able to collapse the dock to nothing.
-  const dockVh = Number.isFinite(storedVh) ? clampVh(storedVh) : DEFAULT_DOCK_VH;
-
-  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!logOpen) setLogOpen(true);
-    e.preventDefault();
-    const startY = e.clientY;
-    const startVh = dockVh;
-    setDragging(true);
-    const onMove = (ev: PointerEvent) => {
-      // Dragging UP (smaller clientY) makes the dock taller.
-      const deltaVh = ((startY - ev.clientY) / window.innerHeight) * 100;
-      setDockVh(clampVh(startVh + deltaVh));
-    };
-    const onUp = () => {
-      setDragging(false);
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-  };
-
-  // Double-clicking the grip snaps between "tall as it goes" and the default.
-  const toggleMaximize = () => {
-    if (!logOpen) setLogOpen(true);
-    setDockVh(dockVh >= MAX_DOCK_VH - 1 ? DEFAULT_DOCK_VH : MAX_DOCK_VH);
-  };
-
   const [micChecked, setMicChecked] = useLocalStorage<boolean>("aura.micChecked", false);
   const [showCheck, setShowCheck] = useState(false);
 
@@ -127,7 +85,7 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [turns, voice.interim, logOpen]);
+  }, [turns, voice.interim]);
 
   useEffect(() => {
     if (status !== "open" && listening) stopVoice();
@@ -200,13 +158,9 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
     setPending([]);
   };
 
-  const last = turns[turns.length - 1];
-
   return (
     <section
-      className={"dock" + (logOpen ? " dock--open" : "") + (dragging ? " dock--dragging" : "")
-        + (dropping ? " dock--drop" : "")}
-      style={{ "--dock-vh": `${dockVh}vh` } as React.CSSProperties}
+      className={"dock" + (dropping ? " dock--drop" : "")}
       onDragOver={(e) => {
         if (!e.dataTransfer.types.includes("Files") || status !== "open") return;
         e.preventDefault();
@@ -223,18 +177,7 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
       }}
     >
       {dropping && <div className="dock__dropzone">Drop to share it with AURA — she'll read it and keep it in Saved Info</div>}
-      {/* Drag the top edge to resize; double-click to snap tall. */}
-      <div
-        className="dock__grip"
-        onPointerDown={startResize}
-        onDoubleClick={toggleMaximize}
-        role="separator"
-        aria-orientation="horizontal"
-        aria-label="Resize conversation — drag up for more room, double-click to maximise"
-        title="Drag to resize · double-click to maximise"
-      >
-        <span className="dock__gripbar" />
-      </div>
+      {head}
 
       <ChatHistory
         open={historyOpen}
@@ -243,48 +186,40 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
         onNewChat={() => onClearTurns?.()}
       />
 
-      {/* conversation log — floats above the composer inside the same glass */}
-      {logOpen ? (
-        <div className="dock__log" ref={scrollRef}>
-          {turns.length === 0 && (
-            <p className="dock__empty">
-              {status === "open" ? "AURA is listening. Type below, or press the mic to talk." : "Waiting for AURA's brain. Start server.py if it isn't running."}
-            </p>
-          )}
-          {turns.map((t) => (
-            <div key={t.id} className={"bubble bubble--" + t.role}>
-              <span className="bubble__who">
-                {t.role === "user" ? "You" : "AURA"}
-                {t.source && t.source !== "greeting" && (
-                  <span className={"bubble__src bubble__src--" + t.source}>{t.source}</span>
-                )}
-                {t.ts && <span className="bubble__time">{t.ts}</span>}
-              </span>
-              <div className="bubble__text">
-                {renderMarkdown(t.text)}
-                {t.streaming && <span className="caret" />}
-              </div>
-              {t.attachments && t.attachments.length > 0 && (
-                <div className="bubble__files">
-                  {t.attachments.map((a) => (
-                    <span key={a.id} className={"filechip filechip--" + a.kind}>
-                      <span className="filechip__ring" aria-hidden />{a.name}
-                    </span>
-                  ))}
-                </div>
+      <div className="dock__log" ref={scrollRef}>
+        {turns.length === 0 && (
+          <p className="dock__empty">
+            {status === "open"
+              ? "Type below, or press the mic and talk."
+              : "Waiting for AURA's brain. Start server.py if it isn't running."}
+          </p>
+        )}
+        {turns.map((t) => (
+          <div key={t.id} className={"bubble bubble--" + t.role}>
+            <span className="bubble__who">
+              {t.role === "user" ? "You" : "AURA"}
+              {t.source && t.source !== "greeting" && (
+                <span className={"bubble__src bubble__src--" + t.source}>{t.source}</span>
               )}
-              {t.card && <InstallCard proposal={t.card} inChat />}
+              {t.ts && <span className="bubble__time">{t.ts}</span>}
+            </span>
+            <div className="bubble__text">
+              {renderMarkdown(t.text)}
+              {t.streaming && <span className="caret" />}
             </div>
-          ))}
-        </div>
-      ) : (
-        last && (
-          <button className="dock__peek" onClick={() => setLogOpen(true)} title="Show conversation">
-            <span className="dock__peekwho">{last.role === "user" ? "You" : "AURA"}</span>
-            <span className="dock__peektext">{last.text.replace(/\*\*|__|`/g, "").slice(0, 120) || "…"}</span>
-          </button>
-        )
-      )}
+            {t.attachments && t.attachments.length > 0 && (
+              <div className="bubble__files">
+                {t.attachments.map((a) => (
+                  <span key={a.id} className={"filechip filechip--" + a.kind}>
+                    <span className="filechip__ring" aria-hidden />{a.name}
+                  </span>
+                ))}
+              </div>
+            )}
+            {t.card && <InstallCard proposal={t.card} inChat />}
+          </div>
+        ))}
+      </div>
 
       {showCheck && (
         <MicCheck
@@ -348,52 +283,6 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
       )}
 
       <form className={"composer composer--dock" + (listening ? " composer--voice" : "")} onSubmit={submit}>
-        <button
-          type="button"
-          className="composer__collapse"
-          onClick={() => setLogOpen(!logOpen)}
-          title={logOpen ? "Tuck conversation away" : "Show conversation"}
-        >
-          <Icon name={logOpen ? "down" : "up"} />
-        </button>
-
-        <button
-          type="button"
-          className={"composer__hist" + (historyOpen ? " composer__hist--on" : "")}
-          onClick={() => setHistoryOpen((v) => !v)}
-          title="Chats — open an old one and AURA picks up its context"
-          aria-expanded={historyOpen}
-        >
-          <Icon name="history" />
-        </button>
-
-        {/* Pick the room AURA works in \u2014 loads that room's brief so the reply
-            comes back in its style (Coding \u2192 DSA, Japanese Study \u2192 tutor). */}
-        <RoomPicker
-          onLoad={(msgs) => onLoadTurns?.(msgs)}
-          onClear={() => onClearTurns?.()}
-        />
-
-        <button
-          type="button"
-          className="composer__attach"
-          onClick={() => fileRef.current?.click()}
-          disabled={status !== "open"}
-          title="Attach a file — PDFs, Word files and images are saved to Saved Info"
-        >
-          <Icon name="attach" />
-        </button>
-        <input
-          ref={fileRef}
-          type="file"
-          hidden
-          multiple
-          onChange={(e) => {
-            if (e.target.files?.length) takeFiles(e.target.files);
-            e.target.value = "";
-          }}
-        />
-
         <div className="composer__field">
           <input
             ref={inputRef}
@@ -411,7 +300,7 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
             }}
             placeholder={
               listening
-                ? "Speak — or type to interrupt"
+                ? "Speak, or type to interrupt"
                 : status === "open"
                   ? "Ask AURA anything"
                   : "Waiting for AURA's brain to connect"
@@ -423,35 +312,80 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
             <span className="composer__interim">{voice.interim}</span>
           )}
         </div>
-        {/* Speak on/off — right is on, left is off. When off AURA still
-            answers in the chat, she just doesn't say it out loud. */}
-        <button
-          type="button"
-          className={"speakswitch" + (speakOn ? " speakswitch--on" : "")}
-          onClick={toggleSpeak}
-          role="switch"
-          aria-checked={speakOn}
-          aria-label={speakOn ? "Voice on — AURA speaks her replies" : "Voice off — replies are text only"}
-          title={speakOn ? "Voice on — click for text only" : "Text only — click to let AURA speak"}
-        >
-          <Icon name={speakOn ? "speaker" : "mute"} />
-        </button>
 
-        <button
-          type="button"
-          className={"composer__mic" + (listening ? " composer__mic--live" : "")}
-          onClick={onMicClick}
-          disabled={status !== "open"}
-          title={listening ? "Stop listening" : "Start always-on voice"}
-          aria-pressed={listening}
-        >
-          <Icon name="mic" />
-        </button>
-        <button type="submit" className="composer__send"
-                disabled={status !== "open" || (!input.trim() && pending.length === 0)}
-                aria-label="Send">
-          <Icon name="send" />
-        </button>
+        <div className="composer__tools">
+          <button
+            type="button"
+            className={"composer__hist" + (historyOpen ? " composer__hist--on" : "")}
+            onClick={() => setHistoryOpen((v) => !v)}
+            aria-label="Chats"
+            title="Chats — open an old one and AURA picks up its context"
+            aria-expanded={historyOpen}
+          >
+            <Icon name="history" />
+          </button>
+
+          <button
+            type="button"
+            className="composer__attach"
+            onClick={() => fileRef.current?.click()}
+            disabled={status !== "open"}
+            aria-label="Attach a file"
+            title="Attach a file — PDFs, Word files and images are saved to Saved Info"
+          >
+            <Icon name="attach" />
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            hidden
+            multiple
+            onChange={(e) => {
+              if (e.target.files?.length) takeFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+
+          {/* Pick the room AURA works in — loads that room's brief so the reply
+              comes back in its style (Coding → DSA, Japanese Study → tutor). */}
+          <RoomPicker
+            onLoad={(msgs) => onLoadTurns?.(msgs)}
+            onClear={() => onClearTurns?.()}
+          />
+
+          <span className="composer__spacer" />
+
+          {/* Speak on/off. When off AURA still answers in the chat, she just
+              doesn't say it out loud. */}
+          <button
+            type="button"
+            className={"speakswitch" + (speakOn ? " speakswitch--on" : "")}
+            onClick={toggleSpeak}
+            role="switch"
+            aria-checked={speakOn}
+            aria-label={speakOn ? "Voice on — AURA speaks her replies" : "Voice off — replies are text only"}
+            title={speakOn ? "Voice on — click for text only" : "Text only — click to let AURA speak"}
+          >
+            <Icon name={speakOn ? "speaker" : "mute"} />
+          </button>
+
+          <button
+            type="button"
+            className={"composer__mic" + (listening ? " composer__mic--live" : "")}
+            onClick={onMicClick}
+            disabled={status !== "open"}
+            aria-label={listening ? "Stop listening" : "Talk to AURA"}
+            title={listening ? "Stop listening" : "Start always-on voice"}
+            aria-pressed={listening}
+          >
+            <Icon name="mic" />
+          </button>
+          <button type="submit" className="composer__send"
+                  disabled={status !== "open" || (!input.trim() && pending.length === 0)}
+                  aria-label="Send">
+            <Icon name="send" />
+          </button>
+        </div>
       </form>
     </section>
   );

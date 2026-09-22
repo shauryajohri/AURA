@@ -32,7 +32,6 @@ export default function PlanetsPage() {
     <div className="planets">
       <header className="pagehead">
         <h2>Planets</h2>
-        <p>Every model AURA uses is a world in her orbit. Choose a model, then the world it lives on.</p>
       </header>
 
       <div className="planets__body">

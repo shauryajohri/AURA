@@ -50,8 +50,8 @@ export default function BrainDashboard() {
           <p className="brproj__sub">{p?.root || p?.repo_url || "no folder linked"}</p>
         </div>
         <div className="brdash__acts">
-          <button className="brbtn" onClick={() => setSection("research")}>✧ Research</button>
-          <button className="brbtn" onClick={() => setSection("graph")}>◉ Knowledge graph</button>
+          <button className="brbtn" onClick={() => setSection("projects")}>▣ Projects</button>
+          <button className="brbtn" onClick={() => setSection("code")}>⌥ Code</button>
           <button className="brbtn" onClick={doRescan} disabled={!!busy}>⎇ Sync git</button>
           <button className="brbtn" onClick={() => refresh()} disabled={loading}>↻</button>
         </div>
@@ -144,7 +144,7 @@ export default function BrainDashboard() {
               <span className="brevent__when">{whenLabel(e.when)}</span>
             </button>
           ))}
-          <button className="brlink" onClick={() => setSection("history")}>
+          <button className="brlink" onClick={() => setSection("projects")}>
             Full timeline →
           </button>
         </section>

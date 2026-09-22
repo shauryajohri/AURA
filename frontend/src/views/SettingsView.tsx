@@ -6,6 +6,7 @@ import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useSettingsStore } from "../stores/settingsStore";
 import { setPref, usePrefs, type Pref } from "../stores/prefsStore";
 import Icon from "../components/Icon";
+import ResetPanel from "./ResetPanel";
 
 const DEVICE: Array<{ key: Pref; name: string; desc: string }> = [
   { key: "intro", name: "Startup animation", desc: "The black hole forms each time AURA opens" },
@@ -28,6 +29,7 @@ export default function SettingsView() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [offline, setOffline] = useState(false);
   const [focus, setFocus] = useState<SettingsCategory | null>(null);
+  const [resetting, setResetting] = useState(false);
   const applySettings = useSettingsStore((s) => s.apply);
   // Sanctuary layout is edited here too — same store the sanctuary reads.
   const [layout, setLayout] = useLocalStorage<Layout>("aura.sanctuary", DEFAULT_LAYOUT);
@@ -39,10 +41,9 @@ export default function SettingsView() {
 
   return (
     <div className="setview">
-      <div className="setview__head">
+      <header className="pagehead">
         <h2>Settings</h2>
-        <p>Tune AURA's world. Each area opens with a live preview.</p>
-      </div>
+      </header>
 
       <section className="setview__section">
         <h3 className="memtl__title">This device</h3>
@@ -88,11 +89,38 @@ export default function SettingsView() {
         </section>
       ))}
 
+      {/* Last, and on its own: everything above changes how AURA behaves,
+          this one changes what AURA still has. */}
+      <section className="setview__section">
+        <h3 className="memtl__title">Start over</h3>
+        <div className="setview__menu">
+          <button className="san-setopt setview__opt setview__opt--danger"
+                  onClick={() => setResetting(true)}>
+            <span className="san-setopt__icon">↺</span>
+            <span className="san-setopt__meta">
+              <span className="san-setopt__name">Reset AURA</span>
+              <span className="san-setopt__desc">
+                Clear conversations, memory, saved info or settings — one at a time or all of it
+              </span>
+            </span>
+            <span className="san-setopt__go"><Icon name="right" size={16} /></span>
+          </button>
+        </div>
+      </section>
+
       {!settings && (
         <div className="setview__note">
           {offline
             ? "Brain offline — start server.py to load visual settings."
             : "Loading settings…"}
+        </div>
+      )}
+
+      {resetting && (
+        <div className="resetwrap" onClick={(e) => { if (e.target === e.currentTarget) setResetting(false); }}>
+          <div className="resetwrap__card">
+            <ResetPanel onClose={() => setResetting(false)} />
+          </div>
         </div>
       )}
 

@@ -201,6 +201,12 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
             useNotifyStore.getState().add("done", "A new planet joined the orbit");
           }
           break;
+        // A source finishing its sync is nobody's reply — it lands whenever
+        // the pull or the scan is done. Anything showing sources listens for
+        // this rather than polling.
+        case "sources":
+          window.dispatchEvent(new CustomEvent("aura:sources", { detail: msg.payload }));
+          break;
         case "error":
           pushMessage("[error] " + msg.payload.message, "error");
           finishStream();

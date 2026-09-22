@@ -84,7 +84,7 @@ export default function ProjectsView() {
     const pid = await createProject(n);
     setName("");
     setMode("none");
-    if (pid) setSection("research");   // straight into the conversation
+    if (pid) setSection("code");   // straight into the code
   };
 
   return (

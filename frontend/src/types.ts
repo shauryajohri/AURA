@@ -67,6 +67,8 @@ export type ServerMessage =
   | { type: "saved"; payload: { kind: "update" | "delete"; item: SavedItem | null; id: number } }
   // A planet was installed, re-jobbed or removed.
   | { type: "planets"; payload: { kind: string } }
+  /** A connected source finished syncing — the repo list or document set moved. */
+  | { type: "sources"; payload: { sources: unknown[]; changed: unknown } }
   | { type: "error"; payload: { message: string } }
   | { type: "pong" };
 

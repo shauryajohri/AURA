@@ -1,0 +1,67 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "aura-brain",
+      "runtimeExecutable": "C:\\Users\\shaur\\Downloads\\AURA\\venv\\Scripts\\python.exe",
+      "runtimeArgs": [
+        "server.py"
+      ],
+      "port": 8760
+    },
+    {
+      "name": "aura-web",
+      "runtimeExecutable": "C:\\Users\\shaur\\Downloads\\AURA\\venv\\Scripts\\python.exe",
+      "runtimeArgs": [
+        "web_api.py"
+      ],
+      "port": 8770
+    },
+    {
+      "name": "aura-web-qa",
+      "runtimeExecutable": "C:\\Users\\shaur\\Downloads\\AURA\\venv\\Scripts\\python.exe",
+      "runtimeArgs": [
+        "-c",
+        "import os, runpy; os.environ.update(AURA_WEB_PORT='8771', AURA_WEB_IP_DAILY='500', AURA_WEB_IP_PER_MIN='60'); runpy.run_path('web_api.py', run_name='__main__')"
+      ],
+      "port": 8771
+    },
+    {
+      "name": "aura-face",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "frontend",
+        "run",
+        "dev:vite",
+        "--",
+        "--port",
+        "5180",
+        "--strictPort"
+      ],
+      "port": 5180
+    },
+    {
+      "name": "aura-qa-bridge",
+      "runtimeExecutable": "C:\\Users\\shaur\\Downloads\\AURA\\venv\\Scripts\\python.exe",
+      "runtimeArgs": [
+        "C:\\Users\\shaur\\AppData\\Local\\Temp\\claude\\C--Users-shaur-Downloads-AURA\\adf3b1be-ee5e-472a-8b47-e6c6168a0e96\\scratchpad\\qa_server.py"
+      ],
+      "port": 8760
+    },
+    {
+      "name": "aura-dist",
+      "runtimeExecutable": "C:\\Users\\shaur\\Downloads\\AURA\\venv\\Scripts\\python.exe",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8790",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:\\Users\\shaur\\Downloads\\AURA\\frontend\\dist"
+      ],
+      "port": 8790
+    }
+  ]
+}

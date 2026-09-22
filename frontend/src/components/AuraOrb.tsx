@@ -1,14 +1,15 @@
 /**
- * The AURA orb — the black hole held in a glass marble. The same film as the
- * core, cropped round; the glass (rim light, highlight) is CSS. Used as the
+ * The AURA orb — a pocket black hole: the core's film cut out of its
+ * background (orb.webm carries alpha) over a true-black event horizon, so the
+ * photon ring and the disk band float with nothing behind them. Used as the
  * brand mark in the rail and as the loading mark; the floating desktop orb
- * (electron/orb.html) is the same design.
+ * (electron/orb.js) is the same design.
  */
 export default function AuraOrb({ size = 32, live = false }: { size?: number; live?: boolean }) {
   return (
     <span className={"orb" + (live ? " orb--live" : "")} style={{ width: size, height: size }} aria-hidden="true">
-      <video className="orb__film" src="./cosmos/orb.mp4" autoPlay muted loop playsInline />
-      <span className="orb__glass" />
+      <span className="orb__hole" />
+      <video className="orb__film" src="./cosmos/orb.webm" autoPlay muted loop playsInline />
     </span>
   );
 }

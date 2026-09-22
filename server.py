@@ -97,6 +97,16 @@ try:
 except Exception:  # noqa: BLE001
     traceback.print_exc()
 
+# Upgrades, reset and connected sources. Same reasoning as above: if AURA's
+# self-editing machinery fails to import, AURA itself must still start — that
+# is exactly the moment you need it running to roll the last upgrade back.
+try:
+    from system_api import router as system_router
+    app.include_router(system_router)
+    print("[AURA bridge] System API mounted (upgrades, reset, sources)")
+except Exception:  # noqa: BLE001
+    traceback.print_exc()
+
 # Public web surface (/web/api/*) — the sandboxed demo behind the landing
 # page. Deliberately separate from /ws: it never touches the personal store,
 # has no tools, and is budgeted. The static site itself is mounted at the very
@@ -223,6 +233,17 @@ def _init_v3() -> None:
         saved_info.set_sink(lambda payload: broadcast({"type": "saved", "payload": payload}))
         integrations.set_sink(lambda payload: broadcast({"type": "planets", "payload": payload}))
         print("[AURA bridge] Saved Info + planet install sinks attached")
+    except Exception:  # noqa: BLE001
+        traceback.print_exc()
+    try:
+        from core import sources
+        sources.set_sink(broadcast)      # already shaped as a {type, payload} frame
+        sources.init()
+        # Everything the user connected is brought up to date now, in the
+        # background: opening AURA is the moment its picture of your work
+        # should stop being yesterday's.
+        sources.sync_all()
+        print("[AURA bridge] Sources sink attached, launch sync started")
     except Exception:  # noqa: BLE001
         traceback.print_exc()
 

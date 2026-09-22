@@ -76,7 +76,7 @@ export default function InstalledView() {
       </p>
 
       {installed.length === 0 && pending.length === 0 && (
-        <p className="pane-note">Nothing installed yet. The built-in planets are on the Planet Management tab.</p>
+        <p className="pane-note">Nothing installed yet. The built-in planets are on the Planet management tab.</p>
       )}
 
       {installed.map((it) => (

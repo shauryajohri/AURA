@@ -691,6 +691,17 @@ def build_context_prompt(query: str, intent: str, thought_context: str, comeback
             if _room.get("system_hint"):
                 bits.append(_room["system_hint"])
             room_section = "(" + " ".join(bits) + ")"
+            # Sources connected to this room — the GitHub repos and documents
+            # AURA keeps synced. This is what lets "which of my projects uses
+            # Postgres" be answered in the Coding room without being told what
+            # the projects are.
+            try:
+                from core import sources as _sources
+                _block = _sources.context_for_room(_room.get("id"))
+                if _block:
+                    room_section += "\n" + _block
+            except Exception:  # noqa: BLE001
+                pass
     except Exception:  # noqa: BLE001 - context is a bonus, never a blocker
         pass
 
@@ -988,6 +999,21 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
         if on_chunk:
             on_chunk(observation_followup)
         return observation_followup
+    # "Upgrade yourself so you can X" / "apply it" / "roll it back". Handled
+    # before the task matchers because "add a copy button to yourself" contains
+    # "add", which the task handler would otherwise claim as a todo.
+    try:
+        from core import patcher as _patcher
+        upgrade_reply = _patcher.chat_command(query)
+    except Exception:  # noqa: BLE001 — never let this break ordinary talking
+        upgrade_reply = None
+    if upgrade_reply:
+        store.save_conversation("user", query)
+        store.save_conversation("aura", upgrade_reply)
+        if on_chunk:
+            on_chunk(upgrade_reply)
+        return upgrade_reply
+
     if "afk" in query_lower:
           from modules.command_handler import describe_afk_status
           result = describe_afk_status()

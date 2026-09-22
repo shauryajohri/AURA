@@ -161,12 +161,8 @@ export default function ChatsPage({ onSend }: Props) {
 
   return (
     <div className="chatspage">
-      <header className="chatspage__head">
+      <header className="pagehead">
         <h2>Chats</h2>
-        <p>
-          Rooms say what a conversation is about — every chat inside one
-          inherits its brief, and AURA moves you when the subject changes.
-        </p>
       </header>
 
       {offline && <p className="chatspage__note">Brain offline — start server.py.</p>}

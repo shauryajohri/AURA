@@ -8,13 +8,14 @@ import { useSkinStore } from "./stores/skinStore";
 import { useBootStore } from "./stores/bootStore";
 import { usePrefs } from "./stores/prefsStore";
 import { emitCore } from "./lib/coreBus";
+import { sources } from "./systemApi";
 import { sfx } from "./lib/sfx";
 import type { SavedItem } from "./types";
 import Sidebar from "./components/Sidebar";
-import TopBar from "./components/TopBar";
 import Stage from "./components/Stage";
 import ChatDock from "./components/ChatDock";
-import HomeStatusCard from "./components/HomeStatusCard";
+import HomeGreeting from "./components/HomeGreeting";
+import { StageTools, WindowControls } from "./components/Chrome";
 import SpaceBackground from "./components/SpaceBackground";
 import AuraCursor from "./components/AuraCursor";
 import AuraOrb from "./components/AuraOrb";
@@ -33,6 +34,7 @@ const LabsPage = lazy(() => import("./views/LabsPage"));
 const ChatsPage = lazy(() => import("./views/ChatsPage"));
 const SavedInfoPage = lazy(() => import("./views/SavedInfoPage"));
 const PlanetsPage = lazy(() => import("./views/PlanetsPage"));
+const UpgradePage = lazy(() => import("./views/UpgradePage"));
 
 /** Shown for the instant a lazy page is fetched — the orb, breathing. */
 function PageLoading() {
@@ -47,9 +49,10 @@ function PageLoading() {
 /**
  * AURA — one fixed shell around a black hole.
  *
- * Home is the permanent landing page: the core and its planets in the middle,
- * the conversation at the bottom. The rail opens every other page with a
- * crossfade, and "Aura Domain" crosses the portal into the coding workspace.
+ * Home is the permanent landing page, split in two: the sky, where the core
+ * and its planets live and never get pushed around, and the conversation pane
+ * on the right. Every other page opens on a sheet laid over the sky, and
+ * "Aura Domain" crosses the portal into the coding workspace.
  */
 
 // Old localStorage view ids → the page that now owns that feature.
@@ -58,7 +61,7 @@ const LEGACY: Record<string, string> = {
   skills: "models",
   analytics: "models",
 };
-const PAGES = ["home", "chats", "saved", "memory", "tasks", "models", "planets", "settings", "labs"];
+const PAGES = ["home", "chats", "saved", "memory", "tasks", "models", "planets", "settings", "labs", "upgrade"];
 
 export default function App() {
   const { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, activity, send,
@@ -101,6 +104,17 @@ export default function App() {
   useEffect(() => { void loadSaved(); void loadRoster(); }, [loadSaved, loadRoster]);
   // The brain may boot after the window — retry the roster when it connects.
   useEffect(() => { if (status === "open") void loadRoster(); }, [status, loadRoster]);
+
+  // Everything you've connected — your GitHub, your document folders — is
+  // pulled fresh the moment AURA can reach the brain. The brain also syncs on
+  // its own startup; this covers the other order, where the window was already
+  // open and the brain came up second.
+  const syncedRef = useRef(false);
+  useEffect(() => {
+    if (status !== "open" || syncedRef.current) return;
+    syncedRef.current = true;
+    void sources.syncAll().catch(() => { syncedRef.current = false; });
+  }, [status]);
 
   // A reply arriving sends a ring of light out of the core.
   const lastAuraRef = useRef<{ id: string | null; n: number }>({ id: null, n: 0 });
@@ -163,6 +177,8 @@ export default function App() {
         return <SettingsView />;
       case "labs":
         return <LabsPage />;
+      case "upgrade":
+        return <UpgradePage />;
       default:
         return null;
     }
@@ -185,19 +201,18 @@ export default function App() {
       <main className="os-main">
         {view === "home" ? (
           <div className="os-home page-fade" key="home">
-            <TopBar mode={mode}>
-              <HomeStatusCard status={status} activeModelId={activeModelId} />
-            </TopBar>
-            <div className="os-stagewrap">
+            <div className="sky">
               <Stage
                 state={auraState}
                 activeModelId={activeModelId}
                 activity={activity}
                 listening={presence === "working"}
               />
+              <StageTools />
             </div>
             <ChatDock status={status} turns={turns} onSend={send} auraState={auraState}
-                      onLoadTurns={loadTurns} onClearTurns={clearTurns} />
+                      onLoadTurns={loadTurns} onClearTurns={clearTurns}
+                      head={<HomeGreeting status={status} mode={mode} />} />
           </div>
         ) : (
           <div className="os-page page-fade" key={view}>
@@ -224,6 +239,7 @@ export default function App() {
         />
       )}
 
+      {!domainOpen && <WindowControls />}
       <BootSequence />
       {customCursor && <AuraCursor />}
     </div>

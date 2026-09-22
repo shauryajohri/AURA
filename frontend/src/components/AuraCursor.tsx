@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { coreGeom } from "../lib/coreBus";
 import { sfx } from "../lib/sfx";
 
@@ -13,7 +14,11 @@ import { sfx } from "../lib/sfx";
  *             it gets pulled toward the core.
  *
  * Clicks leave a ripple. The OS cursor is hidden app-wide (styles), except
- * over resize grips, which keep the native arrows.
+ * over resize grips, which keep the native arrows, and inside embedded pages
+ * (iframes), which draw their own.
+ *
+ * It lives in <body>, above everything — popovers portalled to <body> (the
+ * room picker) would otherwise cover it while the system cursor is hidden.
  */
 
 const CLICKABLE =
@@ -21,8 +26,12 @@ const CLICKABLE =
   "input[type='range'], input[type='checkbox'], input[type='radio'], .clickable";
 const TEXT = "input:not([type]), input[type='text'], input[type='search'], input[type='email'], " +
   "input[type='url'], input[type='password'], input[type='number'], textarea, [contenteditable='true']";
-const NATIVE = ".dock__grip, .resizer, [data-native-cursor]";
+const NATIVE = ".resizer, [data-native-cursor]";
 const RING = 34;
+
+// Where the pointer was last seen, kept across mounts: switching the cursor
+// back on in Settings shows it right there instead of waiting for a move.
+const lastSeen = { x: 0, y: 0, known: false };
 
 export default function AuraCursor() {
   const dotRef = useRef<HTMLDivElement>(null);
@@ -35,8 +44,8 @@ export default function AuraCursor() {
     const layer = layerRef.current!;
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
-    const p = { x: -100, y: -100 };                 // the pointer
-    const r = { x: -100, y: -100, w: RING, h: RING, rad: RING / 2 }; // the ring (animated)
+    const p = { x: lastSeen.x, y: lastSeen.y };     // the pointer
+    const r = { x: p.x, y: p.y, w: RING, h: RING, rad: RING / 2 }; // the ring (animated)
     const v = { x: 0, y: 0 };                       // ring velocity (spring)
     let mode: "free" | "snap" | "text" | "native" = "free";
     let snap: DOMRect | null = null;
@@ -48,7 +57,8 @@ export default function AuraCursor() {
 
     const classify = (el: Element | null) => {
       if (!el || !el.closest) { mode = "free"; hot = false; snap = null; return; }
-      if (el.closest(NATIVE)) { mode = "native"; hot = false; snap = null; return; }
+      // an embedded page gets no events from us while the pointer is inside it
+      if (el.closest(NATIVE) || el.tagName === "IFRAME") { mode = "native"; hot = false; snap = null; return; }
       if (el.closest(TEXT)) { mode = "text"; hot = false; snap = null; return; }
       const c = el.closest(CLICKABLE) as HTMLElement | null;
       if (c && !(c as HTMLButtonElement).disabled) {
@@ -71,16 +81,31 @@ export default function AuraCursor() {
       mode = "free"; hot = false; snap = null;
     };
 
-    const onMove = (e: MouseEvent) => {
-      p.x = e.clientX; p.y = e.clientY;
+    const show = () => {
       dot.style.transform = `translate3d(${p.x}px, ${p.y}px, 0)`;
       if (!visible) {
         visible = true;
         layer.classList.add("acur--on");
         r.x = p.x; r.y = p.y;
       }
+    };
+    const onMove = (e: MouseEvent) => {
+      p.x = e.clientX; p.y = e.clientY;
+      lastSeen.x = p.x; lastSeen.y = p.y; lastSeen.known = true;
+      show();
       classify(e.target as Element);
     };
+    // Native drag-and-drop (a file dragged onto the dock) sends no mousemove.
+    const onDrag = (e: DragEvent) => {
+      if (!e.clientX && !e.clientY) return;
+      p.x = e.clientX; p.y = e.clientY;
+      lastSeen.x = p.x; lastSeen.y = p.y; lastSeen.known = true;
+      show();
+    };
+    if (lastSeen.known) {
+      show();
+      classify(document.elementFromPoint(p.x, p.y));
+    }
     // Elements move under a still pointer (scrolling, reflow) — re-check.
     const onScroll = () => {
       if (!visible) return;
@@ -100,14 +125,21 @@ export default function AuraCursor() {
       layer.append(rip);
       rip.addEventListener("animationend", () => rip.remove());
     };
-    const onLeave = () => { visible = false; layer.classList.remove("acur--on"); };
+    const onLeave = () => { visible = false; lastSeen.known = false; layer.classList.remove("acur--on"); };
 
     let raf = 0;
     let last = performance.now();
+    let recheck = 0;
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
+      // The page changes under a still pointer (a menu closes, a page opens):
+      // look again at what's under it, so the ring never hugs a ghost.
+      if (visible && now > recheck) {
+        recheck = now + 250;
+        classify(document.elementFromPoint(p.x, p.y));
+      }
       const sceneHot = mode === "free" && coreGeom.hot;
 
       // where the ring wants to be, and what shape
@@ -161,25 +193,30 @@ export default function AuraCursor() {
     };
     raf = requestAnimationFrame(frame);
 
-    window.addEventListener("mousemove", onMove, { passive: true });
-    window.addEventListener("scroll", onScroll, { passive: true, capture: true });
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("mouseup", onUp);
+    // Capture phase: nothing that stops propagation can starve the cursor.
+    const cap = { capture: true, passive: true } as const;
+    window.addEventListener("mousemove", onMove, cap);
+    window.addEventListener("dragover", onDrag, cap);
+    window.addEventListener("scroll", onScroll, cap);
+    window.addEventListener("mousedown", onDown, cap);
+    window.addEventListener("mouseup", onUp, cap);
     document.documentElement.addEventListener("mouseleave", onLeave);
     return () => {
       cancelAnimationFrame(raf);
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("scroll", onScroll, { capture: true });
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("mousemove", onMove, cap);
+      window.removeEventListener("dragover", onDrag, cap);
+      window.removeEventListener("scroll", onScroll, cap);
+      window.removeEventListener("mousedown", onDown, cap);
+      window.removeEventListener("mouseup", onUp, cap);
       document.documentElement.removeEventListener("mouseleave", onLeave);
     };
   }, []);
 
-  return (
+  return createPortal(
     <div ref={layerRef} className="acur" aria-hidden="true">
       <div ref={ringRef} className="acur__ring" />
       <div ref={dotRef} className="acur__dot"><span /></div>
-    </div>
+    </div>,
+    document.body,
   );
 }

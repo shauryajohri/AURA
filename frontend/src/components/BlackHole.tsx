@@ -32,10 +32,12 @@ const BIRTH_SRC = "./cosmos/core-birth.webm";
 // Where the photon ring sits inside those clips (1600×650 frames).
 const VW = 1600, VH = 650, VCX = 804, VCY = 326, VR = 173;
 
-const TILT = 0.36;       // the orbital plane seen from above: height/width of an orbit
-const MAX_R = 128;       // photon-ring radius cap (px)
-const INNER = 1.9;       // first orbit, in ring radii
-const SPAN = 2.55;       // innermost → outermost orbit, in ring radii
+// The black hole is the hero: it takes the stage, and the planets are small
+// worlds on wide orbits around it, clear of the ring.
+const TILT = 0.4;        // the orbital plane seen from above: height/width of an orbit
+const MAX_R = 178;       // photon-ring radius cap (px)
+const INNER = 2.45;      // first orbit, in ring radii
+const OUTER = 4.7;       // last orbit, in ring radii (pulled in to stay on the stage)
 const BIRTH_MS = 2800;   // a planet's spiral out of the horizon
 const BIRTH_WINDOW_MS = 5 * 60_000;
 const BIRTHS_PLAYED = new Set<string>();
@@ -45,6 +47,7 @@ const VIOLET = "155,123,255";
 const SIGNAL = "127,231,255";
 
 const rgba = (c: string, a: number) => `rgba(${c},${a < 0 ? 0 : a > 1 ? 1 : a})`;
+const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 const smooth = (e0: number, e1: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
   return t * t * (3 - 2 * t);
@@ -179,7 +182,7 @@ export default function BlackHole({ state, activeModelId = null }: Props) {
   const picksRef = useRef(picks);
   picksRef.current = picks;
 
-  // Planets menu (top bar) — read live so sliders act instantly.
+  // Orbits menu (top-right of the sky) — read live so sliders act instantly.
   const pOrbit = usePlanetStore((st) => st.orbit);
   const pSize = usePlanetStore((st) => st.size);
   const pSpeed = usePlanetStore((st) => st.speed);
@@ -213,7 +216,7 @@ export default function BlackHole({ state, activeModelId = null }: Props) {
     omul: orbitMul, owidth: orbitWidthMul, ostyle: orbitStyle,
   };
 
-  // Core menu (top bar): size, glow and position — adjustable in edit mode.
+  // Core menu (top-right of the sky): size, glow and position — adjustable in edit mode.
   const scalePct = useCoreStore((s) => s.scale);
   const glowPct = useCoreStore((s) => s.glow);
   const posX = useCoreStore((s) => s.x);
@@ -232,7 +235,7 @@ export default function BlackHole({ state, activeModelId = null }: Props) {
   const hoverRef = useRef<string | null>(null);
   const planetDragRef = useRef<string | null>(null);
   const dragSlotRef = useRef<number | null>(null);
-  const geomRef = useRef({ cx: 0, cy: 0, R: 100, left: 0, top: 0, stageW: 0, stageH: 0 });
+  const geomRef = useRef({ cx: 0, cy: 0, R: 100, left: 0, top: 0, stageW: 0, stageH: 0, inner: 1, outer: 2 });
   if (!planetDragRef.current) slotsRef.current = slotsMap; // sync unless mid-drag
 
   // The stage: where the core is centred and what it has to fit inside.
@@ -329,7 +332,9 @@ export default function BlackHole({ state, activeModelId = null }: Props) {
     const waves: Wave[] = [];
     let glowBoost = 0;
     let Rc = 0;
-    const center = { x: stageRef.current.x, y: stageRef.current.y };
+    const center = intro
+      ? { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+      : { x: stageRef.current.x, y: stageRef.current.y };
     let orbitFade = intro ? 0 : 1;
     let birthsQueued = !intro;
     let lastRate = -1;
@@ -386,17 +391,34 @@ export default function BlackHole({ state, activeModelId = null }: Props) {
 
       // ---- where, and how big -------------------------------------------
       const stage = stageRef.current;
-      const fitR = Math.min(MAX_R, (stage.w / 2 - 36) / (INNER + SPAN), (stage.h / 2 - 34) / ((INNER + SPAN) * TILT + 0.2));
+      // sized by the ring and its glow, not by the planets — outer orbits may
+      // pass under the chrome, the black hole never does
+      const fitR = Math.min(MAX_R, (stage.h / 2 - 22) / 1.28, stage.w / 7.4);
       const Rt = Math.max(56, fitR * core.scale);
       Rc = Rc ? Rc + (Rt - Rc) * Math.min(1, dt * 5) : Rt;
-      const tx = stage.x + core.x, ty = stage.y + core.y;
+      // The startup forms the core in the middle of the window (the panes
+      // are hidden then); on the reveal it glides over to its place in the sky.
+      const home = phase === "intro" ? { x: window.innerWidth / 2, y: window.innerHeight / 2 } : stage;
+      // The saved position is a nudge, not a teleport. Clamping it to the sky
+      // means the core is centred in the gap by default and can never be
+      // dragged — or left by an older layout — half under the sidebar or
+      // behind the conversation pane.
+      const limX = Math.max(0, stage.w / 2 - Rt);
+      const limY = Math.max(0, stage.h / 2 - Rt);
+      const tx = home.x + clamp(core.x, -limX, limX);
+      const ty = home.y + clamp(core.y, -limY, limY);
       center.x += (tx - center.x) * Math.min(1, dt * (core.editing ? 30 : 6));
       center.y += (ty - center.y) * Math.min(1, dt * (core.editing ? 30 : 6));
       canvas.style.transform = `translate3d(${center.x - D / 2}px, ${center.y - D / 2}px, 0)`;
       const R = Rc;
       const cx = D / 2, cy = D / 2;
       coreGeom.x = center.x; coreGeom.y = center.y; coreGeom.r = R;
-      geomRef.current = { cx, cy, R, left: center.x - D / 2, top: center.y - D / 2, stageW: stage.w, stageH: stage.h };
+      const inner = R * INNER;
+      const outer = Math.max(inner + 60, Math.min(R * OUTER, stage.w / 2 - 34));
+      geomRef.current = {
+        cx, cy, R, left: center.x - D / 2, top: center.y - D / 2,
+        stageW: stage.w, stageH: stage.h, inner, outer,
+      };
 
       // ---- the startup: once the reveal begins, planets are born ---------
       if (phase !== "intro" && !birthsQueued) {
@@ -428,7 +450,7 @@ export default function BlackHole({ state, activeModelId = null }: Props) {
       const fracs = slotFracsRef.current;
       const maxRx = D / 2 - 30;
       const slotRx = (si: number) =>
-        Math.min(maxRx, R * (INNER + SPAN * fracs[si % fracs.length]) * pcfg.orbit);
+        Math.min(maxRx, (inner + (outer - inner) * fracs[si % fracs.length]) * pcfg.orbit);
       const activeId = activeRef.current;
       const editMode = pEditingRef.current;
       const vx0 = center.x - D / 2, vy0 = center.y - D / 2;
@@ -465,8 +487,8 @@ export default function BlackHole({ state, activeModelId = null }: Props) {
         p.y = cy + rx * TILT * Math.sin(ang);
         p.z = Math.sin(ang);
         p.rx = rx;
-        const base = R * (0.17 + (p.idx % 3) * 0.028);
-        p.pr = base * pcfg.size * (1 + 0.16 * p.z) * grow * (1 + 0.28 * p.hov + (isAct ? 0.1 : 0));
+        const base = R * (0.082 + (p.idx % 3) * 0.014);
+        p.pr = base * pcfg.size * (1 + 0.16 * p.z) * grow * (1 + 0.5 * p.hov + (isAct ? 0.12 : 0));
         // hover: front-most planet under the pointer
         if (!p.hidden && coreGeom.pointer && !pointer.ui && !editMode) {
           const d = Math.hypot(pointer.x - (vx0 + p.x), pointer.y - (vy0 + p.y));
@@ -537,7 +559,7 @@ export default function BlackHole({ state, activeModelId = null }: Props) {
           ctx.lineCap = "round";
           for (let k = 1; k <= 7; k++) {
             const a0 = at - k * step;
-            ctx.strokeStyle = rgba(gc, (0.16 - k * 0.02) * orbitFade * (1 + p.hov));
+            ctx.strokeStyle = rgba(gc, (0.1 - k * 0.012) * orbitFade * (1 + 1.5 * p.hov));
             ctx.lineWidth = Math.max(0.6, pr * 0.22 * (1 - k / 9));
             ctx.beginPath();
             ctx.ellipse(cx, cy, rx, rx * TILT, 0, a0, a0 + step);
@@ -548,7 +570,7 @@ export default function BlackHole({ state, activeModelId = null }: Props) {
         // atmosphere glow
         ctx.globalCompositeOperation = "lighter";
         const halo = ctx.createRadialGradient(x, y, pr * 0.7, x, y, pr * (2.4 + p.hov));
-        halo.addColorStop(0, rgba(gc, (isAct ? 0.34 : 0.16) + p.hov * 0.2));
+        halo.addColorStop(0, rgba(gc, (isAct ? 0.24 : 0.07) + p.hov * 0.22));
         halo.addColorStop(1, rgba(gc, 0));
         ctx.fillStyle = halo;
         ctx.beginPath(); ctx.arc(x, y, pr * (2.4 + p.hov), 0, Math.PI * 2); ctx.fill();
@@ -588,15 +610,17 @@ export default function BlackHole({ state, activeModelId = null }: Props) {
           if (wRight >= 0.5) { drawSide(false, 1); drawSide(true, 1 - wRight); }
           else { drawSide(true, 1); drawSide(false, wRight); }
         }
-        // farther planets sit a little deeper in shadow
-        if (p.z < 0) {
-          ctx.fillStyle = `rgba(3,2,10,${0.38 * -p.z})`;
+        // planets sit in the core's shadow so its light stays the brightest
+        // thing on screen; farther ones deeper, the hovered one steps out
+        const shade = (0.2 + 0.36 * Math.max(0, -p.z)) * (1 - p.hov) * (isAct ? 0.5 : 1);
+        if (shade > 0.01) {
+          ctx.fillStyle = `rgba(3,2,10,${shade.toFixed(3)})`;
           ctx.beginPath(); ctx.arc(x, y, pr * 0.995, 0, Math.PI * 2); ctx.fill();
         }
         // rim light from the core
         const toCore = Math.atan2(cy - y, cx - x);
         ctx.globalCompositeOperation = "lighter";
-        ctx.strokeStyle = rgba(gc, 0.35 + p.hov * 0.3 + (isAct ? 0.2 : 0));
+        ctx.strokeStyle = rgba(gc, 0.22 + p.hov * 0.4 + (isAct ? 0.25 : 0));
         ctx.lineWidth = Math.max(1, pr * 0.07);
         ctx.beginPath(); ctx.arc(x, y, pr * 0.985, toCore - 1.1, toCore + 1.1); ctx.stroke();
         ctx.globalCompositeOperation = "source-over";
@@ -618,15 +642,17 @@ export default function BlackHole({ state, activeModelId = null }: Props) {
       const drawLabel = (p: Planet) => {
         if (p.hidden || !p.seenAt) return;
         const isAct = p.id === activeId;
-        const show = live.labels || isAct || p.hov > 0.05;
-        if (!show) return;
+        // names are for the planet you point at and the one answering; the
+        // "planet labels" setting adds quiet names to the near side only
+        const passive = live.labels && p.z > 0.2;
+        if (!isAct && p.hov <= 0.05 && !passive) return;
         if (p.z < 0 && Math.hypot(p.x - cx, p.y - cy) < R * 1.05) return; // behind the hole
         const meta = metaRef.current[p.id] || {};
         const name = meta.name || p.name;
         const role = meta.role || p.role;
         const depthA = 0.55 + 0.45 * (p.z + 1) / 2;
-        const a = Math.max(depthA * (live.labels ? 0.78 : 0), isAct ? 0.95 : 0, p.hov) * orbitFade;
-        const ly = p.y + p.pr + 15;
+        const a = Math.max(passive ? depthA * 0.45 : 0, isAct ? 0.95 : 0, p.hov) * orbitFade;
+        const ly = p.y + p.pr + 14;
         const two = p.hov > 0.05 || isAct;
         const w = Math.max(name.length, two ? role.length : 0) * 6.2 + 8;
         const box: [number, number, number, number] = [p.x - w / 2, ly - 11, p.x + w / 2, ly + (two ? 18 : 4)];
@@ -636,7 +662,7 @@ export default function BlackHole({ state, activeModelId = null }: Props) {
         ctx.textAlign = "center";
         ctx.shadowColor = "rgba(0,0,0,0.9)";
         ctx.shadowBlur = 6;
-        ctx.font = `500 ${11.5 + p.hov * 1.5}px "Instrument Sans", "Segoe UI", sans-serif`;
+        ctx.font = `500 ${(two ? 11.5 : 10.5) + p.hov * 1.5}px "Instrument Sans", "Segoe UI", sans-serif`;
         ctx.fillStyle = rgba(PHOTON, a);
         ctx.fillText(name, p.x, ly);
         if (p.hov > 0.05 || isAct) {
@@ -661,7 +687,7 @@ export default function BlackHole({ state, activeModelId = null }: Props) {
       // ---- the film --------------------------------------------------------
       const k = R / VR;
       const filmRect = [cx - VCX * k, cy - VCY * k, VW * k, VH * k] as const;
-      ctx.filter = `brightness(${(0.78 + 0.26 * glow).toFixed(3)}) saturate(${(0.95 + 0.2 * (glow - 1)).toFixed(3)})`;
+      ctx.filter = `brightness(${(0.84 + 0.26 * glow).toFixed(3)}) saturate(${(0.95 + 0.2 * (glow - 1)).toFixed(3)})`;
       if (films) {
         const loopReady = films.loop.readyState >= 2;
         if (phase === "intro" && films.birth) {
@@ -791,7 +817,7 @@ export default function BlackHole({ state, activeModelId = null }: Props) {
     const isUi = (el: EventTarget | null) =>
       !!(el as Element | null)?.closest?.(
         "button, a, input, textarea, select, label, [role='button'], [role='dialog'], " +
-        ".dock, .rail, .topbar, .menu, .homeline, .corestatus, .boot");
+        ".dock, .rail, .stagetools, .winbar, .menu, .corestatus, .boot");
     const onMove = (e: MouseEvent) => {
       pointer.x = e.clientX; pointer.y = e.clientY;
       pointer.ui = isUi(e.target);
@@ -852,7 +878,7 @@ export default function BlackHole({ state, activeModelId = null }: Props) {
       const mul = planetCfgRef.current.orbit || 1;
       let best = 0, bestD = Infinity;
       for (let si = 0; si < fracs.length; si++) {
-        const rr = g.R * (INNER + SPAN * fracs[si]) * mul;
+        const rr = (g.inner + (g.outer - g.inner) * fracs[si]) * mul;
         const d = Math.abs(rEq - rr);
         if (d < bestD) { bestD = d; best = si; }
       }

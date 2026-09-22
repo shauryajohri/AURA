@@ -133,30 +133,60 @@ Enter it from Sanctuary's **Enter Workspace** button (portal transition), or hit
 
 | Section | What it does |
 |---|---|
-| **Dashboard** | Real progress: buckets, per-feature bars, biggest blocker, recent events, git sync |
+| **Overview** | Real progress: buckets, per-feature bars, biggest blocker, recent events, git sync |
+| **Sources** | Your GitHub link and document folders, re-read every time AURA opens. Open a repo here and it is cloned, ready to prompt |
 | **Projects** | Create empty · import a local folder (reads code + git history) · clone a GitHub repo |
-| **Research** | Pick a project, then just talk. Every sentence becomes a feature, decision, task edit, or note |
+| **Code** | Real filesystem editor (file tree, tabs, quick-open) with **Build with AURA** underneath it |
+| **Git** | Status, diff, branches, commit, push |
 | **Tasks** | The generated board, grouped by feature. Commits close tasks themselves |
-| **Knowledge Graph** | Nodes + edges, laid out left-to-right as the lifecycle: idea → decision → feature → task → commit → file |
-| **Code** | Real filesystem editor (file tree, tabs, quick-open) |
-| **Code Review** | AURA's version vs yours, console, and a permission ladder |
-| **Documentation / Notes** | Markdown docs and quick notes per project |
+| **Notes** | Quick notes per project |
 | **Terminal** | A real shell, scoped to the project folder |
-| **History** | The project's own timeline — commits, decisions, finished tasks, milestones |
-| **Settings** | Nav order, density, glass, accent, background, connectors |
+| **Settings** | Nav order, density, accent, surface, connectors |
+
+Nine sections, down from eighteen. The ones that went were either panels of
+invented data or the same act split across two places — Build, Preview and
+Review were all "do something to the code you have open", which is what Code
+does now that you can talk to it.
 
 Click any node anywhere — graph, board, timeline, a Research receipt — and the **node drawer** answers three questions: *why does this exist* (the causal chain back to the originating idea), *what's connected*, and anything else you type (grounded in the graph only).
 
-### The permission ladder (Code Review)
+### Build with AURA (the prompt bar under the editor)
+
+Say what you want changed in the repo you're in. AURA works out which files it
+touches, reads them, rewrites them, and stops — showing you the diff. Nothing
+reaches disk until you approve it, and anything applied can be rolled back
+whole.
 
 ```
-Read Only  →  Sandbox  →  Merge Review  →  Write  →  Push
-   │            │             │              │        │
- suggest      run it       see the diff     save    commit
- only                                       to disk & push
+you ask  →  AURA picks the files  →  reads them + what they import
+         →  rewrites them  →  you read the diff  →  approve  →  written
+                                                 └─ roll back any time
 ```
 
-One rung at a time, and the capabilities above the current rung are genuinely disabled. AURA's suggestion is always read-only — applying it is a click *you* make. Nothing escalates itself.
+### Upgrading AURA itself
+
+The same engine, pointed at AURA's own source. From the **Upgrade** page in the
+sidebar, or just say it:
+
+```
+"upgrade yourself so the sidebar remembers my last page"
+   → AURA reads its own code and writes the change
+"what upgrades are pending?"       → the list
+"apply it"                         → applied, restart to load it
+"roll it back"                     → exactly as it was
+```
+
+Rails, because this one edits the thing that is running:
+
+- **Nothing is written without an explicit yes.** A request produces a proposal, never an edit.
+- **Backed up before it is applied**, so rollback restores the real bytes.
+- **Refused if it would break.** Python is compiled, JSON is parsed, and a rewrite that keeps less than a third of a file is rejected as a truncated reply rather than applied — that check runs again at apply time, not just when the proposal is written.
+- **Out of bounds:** `.env`, keys, the database, `.git/`, `node_modules/`, `venv/`, and anything outside the repo. A path that tries to escape the tree is dropped.
+
+The old Code Review screen and its permission ladder are gone. They were
+describing the same rule the proposal flow now enforces directly: what AURA
+writes is a suggestion until you apply it, and applying it is a click you
+make. Nothing escalates itself.
 
 ---
 
@@ -218,6 +248,28 @@ GET    /api/domain/github/status · repos
 POST   /api/domain/github/import            clone + build the graph
 ```
 
+**Upgrades, reset and sources** (`system_api.py`)
+
+```
+GET    /api/upgrade/proposals            list (?scope=self|project&root=…)
+GET    /api/upgrade/proposals/{id}       one, with every file's before/after
+POST   /api/upgrade/propose              ask for a change — writes nothing
+POST   /api/upgrade/proposals/{id}/approve · reject · rollback
+DELETE /api/upgrade/proposals/{id}
+GET    /api/upgrade/files · /api/upgrade/file      what AURA may read
+
+GET    /api/system/reset                 the scopes you can clear
+POST   /api/system/reset                 {scopes: [...], confirm: "RESET"}
+
+GET    /api/sources                      what AURA keeps in step with
+POST   /api/sources                      connect a GitHub link, folder or page
+PATCH  /api/sources/{id}                 rename, or file it in a room
+DELETE /api/sources/{id}
+POST   /api/sources/{id}/sync · /api/sources/sync    one, or all of them
+GET    /api/sources/repos                every repo across every GitHub source
+POST   /api/sources/{id}/clone           bring a repo down to work on
+```
+
 ---
 
 ## Layout
@@ -225,7 +277,11 @@ POST   /api/domain/github/import            clone + build the graph
 ```
 server.py              FastAPI app + WebSocket bridge + companion REST
 domain_api.py          Domain REST (filesystem, shell, git, review, brain, connectors)
+system_api.py          upgrades, reset, connected sources
 core/
+  patcher.py           AI-authored code changes: propose → approve → roll back
+  sources.py           GitHub / document sync, and the context a room gets
+  system_reset.py      scoped wipes, database backed up first
   brain.py             the turn: intent → context → route → guard
   ai_router.py         5 models, cost-aware routing, leak sanitiser
   work_recall.py       project memory injected into every chat turn

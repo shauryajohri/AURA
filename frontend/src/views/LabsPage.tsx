@@ -66,9 +66,8 @@ export default function LabsPage() {
   return (
     <PageShell
       title="Labs"
-      tagline="Where AURA is going next. Nothing here is finished — that's the point."
       storeKey="aura.page.labs"
-      tabs={[{ id: "coming", label: "Coming Soon", body: <ComingPane /> }]}
+      tabs={[{ id: "coming", label: "Coming soon", body: <ComingPane /> }]}
     />
   );
 }

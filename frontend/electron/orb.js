@@ -1,27 +1,29 @@
-// The floating orb — AURA's black hole held in a glass marble. The core is
-// the same Higgsfield film the app uses (orb-core.mp4, cropped round); the
-// glass, the bloom and the state colours are drawn here, so the orb can
-// breathe with whatever AURA is doing right now.
+// The floating orb — a pocket-sized AURA core: the same Higgsfield black hole
+// the app uses, cut out of its background (orb-core.webm carries alpha), so
+// only the void, the photon ring and the disk band float on the desktop.
+// The event horizon, the state colours and the voice rings are drawn here.
 (() => {
   const cv = document.getElementById("orb");
   const ctx = cv.getContext("2d");
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   const film = document.createElement("video");
-  film.src = "orb-core.mp4";
+  film.src = "orb-core.webm";
   film.muted = true;
   film.loop = true;
   film.playsInline = true;
   film.play().catch(() => {});
+  // In the clip (a square), the photon ring's radius is this share of its width.
+  const RING = 173 / 600;
 
   // Each state is a look the orb eases toward, so switching never snaps.
   //   tint  — hue shift applied to the film (0 keeps its violet)
-  //   rate  — film speed; bright — exposure; glow — bloom strength
+  //   rate  — film speed; bright — exposure; glow — halo strength
   const LOOK = {
-    idle:      { accent: [155, 123, 255], tint: 0,   rate: 0.8, bright: 1.0,  glow: 0.55, pulse: 0.02 },
-    listening: { accent: [127, 231, 255], tint: -70, rate: 1.0, bright: 1.08, glow: 0.8,  pulse: 0.05 },
-    thinking:  { accent: [190, 160, 255], tint: 0,   rate: 1.9, bright: 1.3,  glow: 0.95, pulse: 0.03 },
-    speaking:  { accent: [214, 190, 255], tint: 0,   rate: 1.15, bright: 1.18, glow: 0.85, pulse: 0.07 },
+    idle:      { accent: [155, 123, 255], tint: 0,   rate: 0.8,  bright: 1.0,  glow: 0.35, pulse: 0.015 },
+    listening: { accent: [127, 231, 255], tint: -70, rate: 1.0,  bright: 1.1,  glow: 0.7,  pulse: 0.04 },
+    thinking:  { accent: [190, 160, 255], tint: 0,   rate: 1.9,  bright: 1.32, glow: 0.8,  pulse: 0.02 },
+    speaking:  { accent: [214, 190, 255], tint: 0,   rate: 1.15, bright: 1.18, glow: 0.7,  pulse: 0.05 },
   };
   const EMBER = [255, 180, 138];
 
@@ -73,68 +75,44 @@
 
     const c = W / 2;
     const breathe = reduce ? 0 : Math.sin(t * (st === "speaking" ? 6.5 : 1.3)) * cur.pulse;
-    const R = W * 0.36 * (1 + breathe) * (1 + 0.06 * hover);   // the marble
+    const F = W * 0.94 * (1 + breathe) * (1 + 0.06 * hover);   // the film's drawn size
+    const R = F * RING;                                          // photon ring radius
     ctx.clearRect(0, 0, W, W);
 
-    // bloom — the only thing that reaches the window's edge
-    const bloom = ctx.createRadialGradient(c, c, R * 0.85, c, c, W / 2);
-    bloom.addColorStop(0, rgba(cur.accent, 0.42 * cur.glow * (1 + hover * 0.4)));
-    bloom.addColorStop(0.5, rgba(cur.accent, 0.12 * cur.glow));
-    bloom.addColorStop(1, rgba(cur.accent, 0));
-    ctx.fillStyle = bloom;
+    // a faint halo in the state colour — kept low so the cut-out stays clean
+    const halo = ctx.createRadialGradient(c, c, R * 0.9, c, c, W / 2);
+    halo.addColorStop(0, rgba(cur.accent, 0.22 * cur.glow * (1 + hover)));
+    halo.addColorStop(1, rgba(cur.accent, 0));
+    ctx.fillStyle = halo;
     ctx.beginPath(); ctx.arc(c, c, W / 2, 0, Math.PI * 2); ctx.fill();
 
-    // speaking: rings of her voice leaving the marble
+    // speaking: rings of her voice leaving the horizon
     if (st === "speaking" && !reduce && t > nextRipple) { ripples.push(t); nextRipple = t + 0.55; }
     for (let i = ripples.length - 1; i >= 0; i--) {
       const age = (t - ripples[i]) / 1.2;
       if (age >= 1) { ripples.splice(i, 1); continue; }
-      ctx.strokeStyle = rgba(cur.accent, 0.5 * (1 - age));
+      ctx.strokeStyle = rgba(cur.accent, 0.55 * (1 - age));
       ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(c, c, R * (1.02 + age * 0.34), 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(c, c, R * (1.15 + age * 0.55), 0, Math.PI * 2); ctx.stroke();
     }
 
-    // the marble: the black hole film, clipped round
-    ctx.save();
-    ctx.beginPath(); ctx.arc(c, c, R, 0, Math.PI * 2); ctx.clip();
-    ctx.fillStyle = "#000";
-    ctx.fillRect(c - R, c - R, R * 2, R * 2);
+    // the event horizon: true black, soft only at its very edge
+    const hole = ctx.createRadialGradient(c, c, R * 0.84, c, c, R * 1.0);
+    hole.addColorStop(0, "rgba(0,0,0,1)");
+    hole.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = hole;
+    ctx.beginPath(); ctx.arc(c, c, R, 0, Math.PI * 2); ctx.fill();
+
+    // the black hole itself — its light, cut out of the background
     if (film.readyState >= 2) {
-      const s = R * 2 * 1.32;                             // the ring fills ~70% of the marble
       ctx.filter = `hue-rotate(${cur.tint.toFixed(1)}deg) brightness(${cur.bright.toFixed(3)}) saturate(1.1)`;
-      ctx.drawImage(film, c - s / 2, c - s / 2, s, s);
+      ctx.drawImage(film, c - F / 2, c - F / 2, F, F);
       ctx.filter = "none";
     }
-    // glass: a dark lens edge, a lit floor, a highlight up top
-    const edge = ctx.createRadialGradient(c, c, R * 0.55, c, c, R);
-    edge.addColorStop(0, "rgba(10,6,30,0)");
-    edge.addColorStop(1, "rgba(10,6,30,0.65)");
-    ctx.fillStyle = edge;
-    ctx.fillRect(c - R, c - R, R * 2, R * 2);
-    const floor = ctx.createRadialGradient(c, c + R * 0.9, 0, c, c + R * 0.9, R * 0.9);
-    floor.addColorStop(0, rgba(cur.accent, 0.35));
-    floor.addColorStop(1, rgba(cur.accent, 0));
-    ctx.fillStyle = floor;
-    ctx.fillRect(c - R, c - R, R * 2, R * 2);
-    const spec = ctx.createRadialGradient(c - R * 0.36, c - R * 0.46, 0, c - R * 0.36, c - R * 0.46, R * 0.62);
-    spec.addColorStop(0, "rgba(255,255,255,0.5)");
-    spec.addColorStop(0.35, "rgba(255,255,255,0.12)");
-    spec.addColorStop(1, "rgba(255,255,255,0)");
-    ctx.fillStyle = spec;
-    ctx.fillRect(c - R, c - R, R * 2, R * 2);
-    ctx.restore();
-
-    // rim — thin glass edge, catching the state colour
-    ctx.strokeStyle = "rgba(255,255,255,0.2)";
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.arc(c, c, R - 0.5, 0, Math.PI * 2); ctx.stroke();
-    ctx.strokeStyle = rgba(cur.accent, 0.55 + 0.3 * hover);
-    ctx.lineWidth = 1.4;
-    ctx.beginPath(); ctx.arc(c, c, R + 1, Math.PI * 0.15, Math.PI * 0.85); ctx.stroke();
 
     // she said something while you were away: an ember mark that keeps pinging
     if (status.unread) {
-      const dx = c + R * 0.78, dy = c - R * 0.78, dr = Math.max(4, W * 0.05);
+      const dx = c + R * 1.25, dy = c - R * 1.25, dr = Math.max(4, W * 0.05);
       const ping = reduce ? 0 : (t * 0.9) % 1;
       ctx.strokeStyle = rgba(EMBER, 0.7 * (1 - ping));
       ctx.lineWidth = 1.5;

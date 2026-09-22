@@ -12,9 +12,8 @@ import { persist } from "zustand/middleware";
 // ============================================================================
 
 export type DomainSection =
-  | "dashboard" | "projects" | "planning" | "research" | "tasks" | "graph" | "code"
-  | "review" | "git" | "github" | "build" | "preview" | "documents" | "notes"
-  | "agents" | "terminal" | "history" | "settings";
+  | "dashboard" | "sources" | "projects" | "code" | "git" | "tasks" | "notes"
+  | "terminal" | "settings";
 
 export type ProjectStatus = "idea" | "progress" | "paused" | "completed";
 
@@ -149,23 +148,39 @@ export interface DomainLayout {
   density: "cosy" | "normal" | "compact";
   radius: number;          // px, panel corner rounding
   glass: number;           // 0..100 backdrop blur strength
-  background: "video" | "gradient" | "flat";
+  /** The Domain is a workspace, not a view of space: it is a flat surface by
+   *  default so the code on it is the only thing competing for your eye. */
+  background: "flat" | "gradient";
   accent: string;
   showChat: boolean;
   showHeader: boolean;
 }
 
 export const ALL_SECTIONS: DomainSection[] = [
-  "dashboard", "projects", "planning", "research", "tasks", "graph",
-  "code", "git", "github", "build", "preview", "review", "terminal",
-  "documents", "notes", "agents", "history", "settings",
+  "dashboard", "sources", "projects", "code", "git", "tasks", "notes",
+  "terminal", "settings",
 ];
 
 /** Sections that existed in older builds, and where they went. Persisted
  *  layouts and the remembered section are rewritten through this on load —
- *  without it, a saved nav order silently loses the renamed entry. */
+ *  without it, a saved nav order silently loses the renamed entry.
+ *
+ *  The 2026 pass cut eighteen entries to nine. Half of them were panels of
+ *  invented data, and the rest were one real feature each, split across two
+ *  places: Build, Preview and Review are all "do something to the code you
+ *  have open", which is what Code is for now that it can be prompted. */
 const SECTION_ALIASES: Record<string, DomainSection> = {
-  brainstorm: "research",   // Research absorbed it: chooser + discussion in one
+  brainstorm: "projects",   // Research absorbed it, then Projects absorbed Research
+  research: "projects",
+  planning: "tasks",
+  graph: "projects",
+  history: "projects",
+  review: "code",
+  build: "terminal",
+  preview: "terminal",
+  agents: "dashboard",      // it never showed anything real
+  documents: "sources",     // documents are a source you connect
+  github: "sources",        // ditto: the repo list lives with the link now
 };
 
 export const migrateSection = (s: unknown): DomainSection | null => {
@@ -175,23 +190,14 @@ export const migrateSection = (s: unknown): DomainSection | null => {
 };
 
 export const SECTION_META: Record<DomainSection, { icon: string; label: string }> = {
-  dashboard: { icon: "◈", label: "Dashboard" },
+  dashboard: { icon: "◈", label: "Overview" },
+  sources: { icon: "◧", label: "Sources" },
   projects: { icon: "▣", label: "Projects" },
-  planning: { icon: "◫", label: "Planning" },
-  research: { icon: "✧", label: "Research" },
-  tasks: { icon: "☑", label: "Tasks" },
-  graph: { icon: "◉", label: "Knowledge Graph" },
   code: { icon: "⌥", label: "Code" },
   git: { icon: "⑂", label: "Git" },
-  github: { icon: "◧", label: "GitHub" },
-  build: { icon: "⚙", label: "Build" },
-  preview: { icon: "▢", label: "Live Preview" },
-  review: { icon: "⇄", label: "Code Review" },
-  documents: { icon: "≡", label: "Documentation" },
+  tasks: { icon: "☑", label: "Tasks" },
   notes: { icon: "✎", label: "Notes" },
-  agents: { icon: "✦", label: "AI Agents" },
   terminal: { icon: "❯", label: "Terminal" },
-  history: { icon: "↺", label: "History" },
   settings: { icon: "⚙", label: "Settings" },
 };
 
@@ -210,7 +216,7 @@ export const DEFAULT_LAYOUT: DomainLayout = {
   density: "normal",
   radius: 18,
   glass: 22,
-  background: "video",
+  background: "flat",
   accent: "#8b5cff",
   showChat: true,
   showHeader: true,

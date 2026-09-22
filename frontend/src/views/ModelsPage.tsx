@@ -66,13 +66,12 @@ export default function ModelsPage({ v3Events, onGoHome, activeModelId = null }:
   return (
     <PageShell
       title="Models"
-      tagline="Each model is a planet with its own nature — routing is gravity."
       storeKey="aura.page.models"
       tabs={[
         { id: "specs", label: "Specifications", body: <ModelSpecs activeModelId={activeModelId} /> },
-        { id: "planets", label: "Planet Management", body: <ModelsView /> },
+        { id: "planets", label: "Planet management", body: <ModelsView /> },
         { id: "installed", label: "Installed", body: <InstalledView /> },
-        { id: "orbits", label: "Orbit Editor", body: <OrbitEditorPane onGoHome={onGoHome} /> },
+        { id: "orbits", label: "Orbit editor", body: <OrbitEditorPane onGoHome={onGoHome} /> },
         { id: "performance", label: "Performance", body: <IntelligenceView events={v3Events} /> },
         { id: "skills", label: "Skills", body: <SkillsView /> },
       ]}

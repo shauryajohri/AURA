@@ -2,16 +2,24 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react"
 import { useAuraSocket } from "./hooks/useAuraSocket";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 import { useSettingsStore } from "./stores/settingsStore";
+import { useSavedStore } from "./stores/savedStore";
+import { useRosterStore } from "./stores/rosterStore";
+import { useSkinStore } from "./stores/skinStore";
+import { useBootStore } from "./stores/bootStore";
+import { usePrefs } from "./stores/prefsStore";
+import { emitCore } from "./lib/coreBus";
+import { sources } from "./systemApi";
+import { sfx } from "./lib/sfx";
+import type { SavedItem } from "./types";
 import Sidebar from "./components/Sidebar";
-import TopBar from "./components/TopBar";
 import Stage from "./components/Stage";
 import ChatDock from "./components/ChatDock";
-import HomeStatusCard from "./components/HomeStatusCard";
-import CosmicBackground from "./components/CosmicBackground";
-import UniverseBackground from "./components/UniverseBackground";
-import ParticleField from "./components/ParticleField";
-import CursorLens from "./components/CursorLens";
-import PortalTransition from "./components/Domain/PortalTransition";
+import HomeGreeting from "./components/HomeGreeting";
+import { StageTools, WindowControls } from "./components/Chrome";
+import SpaceBackground from "./components/SpaceBackground";
+import AuraCursor from "./components/AuraCursor";
+import AuraOrb from "./components/AuraOrb";
+import BootSequence from "./components/BootSequence";
 
 // Pages are code-split: Home boots instantly and the heavy panels (Domain's
 // editor, the settings overlay, the memory/task views) only download when you
@@ -23,25 +31,27 @@ const ModelsPage = lazy(() => import("./views/ModelsPage"));
 const SettingsView = lazy(() => import("./views/SettingsView"));
 const LabsPage = lazy(() => import("./views/LabsPage"));
 const ChatsPage = lazy(() => import("./views/ChatsPage"));
+const SavedInfoPage = lazy(() => import("./views/SavedInfoPage"));
+const PlanetsPage = lazy(() => import("./views/PlanetsPage"));
+const UpgradePage = lazy(() => import("./views/UpgradePage"));
 
-/** Shown for the instant a lazy page is fetched — a calm pulse, never a jolt. */
+/** Shown for the instant a lazy page is fetched — the orb, breathing. */
 function PageLoading() {
   return (
     <div className="pageloading">
-      <span className="pageloading__orb" />
-      <span className="pageloading__text">opening…</span>
+      <AuraOrb size={40} />
+      <span className="pageloading__text">Opening</span>
     </div>
   );
 }
 
 /**
- * AURA OS — one fixed shell, no scroll journey.
+ * AURA — one fixed shell around a black hole.
  *
- * Home is the permanent landing page: the core at the center, the chat dock
- * at the bottom, one small status card. The glass sidebar opens every other
- * page with a crossfade, and "Aura Domain" crosses the portal into the
- * dedicated coding workspace. The old second "Village" screen is gone — what
- * lived there (tasks, links vault, memory, settings) lives in the pages now.
+ * Home is the permanent landing page, split in two: the sky, where the core
+ * and its planets live and never get pushed around, and the conversation pane
+ * on the right. Every other page opens on a sheet laid over the sky, and
+ * "Aura Domain" crosses the portal into the coding workspace.
  */
 
 // Old localStorage view ids → the page that now owns that feature.
@@ -50,71 +60,152 @@ const LEGACY: Record<string, string> = {
   skills: "models",
   analytics: "models",
 };
-const PAGES = ["home", "chats", "memory", "tasks", "models", "settings", "labs"];
+const PAGES = ["home", "chats", "saved", "memory", "tasks", "models", "planets", "settings", "labs", "upgrade"];
 
 export default function App() {
   const { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, activity, send,
           loadTurns, clearTurns } = useAuraSocket();
-  const [collapsed, setCollapsed] = useLocalStorage<boolean>("aura.sidebarMin", false);
+  const [collapsed, setCollapsed] = useLocalStorage<boolean>("aura.sidebarMin", true);
   const [rawView, setView] = useLocalStorage<string>("aura.view", "home");
   const view = PAGES.includes(rawView) ? rawView : LEGACY[rawView] ?? "home";
+  const bootPhase = useBootStore((s) => s.phase);
+  const customCursor = usePrefs((s) => s.cursor);
+  // The system cursor is hidden only while AURA's own cursor is drawn.
+  useEffect(() => {
+    document.documentElement.classList.toggle("aura-cursor", customCursor);
+  }, [customCursor]);
 
-  // Background video health. A failure swaps in the CSS starfield, but a
-  // transient decoder hiccup shouldn't cost the universe until restart —
-  // retry with backoff before giving up.
-  const [videoOk, setVideoOk] = useState(true);
-  const videoRetriesRef = useRef(0);
-  const handleVideoFail = useCallback(() => {
-    setVideoOk(false);
-    if (videoRetriesRef.current >= 2) return;
-    const delay = 15000 * (videoRetriesRef.current + 1);
-    videoRetriesRef.current += 1;
-    setTimeout(() => setVideoOk(true), delay);
+  // The startup plays on Home — that's where the black hole lives.
+  useEffect(() => {
+    if (bootPhase === "intro" && view !== "home") setView("home");
+  }, [bootPhase]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The floating orb (desktop app) glows with whatever AURA is doing.
+  useEffect(() => { window.aura?.orbState?.(auraState); }, [auraState]);
+  // …and appears whenever this page can't be seen. Chromium reports real
+  // occlusion on Windows, so "another window is on top of AURA" lands here
+  // even when the OS focus events don't say so.
+  useEffect(() => {
+    const report = () => window.aura?.orbVisible?.(document.visibilityState === "visible");
+    report();
+    document.addEventListener("visibilitychange", report);
+    return () => document.removeEventListener("visibilitychange", report);
   }, []);
 
-  // Pull saved appearance/voice settings from the brain once at startup and
-  // push them into the visual stores (core, planets, background).
+  // Pull saved appearance/voice settings from the brain once at startup.
   const loadSettings = useSettingsStore((s) => s.load);
   useEffect(() => { loadSettings(); }, [loadSettings]);
 
+  // Saved Info and installed planets: loaded once here, then kept live by the
+  // socket's "saved" / "planets" frames.
+  const loadSaved = useSavedStore((s) => s.load);
+  const loadRoster = useRosterStore((s) => s.load);
+  useEffect(() => { void loadSaved(); void loadRoster(); }, [loadSaved, loadRoster]);
+  // The brain may boot after the window — retry the roster when it connects.
+  useEffect(() => { if (status === "open") void loadRoster(); }, [status, loadRoster]);
+
+  // Everything you've connected — your GitHub, your document folders — is
+  // pulled fresh the moment AURA can reach the brain. The brain also syncs on
+  // its own startup; this covers the other order, where the window was already
+  // open and the brain came up second.
+  const syncedRef = useRef(false);
+  useEffect(() => {
+    if (status !== "open" || syncedRef.current) return;
+    syncedRef.current = true;
+    void sources.syncAll().catch(() => { syncedRef.current = false; });
+  }, [status]);
+
+  // A reply arriving sends a ring of light out of the core.
+  const lastAuraRef = useRef<{ id: string | null; n: number }>({ id: null, n: 0 });
+  useEffect(() => {
+    const last = turns[turns.length - 1];
+    const prev = lastAuraRef.current;
+    if (last && last.role === "aura" && last.id !== prev.id && turns.length - prev.n <= 1) {
+      emitCore({ kind: "pulse" });
+      sfx.chime();
+    }
+    lastAuraRef.current = { id: last?.role === "aura" ? last.id : prev.id, n: turns.length };
+  }, [turns]);
+
+  // Clicking a planet in orbit opens it on the Planets page.
+  const setFocus = useSkinStore((s) => s.setFocus);
+  useEffect(() => {
+    const open = (e: Event) => {
+      setFocus((e as CustomEvent<string>).detail);
+      setView("planets");
+    };
+    window.addEventListener("aura:open-planet", open);
+    return () => window.removeEventListener("aura:open-planet", open);
+  }, [setFocus, setView]);
+
   // ---- AURA Domain: the workspace beyond the portal -----------------------
   const [domainOpen, setDomainOpen] = useState(false);
-  const [portal, setPortal] = useState<null | "in" | "out">(null);
-  const enterDomain = useCallback(() => setPortal("in"), []);
-  const exitDomain = useCallback(() => setPortal("out"), []);
-  const portalDone = useCallback(() => setPortal(null), []);
+  // It opens as an iris out of the black hole and closes back into it. The
+  // centre is measured when you press the button, so it follows the core
+  // wherever it sits; from a page without the sky it opens from the middle.
+  const [domainClosing, setDomainClosing] = useState(false);
+  const [irisAt, setIrisAt] = useState("50% 50%");
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const enterDomain = useCallback(() => {
+    const sky = document.querySelector(".sky")?.getBoundingClientRect();
+    setIrisAt(sky ? `${Math.round(sky.left + sky.width / 2)}px ${Math.round(sky.top + sky.height / 2)}px` : "50% 50%");
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    setDomainClosing(false);
+    setDomainOpen(true);
+  }, []);
+  // A timer, not animationend: a hidden or minimized window never delivers
+  // that event, and the Domain would stay mounted over Home.
+  const exitDomain = useCallback(() => {
+    setDomainClosing(true);
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => {
+      setDomainOpen(false);
+      setDomainClosing(false);
+    }, 430);
+  }, []);
 
   const goHome = useCallback(() => setView("home"), [setView]);
+
+  // Saved Info → "Ask AURA about it": back to Home, where the answer streams
+  // into the dock (and is spoken, if voice is on).
+  const askAbout = useCallback((item: SavedItem) => {
+    setView("home");
+    send(`Tell me about “${item.title}” from my Saved Info.`, {
+      attachments: [{ id: item.id, name: item.title, kind: item.kind }],
+      intent: "EXPLAIN",
+    });
+  }, [setView, send]);
 
   const renderPage = () => {
     switch (view) {
       case "chats":
         // Same socket as the dock — one conversation, two places to see it.
         return <ChatsPage onSend={send} />;
+      case "saved":
+        return <SavedInfoPage onAsk={askAbout} />;
       case "memory":
         return <MemoryPage />;
       case "tasks":
         return <TasksPage questEvent={questEvent} />;
       case "models":
         return <ModelsPage v3Events={v3Events} onGoHome={goHome} activeModelId={activeModelId} />;
+      case "planets":
+        return <PlanetsPage />;
       case "settings":
         return <SettingsView />;
       case "labs":
         return <LabsPage />;
+      case "upgrade":
+        return <UpgradePage />;
       default:
         return null;
     }
   };
 
   return (
-    <div className="os-root">
-      {/* the living universe — always behind everything, never replaced */}
-      {videoOk ? (
-        <UniverseBackground state={auraState} onFail={handleVideoFail} />
-      ) : (
-        <CosmicBackground state={auraState} />
-      )}
-      <ParticleField state={auraState} />
+    <div className="os-root" data-boot={bootPhase}>
+      {/* deep space — always behind everything */}
+      <SpaceBackground state={auraState} />
 
       <Sidebar
         active={view}
@@ -128,18 +219,18 @@ export default function App() {
       <main className="os-main">
         {view === "home" ? (
           <div className="os-home page-fade" key="home">
-            <TopBar mode={mode} />
-            <div className="os-stagewrap">
+            <div className="sky">
               <Stage
                 state={auraState}
                 activeModelId={activeModelId}
                 activity={activity}
                 listening={presence === "working"}
               />
-              <HomeStatusCard status={status} activeModelId={activeModelId} mode={mode} />
+              <StageTools />
             </div>
             <ChatDock status={status} turns={turns} onSend={send} auraState={auraState}
-                      onLoadTurns={loadTurns} onClearTurns={clearTurns} />
+                      onLoadTurns={loadTurns} onClearTurns={clearTurns}
+                      head={<HomeGreeting status={status} mode={mode} />} />
           </div>
         ) : (
           <div className="os-page page-fade" key={view}>
@@ -150,24 +241,20 @@ export default function App() {
 
       {/* ---- The Domain: a different workspace entirely ---- */}
       {domainOpen && (
-        <div className="screen screen--domain">
+        <div
+          className={"screen screen--domain" + (domainClosing ? " screen--closing" : "")}
+          style={{ ["--iris-at" as string]: irisAt }}
+        >
           <Suspense fallback={<PageLoading />}>
-            <DomainScreen onExit={exitDomain} />
+            <DomainScreen onExit={exitDomain} status={status} turns={turns} send={send} />
           </Suspense>
         </div>
       )}
 
-      {/* ---- Portal overlay: crossing the threshold ---- */}
-      {portal && (
-        <PortalTransition
-          direction={portal}
-          onMid={() => setDomainOpen(portal === "in")}
-          onDone={portalDone}
-        />
-      )}
 
-      {/* the pointer is a tiny black hole — lives above everything */}
-      <CursorLens />
+      {!domainOpen && <WindowControls />}
+      <BootSequence />
+      {customCursor && <AuraCursor />}
     </div>
   );
 }

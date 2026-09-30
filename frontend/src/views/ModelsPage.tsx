@@ -5,7 +5,8 @@ import SkillsView from "./SkillsView";
 import IntelligenceView from "./IntelligenceView";
 import { usePlanetStore } from "../stores/planetStore";
 import { useCoreStore } from "../stores/coreStore";
-import { MODELS } from "../data/models";
+import { useRoster } from "../stores/rosterStore";
+import InstalledView from "./InstalledView";
 import type { V3Event } from "../types";
 
 /**
@@ -18,11 +19,12 @@ import type { V3Event } from "../types";
 function OrbitEditorPane({ onGoHome }: { onGoHome: () => void }) {
   const startPlanets = usePlanetStore((s) => s.startEdit);
   const startCore = useCoreStore((s) => s.startEdit);
+  const roster = useRoster();
 
   return (
     <div className="orbitpane">
       <div className="orbitpane__roster">
-        {MODELS.map((m) => (
+        {roster.map((m) => (
           <div key={m.id} className="orbitpane__planet">
             <span className="orbitpane__dot" style={{ background: m.color }} />
             <span className="orbitpane__name">{m.name}</span>
@@ -64,12 +66,12 @@ export default function ModelsPage({ v3Events, onGoHome, activeModelId = null }:
   return (
     <PageShell
       title="Models"
-      tagline="Each model is a planet with its own nature — routing is gravity."
       storeKey="aura.page.models"
       tabs={[
         { id: "specs", label: "Specifications", body: <ModelSpecs activeModelId={activeModelId} /> },
-        { id: "planets", label: "Planet Management", body: <ModelsView /> },
-        { id: "orbits", label: "Orbit Editor", body: <OrbitEditorPane onGoHome={onGoHome} /> },
+        { id: "planets", label: "Planet management", body: <ModelsView /> },
+        { id: "installed", label: "Installed", body: <InstalledView /> },
+        { id: "orbits", label: "Orbit editor", body: <OrbitEditorPane onGoHome={onGoHome} /> },
         { id: "performance", label: "Performance", body: <IntelligenceView events={v3Events} /> },
         { id: "skills", label: "Skills", body: <SkillsView /> },
       ]}

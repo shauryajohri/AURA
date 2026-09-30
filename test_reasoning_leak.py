@@ -453,6 +453,51 @@ check(
     == "We know the loop terminates because n shrinks each pass.",
 )
 
+print("\n[nature and web-demo echo, 2026-09-13]")
+# nvidia/nemotron in the web demo, Savage nature: it checked the request against
+# its locks out loud, told itself to "Just answer.", then answered.
+LEAK_NATURE = (
+    "They didn't ask for code. Must follow nature: Savage (roast mode). "
+    "Also we must obey the public web demo constraints: we have no memory etc. "
+    "Just answer. A mutex has one owner, and the thread that locks it has to unlock it. "
+    "A semaphore just counts permits, so any thread can release one."
+)
+out_nature = sanitize_text(LEAK_NATURE, query="mutex or semaphore?")
+check("the nature recital is gone", "nature" not in out_nature.lower())
+check("the demo-constraints recital is gone", "constraints" not in out_nature.lower())
+check("'Just answer.' is gone", "just answer" not in out_nature.lower())
+check("the rules check is gone", "didn't ask" not in out_nature.lower())
+check("the real answer survives", out_nature.startswith("A mutex has one owner"))
+check("the second answer sentence survives", "semaphore just counts permits" in out_nature)
+
+check(
+    "'they didn't ask' as advice mid-reply is left alone",
+    sanitize_text("Ship the smaller version. If they didn't ask for dark mode, skip it.")
+    == "Ship the smaller version. If they didn't ask for dark mode, skip it.",
+)
+check(
+    "'just answer honestly' is ordinary advice",
+    sanitize_text("Just answer honestly and move on.") == "Just answer honestly and move on.",
+)
+check(
+    "'follow the nature trail' is not a rule echo",
+    sanitize_text("Follow the nature trail to the second bridge.")
+    == "Follow the nature trail to the second bridge.",
+)
+
+print("\n[a dropped sentence does not glue its neighbours, 2026-09-14]")
+# Web demo reply: "Nothing you type here is saved; it lives only in this browser
+# session.If you want persistent memory, you'd need the desktop app."
+check(
+    "a space comes back where a sentence was dropped",
+    sanitize_text("Nothing you type here is saved. The user wants reassurance.\n"
+                  "If you want memory, use the desktop app.")
+    == "Nothing you type here is saved. If you want memory, use the desktop app.",
+)
+check("decimals survive the rejoin", sanitize_text("Pi is 3.14 and that's fine.") == "Pi is 3.14 and that's fine.")
+check("file names survive the rejoin",
+      sanitize_text("The router lives in web_api.py for the demo.") == "The router lives in web_api.py for the demo.")
+
 print("\n[leak telemetry names the model]")
 from core.ai_router import note_leak, leak_stats  # noqa: E402
 before = sum(sum(v.values()) for v in leak_stats().values())

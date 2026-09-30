@@ -3,11 +3,13 @@
 // the built dist/index.html AND boots the Python brain itself, so a single
 // double-click brings the whole of AURA to life — and closing the window
 // puts her back to sleep (the brain is killed with the app).
-const { app, BrowserWindow, ipcMain, Menu, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require("electron");
 const { spawn } = require("child_process");
 const path = require("path");
 const net = require("net");
 const fs = require("fs");
+const { createOrb } = require("./orb.cjs");
+const { createHands } = require("./hands.cjs");
 
 const isDev = !app.isPackaged && process.env.AURA_PROD !== "1";
 
@@ -68,6 +70,23 @@ function stopBrain() {
 // ---------------------------------------------------------------------------
 Menu.setApplicationMenu(null); // AURA owns its chrome: no OS titlebar, no menu bar.
 
+let mainWin = null;
+let orb = null;
+let hands = null;
+
+/** Bring AURA's window back to the front — the orb's click. */
+function summonMain() {
+  if (!mainWin || mainWin.isDestroyed()) return;
+  if (mainWin.isMinimized()) mainWin.restore();
+  if (!mainWin.isVisible()) mainWin.show();
+  // Windows may refuse to hand over focus; a moment of always-on-top puts the
+  // window in front regardless, and dropping it again leaves it there.
+  mainWin.setAlwaysOnTop(true);
+  mainWin.moveTop();
+  mainWin.focus();
+  mainWin.setAlwaysOnTop(false);
+}
+
 function createWindow() {
   const iconPath = path.join(__dirname, "aura.ico");
   const win = new BrowserWindow({
@@ -91,8 +110,35 @@ function createWindow() {
   win.once("ready-to-show", () => {
     win.maximize();
     win.show();
+    // Opened behind another window (launched from a script, say)? Then she's
+    // already out of sight and the orb should say so.
+    setTimeout(() => orb?.checkInitialFocus(), 1500);
   });
   win.on("unmaximize", () => win.maximize());
+
+  // The floating orb stands in for AURA whenever she's out of sight:
+  // minimized, or another window came in front of her.
+  mainWin = win;
+  orb = createOrb({
+    getMain: () => mainWin,
+    summon: summonMain,
+    quit: () => app.quit(),
+  });
+  // Her own cursor, on the desktop for as long as AURA runs.
+  hands = createHands({ fromMain: (e) => !!mainWin && e.sender === mainWin.webContents });
+  win.on("minimize", () => orb?.onMainHidden());
+  win.on("hide", () => orb?.onMainHidden());
+  win.on("blur", () => orb?.onMainBlurred());
+  win.on("focus", () => orb?.onMainShown());
+  win.on("restore", () => orb?.onMainShown());
+  // Closing AURA closes the orb too — otherwise it would keep the app alive.
+  win.on("closed", () => {
+    orb?.destroy();
+    orb = null;
+    hands?.destroy();
+    hands = null;
+    mainWin = null;
+  });
 
   // Belt and braces for links. The renderer routes clicks through the preload
   // bridge, but anything that still tries to open a window or navigate the app
@@ -133,6 +179,42 @@ function openExternal(raw) {
 ipcMain.on("win:minimize", (e) => BrowserWindow.fromWebContents(e.sender)?.minimize());
 ipcMain.on("win:close", (e) => BrowserWindow.fromWebContents(e.sender)?.close());
 ipcMain.on("shell:open-external", (_e, url) => openExternal(url));
+ipcMain.on("domain:open-window", (_e, url, title) => openAppWindow(url, title));
+// The Domain's Folder button: Windows' own folder picker. Returns the chosen
+// paths (empty when cancelled); AURA only reads what's picked here.
+ipcMain.handle("dialog:pick-folders", async (e) => {
+  const res = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
+    title: "Give AURA a folder",
+    properties: ["openDirectory", "multiSelections"],
+  });
+  return res.canceled ? [] : res.filePaths;
+});
+
+/** The Domain's Run: a website (or a saved PDF) in a window of its own, like
+ *  an installed app — no address bar, no tabs. It gets no preload and no Node,
+ *  so a page opened here can't reach AURA's bridge. Pop-ups go to the browser. */
+function openAppWindow(raw, title) {
+  let u;
+  try {
+    u = new URL(String(raw));
+  } catch {
+    return;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return;
+  const child = new BrowserWindow({
+    width: 1280,
+    height: 820,
+    title: String(title || u.hostname).slice(0, 120),
+    backgroundColor: "#ffffff",
+    autoHideMenuBar: true,
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  child.webContents.setWindowOpenHandler(({ url }) => {
+    openExternal(url);
+    return { action: "deny" };
+  });
+  child.loadURL(u.href);
+}
 
 app.whenReady().then(() => {
   if (!isDev) startBrainIfNeeded(); // in dev you run server.py yourself

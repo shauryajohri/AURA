@@ -1,0 +1,304 @@
+/* ════════════════════════════════════════════════════════════════════════
+   AURA changing itself: upgrades, reset, connected sources.
+
+   All three answer the same question — what is about to happen to my
+   machine, and can I undo it? — so they share one language: the change
+   stated in a sentence, the evidence one click away, and the irreversible
+   button the last thing you reach.
+   ════════════════════════════════════════════════════════════════════════ */
+
+.btn--danger {
+  background: rgba(255, 122, 138, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(255, 122, 138, 0.4);
+  color: #ffc4cc;
+}
+.btn--danger:hover:not(:disabled) { background: rgba(255, 122, 138, 0.28); }
+.btn:disabled { opacity: 0.4; cursor: default; }
+
+/* ---------- Upgrade: AURA rewriting AURA --------------------------------- */
+.uppage {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: 0 var(--pad-page) 40px;
+  display: flex; flex-direction: column; gap: 18px;
+}
+.uppage__lede { margin: 0; max-width: 62ch; color: var(--haze); font-size: 13.5px; line-height: 1.6; }
+.uppage__ask { display: flex; flex-direction: column; gap: 12px; }
+.uppage__form { display: flex; flex-direction: column; gap: 9px; }
+.uppage__input {
+  width: 100%; resize: vertical; min-height: 78px;
+  padding: 13px 15px; border: 0; border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--photon); font: 400 14px/1.55 var(--font-body);
+  transition: box-shadow 0.2s var(--ease);
+}
+.uppage__input:focus { outline: none; box-shadow: inset 0 0 0 1px var(--horizon); }
+.uppage__input::placeholder { color: var(--haze); }
+.uppage__formrow { display: flex; align-items: center; gap: 12px; }
+.uppage__hint { flex: 1; font-size: 11.5px; color: var(--haze); }
+.uppage__examples { display: flex; flex-wrap: wrap; gap: 7px; }
+.uppage__example {
+  padding: 6px 12px; border: 0; border-radius: 999px;
+  background: rgba(155, 123, 255, 0.1);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--haze); font-size: 12.5px; text-align: left;
+  transition: color 0.18s ease, background 0.18s ease;
+}
+.uppage__example:hover { color: var(--photon); background: rgba(155, 123, 255, 0.22); }
+.uppage__section { display: flex; flex-direction: column; gap: 10px; }
+.uppage__working, .uppage__note, .uppage__empty { margin: 0; font-size: 13px; color: var(--haze); }
+.uppage__working { color: var(--signal); }
+.uppage__err { margin: 0; font-size: 13px; color: var(--danger); }
+
+/* ---------- one proposal ------------------------------------------------- */
+.upcard {
+  display: flex; flex-direction: column; gap: 9px;
+  padding: 14px 16px; border-radius: 16px;
+  background: rgba(255, 255, 255, 0.025);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.upcard--pending { box-shadow: inset 0 0 0 1px rgba(155, 123, 255, 0.35); }
+.upcard--applied { box-shadow: inset 0 0 0 1px rgba(53, 224, 143, 0.28); }
+.upcard--rejected { opacity: 0.68; }
+.upcard__head { display: flex; align-items: flex-start; gap: 10px; }
+.upcard__title {
+  flex: 1; min-width: 0; display: flex; gap: 8px; align-items: flex-start;
+  padding: 0; border: 0; background: none; color: var(--photon);
+  font: 500 14px/1.45 var(--font-body); text-align: left;
+}
+.upcard__caret, .upfile__caret { color: var(--haze); font-size: 11px; line-height: 1.6; }
+.upcard__request { flex: 1; }
+.upcard__status {
+  flex: none; padding: 3px 10px; border-radius: 999px;
+  font-size: 11px; white-space: nowrap;
+}
+.upcard__status--pending { background: rgba(155, 123, 255, 0.2); color: var(--horizon-hi); }
+.upcard__status--applied { background: rgba(53, 224, 143, 0.16); color: #86efb8; }
+.upcard__status--rejected { background: rgba(255, 255, 255, 0.06); color: var(--haze); }
+.upcard__meta {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px;
+  font-size: 11.5px; color: var(--haze);
+}
+.upcard__scope { color: var(--horizon-hi); }
+.upcard__add, .upfile__add { color: #86efb8; }
+.upcard__del, .upfile__del { color: #ff9fae; }
+.upcard__why { margin: 0; font-size: 13px; line-height: 1.55; color: var(--photon); opacity: 0.86; }
+.upcard__body { display: flex; flex-direction: column; gap: 8px; }
+.upcard__loading, .upcard__err { margin: 0; font-size: 12.5px; color: var(--haze); }
+.upcard__err { color: var(--danger); }
+.upcard__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.upfile { border-radius: 12px; background: rgba(0, 0, 0, 0.3); overflow: hidden; }
+.upfile__head {
+  width: 100%; display: flex; align-items: center; gap: 9px;
+  padding: 8px 11px; border: 0; background: none; color: var(--photon);
+  font: 500 12.5px var(--font-body); text-align: left;
+}
+.upfile__head:hover { background: rgba(255, 255, 255, 0.04); }
+.upfile__path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.upfile__tag {
+  padding: 2px 7px; border-radius: 999px; font-size: 10.5px;
+  background: rgba(127, 231, 255, 0.16); color: var(--signal);
+}
+.upfile__counts { display: flex; gap: 7px; font-size: 11.5px; }
+
+.udiff {
+  max-height: 420px; overflow: auto;
+  font: 12px/1.5 ui-monospace, Consolas, monospace;
+  border-top: 1px solid var(--line);
+}
+.udiff__line { padding: 0 11px; white-space: pre-wrap; word-break: break-word; }
+.udiff__line--add { background: rgba(53, 224, 143, 0.1); color: #aef0cd; }
+.udiff__line--del { background: rgba(255, 122, 138, 0.1); color: #ffb9c3; }
+.udiff__hunk { padding: 4px 11px; color: var(--horizon-hi); background: rgba(155, 123, 255, 0.08); }
+.udiff__fold { padding: 3px 11px; color: var(--haze); opacity: 0.6; font-size: 11px; }
+
+/* ---------- Reset -------------------------------------------------------- */
+.resetwrap {
+  position: fixed; inset: 0; z-index: 60;
+  display: grid; place-items: center; padding: 24px;
+  background: rgba(3, 2, 10, 0.72); backdrop-filter: blur(6px);
+  animation: boot-fade 0.2s ease both;
+}
+.resetwrap__card {
+  width: min(560px, 100%); max-height: 86vh; overflow-y: auto;
+  border-radius: 20px; background: var(--glass-strong);
+  box-shadow: inset 0 0 0 1px var(--line-strong), 0 30px 90px rgba(0, 0, 0, 0.6);
+}
+.reset { display: flex; flex-direction: column; gap: 13px; padding: 22px; }
+.reset__title { margin: 0; font: 600 18px var(--font-display); color: var(--photon); }
+.reset__lede { margin: 0; font-size: 13px; line-height: 1.6; color: var(--haze); }
+.reset__backup { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--signal); }
+.reset__backup code { font-size: 11.5px; word-break: break-all; }
+.reset__all {
+  align-self: flex-start; padding: 5px 11px; border: 0; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05); color: var(--haze); font-size: 12px;
+}
+.reset__all:hover { color: var(--photon); }
+.reset__list { display: flex; flex-direction: column; gap: 5px; }
+.reset__opt {
+  display: flex; align-items: flex-start; gap: 11px;
+  padding: 10px 12px; border: 0; border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03); text-align: left;
+  transition: background 0.16s ease, box-shadow 0.16s ease;
+}
+.reset__opt:hover { background: rgba(255, 255, 255, 0.06); }
+.reset__opt--on {
+  background: rgba(255, 122, 138, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(255, 122, 138, 0.35);
+}
+.reset__box {
+  flex: none; width: 17px; height: 17px; margin-top: 1px;
+  display: grid; place-items: center; border-radius: 5px;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  font-size: 11px; color: #ffc4cc;
+}
+.reset__opt--on .reset__box { background: rgba(255, 122, 138, 0.3); }
+.reset__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.reset__name { font-size: 13px; color: var(--photon); }
+.reset__desc { font-size: 11.5px; line-height: 1.5; color: var(--haze); }
+.reset__confirm { display: flex; flex-direction: column; gap: 7px; font-size: 12.5px; color: var(--haze); }
+.reset__confirm b { color: var(--photon); letter-spacing: 0.04em; }
+.reset__input {
+  padding: 9px 12px; border: 0; border-radius: 11px;
+  background: rgba(0, 0, 0, 0.35); box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--photon); font: 500 14px var(--font-body); letter-spacing: 0.08em;
+}
+.reset__input:focus { outline: none; box-shadow: inset 0 0 0 1px rgba(255, 122, 138, 0.6); }
+.reset__err { margin: 0; font-size: 12.5px; color: var(--danger); }
+.reset__actions { display: flex; justify-content: flex-end; gap: 9px; padding-top: 4px; }
+.setview__opt--danger .san-setopt__icon { color: #ffa0ad; }
+
+/* ---------- Sources ------------------------------------------------------ */
+.sources {
+  flex: 1; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 14px; padding-bottom: 30px;
+}
+.sources__add { display: flex; gap: 9px; }
+.sources__input {
+  flex: 1; min-width: 0;
+  padding: 11px 14px; border: 0; border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--photon); font: 400 13.5px var(--font-body);
+}
+.sources__input:focus { outline: none; box-shadow: inset 0 0 0 1px var(--horizon); }
+.sources__input::placeholder { color: var(--haze); }
+.sources__lede { margin: 0; max-width: 68ch; font-size: 12.5px; line-height: 1.6; color: var(--haze); }
+.sources__err { margin: 0; font-size: 12.5px; color: var(--danger); }
+.sources__note { margin: 0; font-size: 12.5px; color: var(--signal); }
+.sources__empty { margin: 0; font-size: 13px; color: var(--haze); }
+.sources__list { display: flex; flex-direction: column; gap: 10px; }
+
+.scard {
+  display: flex; flex-direction: column; gap: 9px;
+  padding: 14px 16px; border-radius: 16px;
+  background: rgba(255, 255, 255, 0.025);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.scard--error { box-shadow: inset 0 0 0 1px rgba(255, 122, 138, 0.3); }
+.scard__head { display: flex; align-items: center; gap: 11px; }
+.scard__icon { flex: none; font-size: 16px; color: var(--horizon-hi); }
+.scard__title {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+  padding: 0; border: 0; background: none; text-align: left;
+}
+.scard__label {
+  font: 500 14px var(--font-body); color: var(--photon);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.scard__url {
+  font-size: 11.5px; color: var(--haze);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.scard__dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--haze); }
+.scard__dot--ok { background: #35e08f; box-shadow: 0 0 8px rgba(53, 224, 143, 0.7); }
+.scard__dot--error { background: var(--danger); }
+.scard__dot--syncing { background: var(--signal); animation: soft-pulse 1.2s ease-in-out infinite; }
+.scard__meta {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px;
+  font-size: 11.5px; color: var(--haze);
+}
+.scard__kind { color: var(--horizon-hi); }
+.scard--error .scard__detail { color: #ff9fae; }
+.scard__row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.scard__roomlab { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--haze); }
+.scard__room {
+  padding: 5px 9px; border: 0; border-radius: 9px;
+  background: rgba(0, 0, 0, 0.4); box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--photon); font: 400 12px var(--font-body);
+}
+.scard__body { display: flex; flex-direction: column; gap: 3px; padding-top: 3px; }
+
+.srepo {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px;
+  padding: 8px 11px; border-radius: 11px; background: rgba(0, 0, 0, 0.26);
+}
+.srepo--local { box-shadow: inset 0 0 0 1px rgba(53, 224, 143, 0.28); }
+.srepo__name { font: 500 12.5px var(--font-body); color: var(--photon); }
+.srepo__lang { font-size: 11px; color: var(--signal); }
+.srepo__private {
+  padding: 1px 6px; border-radius: 999px; font-size: 10px;
+  background: rgba(255, 180, 138, 0.16); color: var(--ember);
+}
+.srepo__desc {
+  flex: 1; min-width: 0; font-size: 11.5px; color: var(--haze);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The open button lands in the same column on every row, whether or not the
+   repo has a description — a ragged right edge makes eight repos look like a
+   list of unrelated things. */
+.srepo__spacer { flex: 1; }
+.srepo__open {
+  flex: none; padding: 4px 11px; border: 0; border-radius: 999px;
+  background: rgba(155, 123, 255, 0.16); color: var(--horizon-hi); font-size: 11.5px;
+  transition: background 0.16s ease;
+}
+.srepo__open:hover:not(:disabled) { background: rgba(155, 123, 255, 0.32); color: var(--photon); }
+.srepo__open:disabled { opacity: 0.5; }
+.sdoc { padding: 6px 11px; border-radius: 10px; background: rgba(0, 0, 0, 0.26); }
+.sdoc__name { font-size: 12px; color: var(--photon); }
+
+/* ---------- Build with AURA: the prompt bar under the editor -------------- */
+.cprompt {
+  flex: none; display: flex; flex-direction: column;
+  border-top: 1px solid var(--line); background: rgba(6, 5, 16, 0.92);
+}
+.cprompt__bar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
+.cprompt__spark { flex: none; color: var(--horizon-hi); font-size: 13px; }
+.cprompt__input {
+  flex: 1; min-width: 0;
+  padding: 7px 11px; border: 0; border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--photon); font: 400 13px var(--font-body);
+}
+.cprompt__input:focus { outline: none; box-shadow: inset 0 0 0 1px var(--horizon); }
+.cprompt__input::placeholder { color: var(--haze); }
+.cprompt__input:disabled { opacity: 0.6; }
+.cprompt__go { height: 30px; padding: 0 14px; font-size: 12.5px; }
+.cprompt__count {
+  flex: none; min-width: 24px; height: 24px; padding: 0 7px;
+  border: 0; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07); color: var(--haze); font-size: 11.5px;
+}
+.cprompt__count--live { background: rgba(155, 123, 255, 0.3); color: var(--photon); }
+.cprompt__close {
+  flex: none; width: 24px; height: 24px; border: 0; border-radius: 8px;
+  background: none; color: var(--haze); font-size: 11px;
+}
+.cprompt__close:hover { color: var(--photon); background: rgba(255, 255, 255, 0.06); }
+.cprompt__panel {
+  max-height: min(52vh, 520px); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 9px;
+  padding: 4px 10px 12px;
+}
+.cprompt__working { margin: 0; font-size: 12.5px; color: var(--signal); }
+.cprompt__note { margin: 0; font-size: 12.5px; color: var(--haze); }
+.cprompt__err { margin: 0; font-size: 12.5px; color: var(--danger); }
+.cprompt__empty { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--haze); }
+.cprompt__history > summary {
+  cursor: pointer; padding: 5px 0; font-size: 12px; color: var(--haze);
+}
+.cprompt__history > summary:hover { color: var(--photon); }
+.cprompt__history[open] { display: flex; flex-direction: column; gap: 8px; }

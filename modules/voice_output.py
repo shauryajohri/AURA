@@ -248,9 +248,57 @@ def render_preview(voice: str, text: str | None = None) -> bytes:
 # chunk render while the current one is still speaking (see speak_chunks).
 
 def _synth(text: str) -> str | None:
-    """Render `text` to a temp mp3 and return its path (None on failure).
-    Safe to run concurrently — each call writes its own file and never
-    touches the mixer."""
+    """Render `text` to a temp audio file and return its path (None on failure).
+    edge-tts first; if it's missing or can't reach Microsoft, the offline
+    Windows voice renders it instead, so AURA still talks. Safe to run
+    concurrently — each call writes its own file and never touches the mixer."""
+    return _synth_edge(text) or _synth_windows(text)
+
+
+def _synth_windows(text: str) -> str | None:
+    """Backup voice: Windows' built-in SAPI speech rendered to a WAV (pygame
+    plays it like the mp3s). Offline and keyless. Picks an English voice of
+    the same gender as the chosen edge-tts voice. None off Windows."""
+    try:
+        import pythoncom
+        import win32com.client
+    except ImportError:
+        return None
+    tmp_path = None
+    pythoncom.CoInitialize()   # _synth runs on worker threads
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
+            tmp_path = f.name
+        voice = win32com.client.Dispatch("SAPI.SpVoice")
+        gender = next((v["gender"] for v in VOICES if v["id"] == resolve_voice()), "female")
+        tokens = voice.GetVoices()
+        for i in range(tokens.Count):
+            token = tokens.Item(i)
+            if (token.GetAttribute("Gender") or "").lower() == gender \
+                    and token.GetAttribute("Language") in ("409", "809"):   # en-US / en-GB
+                voice.Voice = token
+                break
+        stream = win32com.client.Dispatch("SAPI.SpFileStream")
+        stream.Open(tmp_path, 3)   # SSFMCreateForWrite
+        voice.AudioOutputStream = stream
+        voice.Speak(text)
+        stream.Close()
+        print("[AURA TTS] edge-tts unavailable — spoke with the offline Windows voice")
+        return tmp_path
+    except Exception as e:  # noqa: BLE001
+        print(f"[AURA TTS Error] windows voice: {e}")
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        return None
+    finally:
+        pythoncom.CoUninitialize()
+
+
+def _synth_edge(text: str) -> str | None:
+    """edge-tts neural voice → temp mp3 path, or None on failure."""
     if edge_tts is None:
         print("[AURA TTS Error] edge_tts is not installed")
         return None

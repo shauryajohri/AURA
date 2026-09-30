@@ -156,7 +156,48 @@ def _list_rooms(**_) -> str:
         return f"rooms unavailable: {e}"
 
 
+def _saved_info(query: str = "", **_) -> str:
+    """Links, PDFs and files the user shared — summaries and matching text."""
+    try:
+        from core import saved_info
+        return saved_info.tool_lookup(query)
+    except Exception as e:  # noqa: BLE001
+        return f"saved info unavailable: {e}"
+
+
+def _web_search(query: str = "", **_) -> str:
+    """Live web results from the search API the user installed."""
+    query = (query or "").strip()
+    if not query:
+        return "web_search needs a query"
+    try:
+        from core import integrations
+        hits = integrations.web_search(query, n=5)
+    except Exception as e:  # noqa: BLE001
+        return f"web search failed: {e}"
+    if not hits:
+        return "(no results)"
+    return "\n".join(f"- {h['title']} — {h['url']}\n  {h['snippet'][:260]}" for h in hits)
+
+
+def _has_web_search() -> bool:
+    try:
+        from core import integrations
+        return integrations.search_provider() is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
 TOOLS: dict[str, dict] = {
+    "saved_info": {
+        "fn": _saved_info, "args": '{"query": "..."}',
+        "help": "links, PDFs and files the user shared with AURA (Saved Info) — summaries and text",
+    },
+    "web_search": {
+        "fn": _web_search, "args": '{"query": "..."}',
+        "help": "search the live web (current facts, docs, news)",
+        "available": _has_web_search,
+    },
     "repo_state": {
         "fn": _repo_state, "args": "{}",
         "help": "git branch, uncommitted files and recent commits of the AURA codebase",
@@ -176,8 +217,22 @@ TOOLS: dict[str, dict] = {
 }
 
 
+def available() -> dict[str, dict]:
+    """TOOLS minus the ones whose backing service isn't set up (web_search
+    exists only once a search API is installed)."""
+    out = {}
+    for name, spec in TOOLS.items():
+        check = spec.get("available")
+        try:
+            if check is None or check():
+                out[name] = spec
+        except Exception:  # noqa: BLE001
+            pass
+    return out
+
+
 def catalogue() -> str:
-    return "\n".join(f"  {n} {t['args']}  — {t['help']}" for n, t in TOOLS.items())
+    return "\n".join(f"  {n} {t['args']}  — {t['help']}" for n, t in available().items())
 
 
 _CALL_RE = re.compile(r"(?i)^(?:fetch|lookup|tool)\s*:\s*")
@@ -218,9 +273,10 @@ def parse_tool_call(text: str) -> tuple[str, dict] | None:
 
 
 def run_tool(name: str, args: dict) -> str:
-    spec = TOOLS.get(name)
+    tools = available()
+    spec = tools.get(name)
     if not spec:
-        return f"no such tool '{name}'. available: {', '.join(TOOLS)}"
+        return f"no such tool '{name}'. available: {', '.join(tools)}"
     clean = {}
     for k, v in (args or {}).items():
         clean[k] = v[:MAX_ARG_LEN] if isinstance(v, str) else v

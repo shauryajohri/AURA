@@ -1,5 +1,8 @@
 // REST client for the AURA bridge (memory/store.py + model_lock).
-const BASE = "http://127.0.0.1:8760";
+import type { InstallProposal, InstallResult, Job, LibraryRoot, SavedItem } from "./types";
+import type { ModelNode } from "./data/models";
+
+export const BASE = "http://127.0.0.1:8760";
 
 export interface Task {
   id: number;
@@ -39,6 +42,11 @@ export interface ModelInfo {
   id: string;
   name: string;
   locked: boolean;
+  /** Backend model id, e.g. "cohere/north-mini-code:free". */
+  model_id?: string;
+  provider?: string;
+  /** Every job this model is in the chain for; rank 1 is tried first. */
+  jobs?: { job: string; rank: number }[];
 }
 
 export interface Fact {
@@ -127,7 +135,7 @@ export interface ChatMessage {
 
 /** One voice AURA can speak with. Mirrors modules/voice_output.VOICES. */
 export interface Voice {
-  /** The edge-tts short name, e.g. "en-US-AvaMultilingualNeural". */
+  /** The edge-tts short name, e.g. "en-US-AvaNeural". */
   id: string;
   /** Short human name shown in the picker, e.g. "Ava". */
   name: string;
@@ -255,6 +263,48 @@ export interface ErrorClassification {
   serious: boolean;
 }
 
+/** An installed integration as the Models page lists it. */
+export interface Integration {
+  id: number;
+  uid: string;
+  provider: string;
+  label: string;
+  kind: "llm" | "search";
+  base_url: string;
+  key_masked: string;
+  key_from: string;
+  status: "installed" | "pending";
+  position: "first" | "backup";
+  created_at: string | null;
+  installed_at: string | null;
+  about: string;
+  cost: string;
+  models: InstalledModel[];
+  search_jobs: string[];
+  /** Pending installs carry their card so they can be finished later. */
+  proposal: InstallProposal | null;
+}
+
+export interface InstalledModel {
+  row_id: number;
+  id: string;
+  planet_id: string;
+  wire: string;
+  name: string;
+  jobs: Job[];
+  position: "first" | "backup";
+  vision: boolean;
+  cost: string;
+  context: string;
+  color: string;
+  role: string;
+  best_for: Job[];
+  status: "ok" | "failed";
+  error: string;
+  latency_ms: number;
+  label: string;
+}
+
 async function j<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(BASE + path, {
     headers: { "Content-Type": "application/json" },
@@ -350,6 +400,13 @@ export const api = {
 
   // Quests — the daily board AURA verifies from the screen
   getQuests: () => j<QuestBoard>("/api/quests"),
+  /** Promises Donna is holding you to (core/commitments). Times are epoch seconds. */
+  getCommitments: () =>
+    j<{ items: { id: number; title: string; when: string; due: number; created: number; nudges: number }[] }>(
+      "/api/commitments",
+    ).then((r) => r.items),
+  closeCommitment: (id: number, status: "done" | "dropped") =>
+    j(`/api/commitments/${id}`, { method: "POST", body: JSON.stringify({ status }) }),
   addQuest: (body: { text?: string; title?: string; target_minutes?: number; preset?: string; keywords?: string; project_path?: string }) =>
     j<{ ok: boolean; id?: number }>("/api/quests", { method: "POST", body: JSON.stringify(body) }),
   updateQuest: (id: number, patch: Partial<Pick<Quest, "title" | "target_minutes" | "keywords" | "preset" | "color" | "sort_order" | "project_path" | "kind" | "target_count">> & { active?: number }) =>
@@ -488,6 +545,77 @@ export const api = {
     }
     return URL.createObjectURL(await res.blob());
   },
+
+  // Saved Info — links, PDFs and files AURA read (core/saved_info)
+  getSaved: () => j<{ items: SavedItem[] }>("/api/saved").then((r) => r.items),
+  getSavedItem: (id: number) =>
+    j<{ ok: boolean; item: SavedItem | null }>(`/api/saved/${id}`).then((r) => r.item),
+  saveLink: (url: string) =>
+    j<{ ok: boolean; item?: SavedItem; error?: string }>("/api/saved", {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    }),
+  /** `data` is bare base64 (no data: prefix). Returns at once — the scan
+   *  finishes in the background and arrives as a "saved" socket frame. */
+  uploadSaved: (name: string, data: string, mime: string, origin = "upload") =>
+    j<{ ok: boolean; item?: SavedItem; error?: string }>("/api/saved/upload", {
+      method: "POST",
+      body: JSON.stringify({ name, data, mime, origin }),
+    }),
+  rescanSaved: (id: number) =>
+    j<{ ok: boolean; item?: SavedItem }>(`/api/saved/${id}/rescan`, { method: "POST" }),
+  updateSaved: (id: number, patch: { title?: string; pinned?: boolean; tags?: string[] }) =>
+    j<{ ok: boolean; item: SavedItem | null }>(`/api/saved/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  deleteSaved: (id: number) => j<{ ok: boolean }>(`/api/saved/${id}`, { method: "DELETE" }),
+  markSavedOpened: (id: number) => j(`/api/saved/${id}/opened`, { method: "POST" }),
+  savedFileUrl: (id: number) => `${BASE}/api/saved/${id}/file`,
+  // Domain — skills and apps, and Run for anything saved (core/domain_library)
+  addDomainItem: (kind: "skill" | "app", title: string, content: string) =>
+    j<{ ok: boolean; item?: SavedItem; error?: string }>("/api/domain/items", {
+      method: "POST",
+      body: JSON.stringify({ kind, title, content }),
+    }),
+  // Folders and repos AURA can read (core/library)
+  library: () => j<{ ok: boolean; roots: LibraryRoot[] }>("/api/library"),
+  addLibrary: (path: string) =>
+    j<{ ok: boolean; root?: LibraryRoot; already?: boolean; not_folder?: boolean; error?: string }>(
+      "/api/library", { method: "POST", body: JSON.stringify({ path }) }),
+  removeLibrary: (id: number) => j<{ ok: boolean }>(`/api/library/${id}`, { method: "DELETE" }),
+  openLibrary: (id: number) =>
+    j<{ ok: boolean; error?: string }>(`/api/library/${id}/open`, { method: "POST" }),
+  runDomainItem: (id: number) =>
+    j<{ ok: boolean; reply: string; chat?: string }>(`/api/domain/items/${id}/run`, { method: "POST" }),
+
+  // Planet installs (core/integrations)
+  getIntegrations: () =>
+    j<{ integrations: Integration[]; planets: ModelNode[]; jobs: Job[] }>("/api/integrations"),
+  getPlanets: () => j<{ planets: ModelNode[] }>("/api/planets").then((r) => r.planets),
+  identifyInstall: (uid: string, body: { provider?: string; key?: string; base_url?: string }) =>
+    j<{ ok: boolean; proposal?: InstallProposal; error?: string }>(
+      `/api/integrations/proposals/${uid}/identify`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  confirmInstall: (uid: string, body: { models: { id: string; jobs: Job[] }[]; position: string; search_jobs?: string[] }) =>
+    j<{ ok: boolean; proposal?: InstallProposal; results?: InstallResult[]; message?: string; error?: string }>(
+      `/api/integrations/proposals/${uid}/confirm`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  dismissInstall: (uid: string) =>
+    j<{ ok: boolean }>(`/api/integrations/proposals/${uid}/dismiss`, { method: "POST" }),
+  uninstall: (id: number) => j<{ ok: boolean }>(`/api/integrations/${id}`, { method: "DELETE" }),
+  retestIntegration: (id: number) =>
+    j<{ ok: boolean; results: { name: string; ok: boolean; why: string; ms: number }[] }>(
+      `/api/integrations/${id}/test`, { method: "POST" }),
+  updatePlanet: (rowId: number, patch: { jobs?: Job[]; position?: "first" | "backup" }) =>
+    j<{ ok: boolean; error?: string }>(`/api/integrations/models/${rowId}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  removePlanet: (rowId: number) =>
+    j<{ ok: boolean }>(`/api/integrations/models/${rowId}`, { method: "DELETE" }),
 
   // App settings
   getSettings: () => j<{ settings: Settings }>("/api/settings").then((r) => r.settings),

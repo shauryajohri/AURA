@@ -4,7 +4,7 @@ import { create } from "zustand";
  * Notification center — a persistent history of what happened while you
  * weren't looking: routing decisions, memory writes, quest completions,
  * serious V3 events, task activity. Fed by useAuraSocket (which can call
- * getState().add from outside React) and rendered by the bell in the TopBar.
+ * getState().add from outside React) and rendered by the bell in the rail.
  */
 
 export interface Notice {

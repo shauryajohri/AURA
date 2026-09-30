@@ -34,6 +34,60 @@ const PRESSURE_COPY: Record<string, { label: string; cls: string }> = {
   unknown: { label: "—", cls: "" },
 };
 
+type Promise_ = Awaited<ReturnType<typeof api.getCommitments>>[number];
+
+/** Things you told Donna you'd do and said "yes, hold me to it". Renders
+ *  nothing when there are none — they're made in chat, not here. */
+function Promises() {
+  const [items, setItems] = useState<Promise_[]>([]);
+  const load = useCallback(() => {
+    api.getCommitments().then(setItems).catch(() => {});
+  }, []);
+  useEffect(() => {
+    load();
+    const t = setInterval(load, POLL_MS);
+    return () => clearInterval(t);
+  }, [load]);
+
+  if (items.length === 0) return null;
+  const close = (id: number, status: "done" | "dropped") =>
+    api.closeCommitment(id, status).then(load).catch(() => {});
+  const now = Date.now() / 1000;
+
+  return (
+    <>
+      <h3 className="intel-sec__title">Promises</h3>
+      <ul className="qlist">
+        {items.map((c) => {
+          const due = new Date(c.due * 1000);
+          const overdue = c.due < now;
+          return (
+            <li key={c.id} className="qcard">
+              <div className="qcard__top">
+                <span className="qcard__title">{c.title}</span>
+                <span className={overdue ? "qcard__over qcard__over--late" : "qcard__time"}>
+                  {overdue
+                    ? "overdue"
+                    : `due ${due.toLocaleDateString(undefined, { weekday: "short" })} ${due.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
+                </span>
+              </div>
+              <div className="qcard__foot">
+                <span className="qcard__meta">
+                  you said "{c.when}"{c.nudges > 0 && ` · reminded ${c.nudges}×`}
+                </span>
+                <span className="qcard__actions">
+                  <button onClick={() => close(c.id, "done")}>Done</button>
+                  <button onClick={() => close(c.id, "dropped")}>Let it go</button>
+                </span>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </>
+  );
+}
+
 interface Props {
   /** Latest tracker event from the websocket — triggers an immediate refresh. */
   event?: QuestEvent | null;
@@ -225,6 +279,7 @@ export default function QuestsView({ event = null }: Props) {
 
       {!loading && !offline && (
         <>
+          <Promises />
           {/* ── Pressure banner: does the rest of the day still fit? ──── */}
           {/* Nothing to be under pressure ABOUT when every quest is untimed. */}
           {pressure && timed.length > 0 && (

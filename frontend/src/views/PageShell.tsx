@@ -2,9 +2,9 @@ import { ReactNode, useState } from "react";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 
 /**
- * PageShell — every sidebar destination opens as one of these: a breathable
- * glass page with a title, soft sub-tabs and a crossfading body. The tab bar
- * is the only chrome; content gets all the room.
+ * PageShell — every sidebar destination opens as one of these: a title with
+ * its tabs on the same line, then a crossfading body. That one line is the
+ * only chrome; content gets all the room.
  */
 
 export interface PageTab {
@@ -15,13 +15,12 @@ export interface PageTab {
 
 interface Props {
   title: string;
-  tagline?: string;
   tabs: PageTab[];
   /** localStorage key so each page remembers its last tab */
   storeKey: string;
 }
 
-export default function PageShell({ title, tagline, tabs, storeKey }: Props) {
+export default function PageShell({ title, tabs, storeKey }: Props) {
   const [tab, setTab] = useLocalStorage<string>(storeKey, tabs[0]?.id ?? "");
   const activeId = tabs.some((t) => t.id === tab) ? tab : tabs[0]?.id;
   const active = tabs.find((t) => t.id === activeId);
@@ -30,24 +29,24 @@ export default function PageShell({ title, tagline, tabs, storeKey }: Props) {
 
   return (
     <div className="pageshell">
-      <header className="pageshell__head">
+      <header className="pagehead">
         <h2>{title}</h2>
-        {tagline && <p>{tagline}</p>}
+        {tabs.length > 1 && (
+          <nav className="pageshell__tabs" role="tablist">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                role="tab"
+                aria-selected={t.id === activeId}
+                className={"pageshell__tab" + (t.id === activeId ? " pageshell__tab--on" : "")}
+                onClick={() => { setTab(t.id); force((n) => n + 1); }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </nav>
+        )}
       </header>
-
-      {tabs.length > 1 && (
-        <nav className="pageshell__tabs">
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              className={"pageshell__tab" + (t.id === activeId ? " pageshell__tab--on" : "")}
-              onClick={() => { setTab(t.id); force((n) => n + 1); }}
-            >
-              {t.label}
-            </button>
-          ))}
-        </nav>
-      )}
 
       <div className="pageshell__body" key={activeId}>
         {active?.body}

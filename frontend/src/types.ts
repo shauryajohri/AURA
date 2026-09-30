@@ -51,25 +51,54 @@ export interface ActivityEvent {
 }
 
 // Server -> Client
+export type HandsEvent =
+  | { kind: "move"; x: number; y: number; ms: number }
+  | { kind: "click"; x: number; y: number }
+  | { kind: "type"; text: string; ms: number }
+  | { kind: "press"; key: "win" | "enter" | "esc" | "" }
+  | { kind: "dodge" }
+  | { kind: "busy"; on: boolean; label?: string }
+  | { kind: "home" };
+
 export type ServerMessage =
   | { type: "state"; payload: { state: AuraState } }
   | { type: "chunk"; payload: { text: string } }
   | { type: "done"; payload: { text: string; model?: string } }
+  // A spoken line AURA decided wasn't meant for her (core/aura_core).
+  | { type: "quiet"; payload: { text: string; reason: string } }
   | { type: "push"; payload: { text: string; source: string } }
   | { type: "presence"; payload: { state: Presence } }
   | { type: "mode"; payload: { mode: string } }
   | { type: "v3"; payload: V3Event }
   | { type: "quest"; payload: QuestEvent }
   | { type: "activity"; payload: ActivityEvent }
+  // A pasted key / "install <link>" came back as an install card.
+  | { type: "install"; payload: { text: string; proposal: InstallProposal | null; masked: string } }
+  // Saved Info changed (a scan finished, an item was deleted).
+  | { type: "saved"; payload: { kind: "update" | "delete" | "open"; item: SavedItem | null; id: number; url?: string } }
+  // A planet was installed, re-jobbed or removed.
+  | { type: "planets"; payload: { kind: string } }
+  /** A connected source finished syncing — the repo list or document set moved. */
+  | { type: "sources"; payload: { sources: unknown[]; changed: unknown } }
   | { type: "error"; payload: { message: string } }
+  // Her ghost cursor (core/hands): physical screen pixels, drawn by Electron.
+  | { type: "hands"; payload: HandsEvent }
   | { type: "pong" };
 
 // Client -> Server
 export type ClientMessage =
-  | { type: "message"; payload: { text: string } }
+  | { type: "message"; payload: { text: string; attachments?: number[]; intent?: "EXPLAIN"; source?: "voice" } }
+  | { type: "hands_hello" }
   | { type: "ping" };
 
 export type ConnStatus = "connecting" | "open" | "closed";
+
+/** A file shared with a message — shown as a chip on the user's bubble. */
+export interface TurnAttachment {
+  id: number;
+  name: string;
+  kind: string;
+}
 
 export interface ChatTurn {
   id: string;
@@ -78,6 +107,108 @@ export interface ChatTurn {
   streaming?: boolean;
   source?: string; // for auto-chat pushes: proactive | curiosity | greeting
   ts?: string;     // wall-clock time when the turn was created
+  /** An install card rendered under AURA's line. */
+  card?: InstallProposal;
+  attachments?: TurnAttachment[];
+  /** Heard on the mic but not meant for AURA, so she let it pass. */
+  quiet?: string;
+}
+
+// ── Saved Info (core/saved_info.py) ───────────────────────────────────────
+export type SavedKind = "link" | "github" | "video" | "pdf" | "doc" | "image" | "file" | "skill" | "app";
+
+export interface SavedItem {
+  id: number;
+  kind: SavedKind;
+  title: string;
+  url: string;
+  file_name: string;
+  mime: string;
+  size: number;
+  /** Domain for links, "upload" for files. */
+  source: string;
+  summary: string;
+  key_points: string[];
+  tags: string[];
+  status: "scanning" | "ready" | "error";
+  error: string;
+  origin: string;
+  pinned: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+  opened_at: string | null;
+  has_file: boolean;
+  content_chars: number;
+  excerpt: string;
+  /** Only on the single-item endpoint. */
+  content?: string;
+}
+
+// ── Planet installs (core/integrations.py) ────────────────────────────────
+export type Job = "Coding" | "Research" | "Chat" | "Vision" | "Background";
+
+export interface ProposalModel {
+  id: string;
+  name: string;
+  cost: string;
+  context: string;
+  vision: boolean;
+  /** What AURA thinks it's good at, strongest first. */
+  best_for: Job[];
+  /** The jobs pre-ticked for it. */
+  jobs: Job[];
+  selected: boolean;
+  /** Already a planet — can't be installed twice. */
+  existing: boolean;
+  linked?: boolean;
+  desc: string;
+}
+
+export interface InstallResult {
+  id: string;
+  name: string;
+  ok: boolean;
+  why: string;
+  jobs?: Job[];
+  ms?: number;
+}
+
+export interface InstallProposal {
+  id: string;
+  provider: string;
+  label: string;
+  kind: "llm" | "search";
+  about: string;
+  cost: string;
+  base_url: string;
+  key_masked: string;
+  /** Name of the .env variable the key was reused from, if any. */
+  key_from: string;
+  stage: "choose" | "need_provider" | "need_key" | "need_base_url" | "error" | "installed" | "not_installable";
+  error: string;
+  note: string;
+  models: ProposalModel[];
+  total_models: number;
+  position: "first" | "backup";
+  search_jobs: string[];
+  source_url: string;
+  providers: { id: string; label: string; kind: string; cost: string }[];
+  results: InstallResult[];
+  status: string;
+  hint_model: string;
+}
+
+/** A folder or repo AURA can read (core/library). */
+export interface LibraryRoot {
+  id: number;
+  path: string;
+  label: string;
+  kind: "folder" | "repo";
+  status: "idle" | "indexing" | "ok" | "error";
+  detail: string;
+  files: number;
+  indexed_at: string;
+  indexing: boolean;
 }
 
 declare global {
@@ -86,6 +217,16 @@ declare global {
       version: string;
       bridgeUrl: string;
       minimize?: () => void;
+      openExternal?: (url: string) => void;
+      openWindow?: (url: string, title?: string) => void;
+      /** Windows' folder picker (desktop app only). */
+      pickFolders?: () => Promise<string[]>;
+      /** The floating orb (electron/orb.cjs) — desktop app only. */
+      orbState?: (state: AuraState) => void;
+      orbListening?: (on: boolean) => void;
+      orbVisible?: (visible: boolean) => void;
+      orbNotify?: (text: string) => void;
+      hands?: (event: HandsEvent) => void;
       close?: () => void;
     };
   }

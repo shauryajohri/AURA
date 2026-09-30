@@ -36,11 +36,21 @@ _WORK_HINTS = (
 )
 
 
+# Asking for something current is worth a lookup in any lane — but only once a
+# search API is installed (core/integrations), otherwise there's nothing to run.
+_WEB_HINTS = (
+    "search the web", "search online", "look up", "look it up", "google ", "latest",
+    "news", "right now", "today's", "this week", "current version", "release notes",
+)
+
+
 def should_run(query: str, intent: str) -> bool:
     q = (query or "").strip().lower()
     if len(q) < 8:
         return False
     if intent in _ALWAYS_INTENTS:
+        return True
+    if any(h in q for h in _WEB_HINTS) and "web_search" in tools.available():
         return True
     if intent in _SKIP_INTENTS:
         return False
@@ -90,9 +100,10 @@ def gather_context(query: str, intent: str) -> str:
         if not parsed or parsed[0] == "none":
             break
         name, args = parsed
-        if name not in tools.TOOLS:
+        usable = tools.available()
+        if name not in usable:
             # nudge once, then give up rather than spin
-            transcript += f"\n{reply.strip()}\nRESULT: unknown name. Use one of: {', '.join(tools.TOOLS)} or FETCH: none.\n"
+            transcript += f"\n{reply.strip()}\nRESULT: unknown name. Use one of: {', '.join(usable)} or FETCH: none.\n"
             continue
         _announce(name, args)
         result = tools.run_tool(name, args)
@@ -122,6 +133,8 @@ def _announce(name: str, args: dict) -> None:
             "search_code": "Searching the codebase…",
             "recall_project": "Recalling the project…",
             "list_rooms": "Checking rooms…",
+            "saved_info": "Checking Saved Info…",
+            "web_search": "Searching the web…",
         }.get(name, "Looking something up…")
         activity.emit(pretty, "memory")
     except Exception:  # noqa: BLE001

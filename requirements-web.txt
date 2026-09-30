@@ -9,3 +9,6 @@ websockets
 python-docx
 openpyxl
 python-pptx
+
+# Saved Info — reading PDFs you share with AURA
+pypdf

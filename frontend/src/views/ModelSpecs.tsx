@@ -55,7 +55,7 @@ export default function ModelSpecs({ activeModelId = null }: Props) {
                   <span>{m.provider} · {m.role}</span>
                 </div>
                 <span className={"speccard__status" + (locked ? " speccard__status--locked" : active ? " speccard__status--on" : "")}>
-                  {locked ? "LOCKED" : active ? "ACTIVE" : "STANDBY"}
+                  {locked ? "Locked" : active ? "Active" : "Standby"}
                 </span>
               </header>
 

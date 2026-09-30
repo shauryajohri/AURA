@@ -304,7 +304,6 @@ export default function MemoryPage() {
   return (
     <PageShell
       title="Memory"
-      tagline="Everything AURA holds for you — living, searchable, yours to edit."
       storeKey="aura.page.memory"
       tabs={[
         { id: "timeline", label: "Timeline", body: <TimelinePane /> },

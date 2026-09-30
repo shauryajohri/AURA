@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com" />
+  <title>AURA keyboard</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@500;600&family=Syne:wght@600&display=swap" />
+  <style>
+    :root {
+      --space: rgba(10, 8, 30, 0.94);
+      --key: #1a1534;
+      --key-lo: #130f28;
+      --legend: #9189bd;
+      --horizon: #c7b3ff;
+      --hot: #7fe7ff;
+      --photon: #f4eeff;
+      --u: 24px;              /* one key */
+      --gap: 4px;
+    }
+    html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; user-select: none; }
+
+    .plate {
+      position: absolute; inset: 10px 12px 18px;
+      padding: 10px 14px 14px; box-sizing: border-box;
+      border-radius: 18px;
+      background:
+        radial-gradient(120% 60% at 50% -10%, rgba(199, 179, 255, 0.14), transparent 60%),
+        var(--space);
+      border: 1px solid rgba(199, 179, 255, 0.14);
+      /* kept inside the window's margin: a shadow that reaches the window
+         edge is cut off square, a grey box over light apps */
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
+      cursor: grab;
+      display: flex; flex-direction: column; gap: var(--gap);
+    }
+    .plate.dragging { cursor: grabbing; }
+
+    /* the word she's typing, sitting on her horizon */
+    .word {
+      position: relative; height: 30px; margin-bottom: 4px;
+      display: flex; align-items: flex-end; justify-content: center;
+    }
+    .word::after {
+      content: ""; position: absolute; left: 6%; right: 6%; bottom: 3px; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--horizon) 30%, var(--hot) 60%, transparent);
+      opacity: 0.35; transition: opacity 0.3s ease, box-shadow 0.3s ease;
+    }
+    .typing .word::after { opacity: 1; box-shadow: 0 0 10px rgba(127, 231, 255, 0.6); }
+    .text {
+      font: 600 17px/1 Syne, "Segoe UI", sans-serif; letter-spacing: 0.01em;
+      color: var(--photon); padding-bottom: 8px; white-space: nowrap; overflow: hidden; max-width: 100%;
+      transition: opacity 0.6s ease;
+    }
+    .text:empty { display: none; }
+    .typing .text::after {
+      content: ""; display: inline-block; width: 2px; height: 16px; margin-left: 2px; vertical-align: -2px;
+      background: var(--hot); animation: caret 0.9s steps(1) infinite;
+    }
+    .faded .text { opacity: 0.35; }
+
+    .row { display: flex; gap: var(--gap); justify-content: center; }
+    .k {
+      width: var(--u); height: var(--u); border-radius: 7px; flex: none;
+      display: grid; place-items: center;
+      background: linear-gradient(180deg, var(--key), var(--key-lo));
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 1px 0 rgba(0, 0, 0, 0.5);
+      font: 500 11px/1 "Instrument Sans", "Segoe UI", sans-serif; color: var(--legend);
+    }
+    .k.wide { width: calc(var(--u) * 1.5); font-size: 9.5px; }
+    .k.space { flex: 1; width: auto; }
+    .k svg { width: 10px; height: 10px; fill: currentColor; }
+    .k.lit { animation: strike 0.42s cubic-bezier(0.2, 0.7, 0.2, 1); }
+    @keyframes strike {
+      0% { background: var(--photon); color: #120e2a; transform: translateY(1px);
+           box-shadow: 0 0 14px 2px rgba(127, 231, 255, 0.75), 0 0 0 1px var(--hot); }
+      100% { transform: none; }
+    }
+    @keyframes caret { 50% { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) {
+      .k.lit { animation-duration: 0.01s; }
+      .typing .text::after { animation: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="plate" id="plate" aria-label="What AURA is typing">
+    <div class="word"><span class="text" id="text" aria-live="polite"></span></div>
+    <div class="row">
+      <span class="k" data-k="q">q</span><span class="k" data-k="w">w</span><span class="k" data-k="e">e</span><span class="k" data-k="r">r</span><span class="k" data-k="t">t</span><span class="k" data-k="y">y</span><span class="k" data-k="u">u</span><span class="k" data-k="i">i</span><span class="k" data-k="o">o</span><span class="k" data-k="p">p</span>
+    </div>
+    <div class="row">
+      <span class="k" data-k="a">a</span><span class="k" data-k="s">s</span><span class="k" data-k="d">d</span><span class="k" data-k="f">f</span><span class="k" data-k="g">g</span><span class="k" data-k="h">h</span><span class="k" data-k="j">j</span><span class="k" data-k="k">k</span><span class="k" data-k="l">l</span>
+    </div>
+    <div class="row">
+      <span class="k wide" data-k="win" aria-label="Windows key"><svg viewBox="0 0 10 10"><rect width="4.5" height="4.5"/><rect x="5.5" width="4.5" height="4.5"/><rect y="5.5" width="4.5" height="4.5"/><rect x="5.5" y="5.5" width="4.5" height="4.5"/></svg></span>
+      <span class="k" data-k="z">z</span><span class="k" data-k="x">x</span><span class="k" data-k="c">c</span><span class="k" data-k="v">v</span><span class="k" data-k="b">b</span><span class="k" data-k="n">n</span><span class="k" data-k="m">m</span>
+      <span class="k wide" data-k="enter">enter</span>
+    </div>
+    <div class="row">
+      <span class="k wide" data-k="esc">esc</span>
+      <span class="k space" data-k=" " aria-label="space"></span>
+    </div>
+  </div>
+  <script src="keyboard.js"></script>
+</body>
+</html>

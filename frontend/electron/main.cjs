@@ -9,6 +9,7 @@ const path = require("path");
 const net = require("net");
 const fs = require("fs");
 const { createOrb } = require("./orb.cjs");
+const { createHands } = require("./hands.cjs");
 
 const isDev = !app.isPackaged && process.env.AURA_PROD !== "1";
 
@@ -71,6 +72,7 @@ Menu.setApplicationMenu(null); // AURA owns its chrome: no OS titlebar, no menu 
 
 let mainWin = null;
 let orb = null;
+let hands = null;
 
 /** Bring AURA's window back to the front — the orb's click. */
 function summonMain() {
@@ -122,6 +124,8 @@ function createWindow() {
     summon: summonMain,
     quit: () => app.quit(),
   });
+  // Her own cursor, on the desktop for as long as AURA runs.
+  hands = createHands({ fromMain: (e) => !!mainWin && e.sender === mainWin.webContents });
   win.on("minimize", () => orb?.onMainHidden());
   win.on("hide", () => orb?.onMainHidden());
   win.on("blur", () => orb?.onMainBlurred());
@@ -131,6 +135,8 @@ function createWindow() {
   win.on("closed", () => {
     orb?.destroy();
     orb = null;
+    hands?.destroy();
+    hands = null;
     mainWin = null;
   });
 

@@ -122,7 +122,12 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
-    ws.onopen = () => mountedRef.current && setStatus("open");
+    ws.onopen = () => {
+      if (mountedRef.current) setStatus("open");
+      // Only the desktop app can draw her ghost cursor; without it the
+      // brain opens things the direct way.
+      if (window.aura?.hands) ws.send(JSON.stringify({ type: "hands_hello" }));
+    };
 
     ws.onmessage = (ev) => {
       let msg: ServerMessage;
@@ -214,6 +219,9 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
             else window.open(url, "_blank", "noopener");
           } else if (msg.payload.kind === "delete") useSavedStore.getState().remove(msg.payload.id);
           else if (msg.payload.item) useSavedStore.getState().upsert(msg.payload.item);
+          break;
+        case "hands":
+          window.aura?.hands?.(msg.payload);
           break;
         case "planets":
           void useRosterStore.getState().load();

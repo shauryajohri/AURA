@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'" />
+  <title>AURA cursor</title>
+  <style>
+    html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; pointer-events: none; }
+    #ghost { position: fixed; left: 0; top: 0; will-change: transform; }
+
+    /* the photon: where she's pointing */
+    .photon {
+      position: absolute; left: -4.5px; top: -4.5px; width: 9px; height: 9px; border-radius: 50%;
+      background: #f4eeff;
+      box-shadow: 0 0 2px #fff, 0 0 12px 2px rgba(190, 165, 255, 0.95), 0 0 28px 6px rgba(140, 110, 255, 0.35);
+    }
+    /* the horizon: trails on a spring, stretches with speed */
+    #ring {
+      position: fixed; left: 0; top: 0; width: 34px; height: 34px; margin: -17px 0 0 -17px;
+      border-radius: 50%; box-sizing: border-box;
+      border: 1.5px solid rgba(199, 179, 255, 0.75);
+      box-shadow: 0 0 14px rgba(160, 130, 255, 0.35), inset 0 0 10px rgba(160, 130, 255, 0.2);
+      will-change: transform;
+    }
+    /* what she's doing, and what she's typing */
+    .tag {
+      position: absolute; left: 20px; top: 16px; white-space: nowrap;
+      font: 600 12px/1 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; letter-spacing: 0.02em;
+      color: #f4eeff; padding: 6px 10px 6px 8px; border-radius: 999px;
+      background: rgba(14, 10, 30, 0.82); border: 1px solid rgba(199, 179, 255, 0.35);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+      opacity: 0; transform: translateY(-4px) scale(0.96); transform-origin: left top;
+      transition: opacity 0.22s ease, transform 0.22s ease;
+      display: flex; align-items: center; gap: 7px;
+    }
+    .tag b { font-weight: 700; color: #c7b3ff; letter-spacing: 0.14em; font-size: 10px; }
+    .tag .typed { color: #7fe7ff; font-weight: 600; }
+    .tag .typed:empty { display: none; }
+    .tag .typed::after { content: ""; display: inline-block; width: 1.5px; height: 12px; margin-left: 2px;
+      vertical-align: -2px; background: #7fe7ff; animation: caret 0.9s steps(1) infinite; }
+    body.busy .tag { opacity: 1; transform: none; }
+    .tag-up .tag { top: auto; bottom: 16px; transform-origin: left bottom; }
+    .tag-left .tag { left: auto; right: 20px; }
+
+    /* resting: dim, breathing */
+    body:not(.busy) #ghost .photon { animation: breathe 3.2s ease-in-out infinite; }
+    body:not(.busy) #ring { opacity: 0.55; }
+
+    .ripple {
+      position: fixed; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
+      border: 2px solid rgba(127, 231, 255, 0.95);
+      animation: rip 0.65s cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+    }
+    @keyframes rip { to { transform: scale(6); opacity: 0; } }
+    @keyframes breathe { 50% { opacity: 0.55; transform: scale(0.8); } }
+    @keyframes caret { 50% { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) {
+      body:not(.busy) #ghost .photon, .tag .typed::after { animation: none; }
+    }
+  </style>
+</head>
+<body>
+  <div id="ring"></div>
+  <div id="ghost">
+    <div class="photon"></div>
+    <div class="tag"><b>AURA</b><span class="label"></span><span class="typed"></span></div>
+  </div>
+  <script src="hands.js"></script>
+</body>
+</html>

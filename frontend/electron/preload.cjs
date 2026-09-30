@@ -22,4 +22,6 @@ contextBridge.exposeInMainWorld("aura", {
   orbListening: (on) => ipcRenderer.send("orb:listening", !!on),
   orbVisible: (visible) => ipcRenderer.send("orb:visible", !!visible),
   orbNotify: (text) => ipcRenderer.send("orb:notify", String(text).slice(0, 300)),
+  // Her ghost cursor (electron/hands.cjs): where she's about to click.
+  hands: (event) => ipcRenderer.send("hands:event", event),
 });

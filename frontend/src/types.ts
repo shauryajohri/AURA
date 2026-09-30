@@ -51,6 +51,15 @@ export interface ActivityEvent {
 }
 
 // Server -> Client
+export type HandsEvent =
+  | { kind: "move"; x: number; y: number; ms: number }
+  | { kind: "click"; x: number; y: number }
+  | { kind: "type"; text: string; ms: number }
+  | { kind: "press"; key: "win" | "enter" | "esc" | "" }
+  | { kind: "dodge" }
+  | { kind: "busy"; on: boolean; label?: string }
+  | { kind: "home" };
+
 export type ServerMessage =
   | { type: "state"; payload: { state: AuraState } }
   | { type: "chunk"; payload: { text: string } }
@@ -72,11 +81,14 @@ export type ServerMessage =
   /** A connected source finished syncing — the repo list or document set moved. */
   | { type: "sources"; payload: { sources: unknown[]; changed: unknown } }
   | { type: "error"; payload: { message: string } }
+  // Her ghost cursor (core/hands): physical screen pixels, drawn by Electron.
+  | { type: "hands"; payload: HandsEvent }
   | { type: "pong" };
 
 // Client -> Server
 export type ClientMessage =
   | { type: "message"; payload: { text: string; attachments?: number[]; intent?: "EXPLAIN"; source?: "voice" } }
+  | { type: "hands_hello" }
   | { type: "ping" };
 
 export type ConnStatus = "connecting" | "open" | "closed";
@@ -214,6 +226,7 @@ declare global {
       orbListening?: (on: boolean) => void;
       orbVisible?: (visible: boolean) => void;
       orbNotify?: (text: string) => void;
+      hands?: (event: HandsEvent) => void;
       close?: () => void;
     };
   }

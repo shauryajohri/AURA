@@ -436,6 +436,7 @@ html.aura-cursor [data-native-cursor] { cursor: auto !important; }
 .greet__link--closed i, .greet__link--error i { background: var(--danger); }
 .greet__time { font-variant-numeric: tabular-nums; }
 .greet__mode { color: var(--signal); }
+.greet__core { font-variant-numeric: tabular-nums; }
 .greet__task {
   margin: 10px 0 0; padding-left: 10px;
   border-left: 2px solid rgba(155, 123, 255, 0.5);
@@ -464,6 +465,11 @@ html.aura-cursor [data-native-cursor] { cursor: auto !important; }
   align-self: flex-start; border: 0; border-bottom-left-radius: 6px;
   background: rgba(255, 255, 255, 0.035); box-shadow: inset 0 0 0 1px var(--line);
 }
+/* A line the mic caught that wasn't for AURA: it stays in the log, faded,
+   with the reason she let it pass. */
+.bubble--quiet { background: transparent; box-shadow: inset 0 0 0 1px var(--line); }
+.bubble--quiet .bubble__text { opacity: 0.55; }
+.bubble__quiet { margin: 6px 0 0; font-size: 12px; line-height: 1.45; color: var(--haze); }
 .bubble__who { font-size: 12px; font-weight: 600; color: var(--haze); letter-spacing: 0; }
 .bubble--aura .bubble__who { color: var(--horizon-hi); }
 .bubble__time { font-weight: 400; }

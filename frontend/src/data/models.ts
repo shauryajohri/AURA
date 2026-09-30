@@ -87,4 +87,9 @@ export const MODELS: ModelNode[] = [
   { id: "llama8b",   name: "GPT-OSS 20B",            short: "OSS-20B",   modelId: "openai/gpt-oss-20b",
     role: "The Archivist",    nature: "Silent · Stable · Instant",      status: "standby", color: "#E6E6FF", x: -40, y: -20,
     provider: "Groq", speed: 99, context: "131K", purpose: "Instant classification, memory & nudges", cost: "free", priority: 11 },
+  // AURA's own model: gemma3 on this PC via Ollama, her identity baked in
+  // (core/aura_core). Never rate-limited, works offline.
+  { id: "core",      name: "AURA Core",              short: "Core",      modelId: "local:aura-core",
+    role: "The Self",         nature: "Loyal · Local · Always there",   status: "standby", color: "#C7B3FF", x: -8, y: 20,
+    provider: "This PC", speed: 60, context: "4K", purpose: "Conversation when the cloud is busy · works offline", cost: "free", priority: 12 },
 ];

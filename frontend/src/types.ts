@@ -55,6 +55,8 @@ export type ServerMessage =
   | { type: "state"; payload: { state: AuraState } }
   | { type: "chunk"; payload: { text: string } }
   | { type: "done"; payload: { text: string; model?: string } }
+  // A spoken line AURA decided wasn't meant for her (core/aura_core).
+  | { type: "quiet"; payload: { text: string; reason: string } }
   | { type: "push"; payload: { text: string; source: string } }
   | { type: "presence"; payload: { state: Presence } }
   | { type: "mode"; payload: { mode: string } }
@@ -64,7 +66,7 @@ export type ServerMessage =
   // A pasted key / "install <link>" came back as an install card.
   | { type: "install"; payload: { text: string; proposal: InstallProposal | null; masked: string } }
   // Saved Info changed (a scan finished, an item was deleted).
-  | { type: "saved"; payload: { kind: "update" | "delete"; item: SavedItem | null; id: number } }
+  | { type: "saved"; payload: { kind: "update" | "delete" | "open"; item: SavedItem | null; id: number; url?: string } }
   // A planet was installed, re-jobbed or removed.
   | { type: "planets"; payload: { kind: string } }
   /** A connected source finished syncing — the repo list or document set moved. */
@@ -74,7 +76,7 @@ export type ServerMessage =
 
 // Client -> Server
 export type ClientMessage =
-  | { type: "message"; payload: { text: string; attachments?: number[]; intent?: "EXPLAIN" } }
+  | { type: "message"; payload: { text: string; attachments?: number[]; intent?: "EXPLAIN"; source?: "voice" } }
   | { type: "ping" };
 
 export type ConnStatus = "connecting" | "open" | "closed";
@@ -96,10 +98,12 @@ export interface ChatTurn {
   /** An install card rendered under AURA's line. */
   card?: InstallProposal;
   attachments?: TurnAttachment[];
+  /** Heard on the mic but not meant for AURA, so she let it pass. */
+  quiet?: string;
 }
 
 // ── Saved Info (core/saved_info.py) ───────────────────────────────────────
-export type SavedKind = "link" | "github" | "video" | "pdf" | "doc" | "image" | "file";
+export type SavedKind = "link" | "github" | "video" | "pdf" | "doc" | "image" | "file" | "skill" | "app";
 
 export interface SavedItem {
   id: number;
@@ -182,6 +186,19 @@ export interface InstallProposal {
   hint_model: string;
 }
 
+/** A folder or repo AURA can read (core/library). */
+export interface LibraryRoot {
+  id: number;
+  path: string;
+  label: string;
+  kind: "folder" | "repo";
+  status: "idle" | "indexing" | "ok" | "error";
+  detail: string;
+  files: number;
+  indexed_at: string;
+  indexing: boolean;
+}
+
 declare global {
   interface Window {
     aura?: {
@@ -189,6 +206,9 @@ declare global {
       bridgeUrl: string;
       minimize?: () => void;
       openExternal?: (url: string) => void;
+      openWindow?: (url: string, title?: string) => void;
+      /** Windows' folder picker (desktop app only). */
+      pickFolders?: () => Promise<string[]>;
       /** The floating orb (electron/orb.cjs) — desktop app only. */
       orbState?: (state: AuraState) => void;
       orbListening?: (on: boolean) => void;

@@ -1,5 +1,5 @@
 // REST client for the AURA bridge (memory/store.py + model_lock).
-import type { InstallProposal, InstallResult, Job, SavedItem } from "./types";
+import type { InstallProposal, InstallResult, Job, LibraryRoot, SavedItem } from "./types";
 import type { ModelNode } from "./data/models";
 
 export const BASE = "http://127.0.0.1:8760";
@@ -135,7 +135,7 @@ export interface ChatMessage {
 
 /** One voice AURA can speak with. Mirrors modules/voice_output.VOICES. */
 export interface Voice {
-  /** The edge-tts short name, e.g. "en-US-AvaMultilingualNeural". */
+  /** The edge-tts short name, e.g. "en-US-AvaNeural". */
   id: string;
   /** Short human name shown in the picker, e.g. "Ava". */
   name: string;
@@ -400,6 +400,13 @@ export const api = {
 
   // Quests — the daily board AURA verifies from the screen
   getQuests: () => j<QuestBoard>("/api/quests"),
+  /** Promises Donna is holding you to (core/commitments). Times are epoch seconds. */
+  getCommitments: () =>
+    j<{ items: { id: number; title: string; when: string; due: number; created: number; nudges: number }[] }>(
+      "/api/commitments",
+    ).then((r) => r.items),
+  closeCommitment: (id: number, status: "done" | "dropped") =>
+    j(`/api/commitments/${id}`, { method: "POST", body: JSON.stringify({ status }) }),
   addQuest: (body: { text?: string; title?: string; target_minutes?: number; preset?: string; keywords?: string; project_path?: string }) =>
     j<{ ok: boolean; id?: number }>("/api/quests", { method: "POST", body: JSON.stringify(body) }),
   updateQuest: (id: number, patch: Partial<Pick<Quest, "title" | "target_minutes" | "keywords" | "preset" | "color" | "sort_order" | "project_path" | "kind" | "target_count">> & { active?: number }) =>
@@ -565,6 +572,22 @@ export const api = {
   deleteSaved: (id: number) => j<{ ok: boolean }>(`/api/saved/${id}`, { method: "DELETE" }),
   markSavedOpened: (id: number) => j(`/api/saved/${id}/opened`, { method: "POST" }),
   savedFileUrl: (id: number) => `${BASE}/api/saved/${id}/file`,
+  // Domain — skills and apps, and Run for anything saved (core/domain_library)
+  addDomainItem: (kind: "skill" | "app", title: string, content: string) =>
+    j<{ ok: boolean; item?: SavedItem; error?: string }>("/api/domain/items", {
+      method: "POST",
+      body: JSON.stringify({ kind, title, content }),
+    }),
+  // Folders and repos AURA can read (core/library)
+  library: () => j<{ ok: boolean; roots: LibraryRoot[] }>("/api/library"),
+  addLibrary: (path: string) =>
+    j<{ ok: boolean; root?: LibraryRoot; already?: boolean; not_folder?: boolean; error?: string }>(
+      "/api/library", { method: "POST", body: JSON.stringify({ path }) }),
+  removeLibrary: (id: number) => j<{ ok: boolean }>(`/api/library/${id}`, { method: "DELETE" }),
+  openLibrary: (id: number) =>
+    j<{ ok: boolean; error?: string }>(`/api/library/${id}/open`, { method: "POST" }),
+  runDomainItem: (id: number) =>
+    j<{ ok: boolean; reply: string; chat?: string }>(`/api/domain/items/${id}/run`, { method: "POST" }),
 
   // Planet installs (core/integrations)
   getIntegrations: () =>

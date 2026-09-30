@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ConnStatus } from "../types";
-import { api } from "../api";
+import { api, BASE } from "../api";
 import { useClock } from "../hooks/useClock";
 
 /**
@@ -23,9 +23,26 @@ const LINK: Record<string, string> = {
   error: "Brain offline",
 };
 
+interface CoreStatus {
+  first_word_p50: number | null;
+  local: { state: string };
+}
+
 export default function HomeGreeting({ status, mode = "CHAT" }: Props) {
   const { time, greeting } = useClock();
   const [nextTask, setNextTask] = useState<string | null>(null);
+  const [core, setCore] = useState<CoreStatus | null>(null);
+
+  // AURA Core's pulse: how fast her replies have been starting.
+  useEffect(() => {
+    if (status !== "open") return;
+    let dead = false;
+    const pull = () => fetch(BASE + "/api/core").then((r) => r.json())
+      .then((c) => { if (!dead) setCore(c); }).catch(() => {});
+    pull();
+    const id = setInterval(pull, 30000);
+    return () => { dead = true; clearInterval(id); };
+  }, [status]);
 
   // One gentle fetch — refreshed when the connection (re)opens.
   useEffect(() => {
@@ -47,6 +64,12 @@ export default function HomeGreeting({ status, mode = "CHAT" }: Props) {
         <span className={"greet__link greet__link--" + status}><i />{LINK[status] ?? status}</span>
         <span className="greet__time">{time}</span>
         {special && <span className="greet__mode">{mode.toLowerCase()} mode</span>}
+        {status === "open" && core?.first_word_p50 != null && (
+          <span className="greet__core"
+                title={"Her own local model: " + (core.local.state === "warm" ? "loaded" : core.local.state)}>
+            replies in ~{core.first_word_p50.toFixed(1)}s
+          </span>
+        )}
       </p>
       {nextTask && <p className="greet__task" title={nextTask}>Next up: {nextTask}</p>}
     </header>

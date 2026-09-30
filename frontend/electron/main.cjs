@@ -3,7 +3,7 @@
 // the built dist/index.html AND boots the Python brain itself, so a single
 // double-click brings the whole of AURA to life — and closing the window
 // puts her back to sleep (the brain is killed with the app).
-const { app, BrowserWindow, ipcMain, Menu, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require("electron");
 const { spawn } = require("child_process");
 const path = require("path");
 const net = require("net");
@@ -173,6 +173,42 @@ function openExternal(raw) {
 ipcMain.on("win:minimize", (e) => BrowserWindow.fromWebContents(e.sender)?.minimize());
 ipcMain.on("win:close", (e) => BrowserWindow.fromWebContents(e.sender)?.close());
 ipcMain.on("shell:open-external", (_e, url) => openExternal(url));
+ipcMain.on("domain:open-window", (_e, url, title) => openAppWindow(url, title));
+// The Domain's Folder button: Windows' own folder picker. Returns the chosen
+// paths (empty when cancelled); AURA only reads what's picked here.
+ipcMain.handle("dialog:pick-folders", async (e) => {
+  const res = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
+    title: "Give AURA a folder",
+    properties: ["openDirectory", "multiSelections"],
+  });
+  return res.canceled ? [] : res.filePaths;
+});
+
+/** The Domain's Run: a website (or a saved PDF) in a window of its own, like
+ *  an installed app — no address bar, no tabs. It gets no preload and no Node,
+ *  so a page opened here can't reach AURA's bridge. Pop-ups go to the browser. */
+function openAppWindow(raw, title) {
+  let u;
+  try {
+    u = new URL(String(raw));
+  } catch {
+    return;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return;
+  const child = new BrowserWindow({
+    width: 1280,
+    height: 820,
+    title: String(title || u.hostname).slice(0, 120),
+    backgroundColor: "#ffffff",
+    autoHideMenuBar: true,
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  child.webContents.setWindowOpenHandler(({ url }) => {
+    openExternal(url);
+    return { action: "deny" };
+  });
+  child.loadURL(u.href);
+}
 
 app.whenReady().then(() => {
   if (!isDev) startBrainIfNeeded(); // in dev you run server.py yourself

@@ -20,7 +20,6 @@ import SpaceBackground from "./components/SpaceBackground";
 import AuraCursor from "./components/AuraCursor";
 import AuraOrb from "./components/AuraOrb";
 import BootSequence from "./components/BootSequence";
-import PortalTransition from "./components/Domain/PortalTransition";
 
 // Pages are code-split: Home boots instantly and the heavy panels (Domain's
 // editor, the settings overlay, the memory/task views) only download when you
@@ -141,10 +140,29 @@ export default function App() {
 
   // ---- AURA Domain: the workspace beyond the portal -----------------------
   const [domainOpen, setDomainOpen] = useState(false);
-  const [portal, setPortal] = useState<null | "in" | "out">(null);
-  const enterDomain = useCallback(() => setPortal("in"), []);
-  const exitDomain = useCallback(() => setPortal("out"), []);
-  const portalDone = useCallback(() => setPortal(null), []);
+  // It opens as an iris out of the black hole and closes back into it. The
+  // centre is measured when you press the button, so it follows the core
+  // wherever it sits; from a page without the sky it opens from the middle.
+  const [domainClosing, setDomainClosing] = useState(false);
+  const [irisAt, setIrisAt] = useState("50% 50%");
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const enterDomain = useCallback(() => {
+    const sky = document.querySelector(".sky")?.getBoundingClientRect();
+    setIrisAt(sky ? `${Math.round(sky.left + sky.width / 2)}px ${Math.round(sky.top + sky.height / 2)}px` : "50% 50%");
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    setDomainClosing(false);
+    setDomainOpen(true);
+  }, []);
+  // A timer, not animationend: a hidden or minimized window never delivers
+  // that event, and the Domain would stay mounted over Home.
+  const exitDomain = useCallback(() => {
+    setDomainClosing(true);
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => {
+      setDomainOpen(false);
+      setDomainClosing(false);
+    }, 430);
+  }, []);
 
   const goHome = useCallback(() => setView("home"), [setView]);
 
@@ -223,21 +241,16 @@ export default function App() {
 
       {/* ---- The Domain: a different workspace entirely ---- */}
       {domainOpen && (
-        <div className="screen screen--domain">
+        <div
+          className={"screen screen--domain" + (domainClosing ? " screen--closing" : "")}
+          style={{ ["--iris-at" as string]: irisAt }}
+        >
           <Suspense fallback={<PageLoading />}>
-            <DomainScreen onExit={exitDomain} />
+            <DomainScreen onExit={exitDomain} status={status} turns={turns} send={send} />
           </Suspense>
         </div>
       )}
 
-      {/* ---- Portal overlay: crossing the threshold ---- */}
-      {portal && (
-        <PortalTransition
-          direction={portal}
-          onMid={() => setDomainOpen(portal === "in")}
-          onDone={portalDone}
-        />
-      )}
 
       {!domainOpen && <WindowControls />}
       <BootSequence />

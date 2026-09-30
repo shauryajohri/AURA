@@ -50,6 +50,8 @@ export interface SendOptions {
   attachments?: TurnAttachment[];
   /** "Ask AURA" from the Saved Info page pins the explain lane. */
   intent?: "EXPLAIN";
+  /** Said out loud: AURA decides whether it was meant for her. */
+  source?: "voice";
 }
 
 /**
@@ -147,6 +149,18 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
           tellOrb(msg.payload.text);
           if (msg.payload.model) setActiveModelId(modelIdToNode(msg.payload.model));
           break;
+        case "quiet": {
+          // Mark the line she let pass, newest matching user turn first.
+          const { reason } = msg.payload;
+          setTurns((prev) => {
+            const i = prev.map((t) => t.role).lastIndexOf("user");
+            if (i < 0) return prev;
+            const next = prev.slice();
+            next[i] = { ...next[i], quiet: reason };
+            return next;
+          });
+          break;
+        }
         case "push":
           pushMessage(msg.payload.text, msg.payload.source);
           tellOrb(msg.payload.text);
@@ -192,7 +206,13 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
           break;
         }
         case "saved":
-          if (msg.payload.kind === "delete") useSavedStore.getState().remove(msg.payload.id);
+          if (msg.payload.kind === "open") {
+            // The Domain's Run (from its page or "open X" in chat): the site
+            // or PDF gets a window of its own. Outside Electron, a tab.
+            const url = msg.payload.url ?? "";
+            if (window.aura?.openWindow) window.aura.openWindow(url, msg.payload.item?.title);
+            else window.open(url, "_blank", "noopener");
+          } else if (msg.payload.kind === "delete") useSavedStore.getState().remove(msg.payload.id);
           else if (msg.payload.item) useSavedStore.getState().upsert(msg.payload.item);
           break;
         case "planets":
@@ -250,6 +270,7 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
         text: trimmed,
         ...(attachments ? { attachments: attachments.map((a) => a.id) } : {}),
         ...(opts.intent ? { intent: opts.intent } : {}),
+        ...(opts.source ? { source: opts.source } : {}),
       },
     };
     ws.send(JSON.stringify(msg));

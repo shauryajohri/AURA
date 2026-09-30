@@ -73,7 +73,7 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
   const [showCheck, setShowCheck] = useState(false);
 
   const voice = useVoiceInput({
-    onFinal: useCallback((text: string) => onSend(text), [onSend]),
+    onFinal: useCallback((text: string) => onSend(text, { source: "voice" }), [onSend]),
     muted: auraState === "speaking",
   });
   const { toggle: toggleVoice, stop: stopVoice, listening } = voice;
@@ -195,7 +195,7 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
           </p>
         )}
         {turns.map((t) => (
-          <div key={t.id} className={"bubble bubble--" + t.role}>
+          <div key={t.id} className={"bubble bubble--" + t.role + (t.quiet ? " bubble--quiet" : "")}>
             <span className="bubble__who">
               {t.role === "user" ? "You" : "AURA"}
               {t.source && t.source !== "greeting" && (
@@ -215,6 +215,9 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
                   </span>
                 ))}
               </div>
+            )}
+            {t.quiet && (
+              <p className="bubble__quiet">Heard, didn't answer: {t.quiet}. Say “Aura” to get her.</p>
             )}
             {t.card && <InstallCard proposal={t.card} inChat />}
           </div>

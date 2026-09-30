@@ -14,7 +14,7 @@ import { uploadToSaved } from "../lib/files";
 
 const KIND_LABEL: Record<SavedKind, string> = {
   link: "Web page", github: "GitHub", video: "Video", pdf: "PDF",
-  doc: "Document", image: "Image", file: "File",
+  doc: "Document", image: "Image", file: "File", skill: "Skill", app: "App",
 };
 const FILTERS: { id: "all" | SavedKind; label: string }[] = [
   { id: "all", label: "Everything" },

@@ -1,8 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AuraState } from "../types";
 import { CORE_EXTENT, createCore, type OrbState } from "../skins/coreForms";
 import { createSky, isSkyKind, SKY_BRIGHT, SKY_TEMPO } from "../skins/backdrops";
-import type { BackdropId, CoreFormId, Skin } from "../skins/skins";
+import { FILMS, isFilm, type BackdropId, type CoreFormId, type Skin } from "../skins/skins";
 
 interface Props {
   skin: Skin;
@@ -19,11 +19,19 @@ interface Props {
 const SPIN: Record<string, number> = { idle: 1, listening: 1.6, thinking: 5, speaking: 2.4 };
 const GLOW: Record<string, number> = { idle: 0.55, listening: 0.72, thinking: 0.95, speaking: 0.85 };
 
+/** The film a backdrop plays, if any, and what stands in when it can't. */
+function filmOf(backdrop: BackdropId): { src: string; still: BackdropId } | null {
+  if (backdrop === "video") return { src: "./aura-main.mp4", still: "cosmos" };
+  if (isFilm(backdrop)) return { src: FILMS[backdrop].src, still: FILMS[backdrop].fallback };
+  return null;
+}
+
 /**
  * A miniature of a skin, drawn by the real renderers: the procedural sky
  * from skins/backdrops and the core form from skins/coreForms, at card size.
- * The filmed universe can't be painted on a canvas, so it plays as a muted
- * <video> underneath; the constellation web gets a painted stand-in.
+ * Films can't be painted on a canvas, so they play as a muted <video>
+ * underneath, and give way to their procedural stand-in if the file is
+ * missing; the constellation web gets a painted stand-in.
  */
 export default function SkinPreview({
   skin, core, backdrop, state = "idle", density = 0.45, className = "",
@@ -33,11 +41,17 @@ export default function SkinPreview({
   const stateRef = useRef<AuraState>(state);
   stateRef.current = state;
 
+  const film = filmOf(backdrop);
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const playing = film && failedSrc !== film.src ? film.src : null;
+  // what the canvas paints behind the core: nothing while a film plays
+  const shown: BackdropId = film ? (playing ? backdrop : film.still) : backdrop;
+
   useEffect(() => {
     const wrap = wrapRef.current!;
     const canvas = canvasRef.current!;
     const ctx = canvas.getContext("2d")!;
-    const sky = isSkyKind(backdrop) ? createSky(backdrop) : null;
+    const sky = !playing && isSkyKind(shown) ? createSky(shown) : null;
     const N = (base: number) => Math.max(4, Math.round(base * density));
     const renderCore = createCore(core, N);
     let W = 0, H = 0, raf = 0, visible = true;
@@ -104,12 +118,18 @@ export default function SkinPreview({
       io.disconnect();
       ro.disconnect();
     };
-  }, [skin, core, backdrop, density]);
+  }, [skin, core, shown, playing, density]);
 
   return (
-    <div ref={wrapRef} className={`skinprev skinprev--${backdrop} ${className}`}>
-      {backdrop === "video" && (
-        <video className="skinprev__video" src="./aura-main.mp4" muted loop playsInline autoPlay />
+    <div ref={wrapRef} className={`skinprev skinprev--${shown} ${className}`}>
+      {playing && (
+        <video
+          key={playing}
+          className="skinprev__video"
+          src={playing}
+          muted loop playsInline autoPlay
+          onError={() => setFailedSrc(playing)}
+        />
       )}
       <canvas ref={canvasRef} className="skinprev__canvas" aria-hidden="true" />
     </div>

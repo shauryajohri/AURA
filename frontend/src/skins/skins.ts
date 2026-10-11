@@ -15,8 +15,26 @@
 // with a live alpha; the CSS side gets the same triplets as --*-rgb vars.
 // ============================================================================
 
+import type { SkyKind } from "./backdrops";
+
 export type CoreFormId = "horizon" | "gargantua" | "eclipse" | "quasar" | "wormhole";
-export type BackdropId = "video" | "cosmos" | "starfield" | "nebula" | "aurora" | "warp" | "void";
+export type FilmId = "film-supernova" | "film-gargantua" | "film-borealis";
+export type BackdropId = "video" | "cosmos" | SkyKind | FilmId;
+
+/**
+ * Filmed backgrounds: seamless loops generated with Higgsfield (a still key
+ * frame, animated with that same frame as first and last, so the loop has no
+ * seam). They live in frontend/public/skins/. If a file is missing or won't
+ * decode, the procedural sky in `fallback` takes over, so a skin never
+ * depends on its film being present.
+ */
+export const FILMS: Record<FilmId, { src: string; fallback: SkyKind }> = {
+  "film-supernova": { src: "./skins/supernova.mp4", fallback: "nebula" },
+  "film-gargantua": { src: "./skins/gargantua.mp4", fallback: "starfield" },
+  "film-borealis": { src: "./skins/borealis.mp4", fallback: "aurora" },
+};
+
+export const isFilm = (b: string): b is FilmId => Object.prototype.hasOwnProperty.call(FILMS, b);
 
 /** The core's light. Roles match the original violet constants in BlackHole. */
 export interface CorePalette {
@@ -67,7 +85,7 @@ export const SKINS: Skin[] = [
     name: "Gargantua",
     tagline: "A tilted disk of molten gold, bent up over the top of the void.",
     core: "gargantua",
-    backdrop: "starfield",
+    backdrop: "film-gargantua",
     pal: {
       main: "255,138,40", inner: "255,190,92", photon: "255,236,204", soft: "255,172,112",
       deep: "222,112,42", white: "255,250,240", accent: "140,210,255", hot: "255,246,220",
@@ -106,7 +124,7 @@ export const SKINS: Skin[] = [
     name: "Supernova",
     tagline: "A crimson horizon wrapped in the gas of a dying star.",
     core: "horizon",
-    backdrop: "nebula",
+    backdrop: "film-supernova",
     pal: {
       main: "255,40,90", inner: "255,100,130", photon: "255,222,215", soft: "255,140,160",
       deep: "220,50,100", white: "255,250,245", accent: "255,190,80", hot: "255,200,120",
@@ -119,7 +137,7 @@ export const SKINS: Skin[] = [
     name: "Borealis",
     tagline: "An emerald disk turning slowly under the northern lights.",
     core: "gargantua",
-    backdrop: "aurora",
+    backdrop: "film-borealis",
     pal: {
       main: "40,220,160", inner: "110,255,200", photon: "220,255,240", soft: "120,230,200",
       deep: "30,170,140", white: "245,255,250", accent: "190,120,255", hot: "210,255,236",
@@ -167,6 +185,9 @@ export const CORE_FORMS: Array<{ id: CoreFormId; name: string; desc: string }> =
 
 export const BACKDROPS: Array<{ id: BackdropId; name: string; desc: string }> = [
   { id: "video", name: "Universe video", desc: "The filmed cosmos AURA shipped with" },
+  { id: "film-supernova", name: "Supernova film", desc: "Crimson remnant gas drifting at the edges of the frame" },
+  { id: "film-gargantua", name: "Gargantua film", desc: "A golden galactic band crossing the sky" },
+  { id: "film-borealis", name: "Borealis film", desc: "Aurora rising over a dark planet, seen from orbit" },
   { id: "cosmos", name: "Cosmic web", desc: "Constellations, pillars and a lattice funnel" },
   { id: "starfield", name: "Deep field", desc: "Layered stars drifting past a galactic band" },
   { id: "nebula", name: "Nebula", desc: "Slow clouds of glowing gas" },

@@ -146,8 +146,8 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
   inset: 0;
   pointer-events: none;
   background: radial-gradient(circle at 50% 50%,
-    rgba(160, 190, 255, 0.16) 0%,
-    rgba(140, 120, 255, 0.08) 30%,
+    rgba(var(--violet-bright-rgb), 0.16) 0%,
+    rgba(var(--violet-rgb), 0.08) 30%,
     transparent 62%);
   opacity: 0;
   animation: universe-pulse 2.6s ease-out infinite;

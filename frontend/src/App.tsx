@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { useAuraSocket } from "./hooks/useAuraSocket";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 import { useSettingsStore } from "./stores/settingsStore";
@@ -7,9 +7,7 @@ import TopBar from "./components/TopBar";
 import Stage from "./components/Stage";
 import ChatDock from "./components/ChatDock";
 import HomeStatusCard from "./components/HomeStatusCard";
-import CosmicBackground from "./components/CosmicBackground";
-import UniverseBackground from "./components/UniverseBackground";
-import SkyBackground from "./components/SkyBackground";
+import WorldBackdrop from "./components/WorldBackdrop";
 import ParticleField from "./components/ParticleField";
 import CursorLens from "./components/CursorLens";
 import PortalTransition from "./components/Domain/PortalTransition";
@@ -61,19 +59,6 @@ export default function App() {
   const [rawView, setView] = useLocalStorage<string>("aura.view", "home");
   const view = PAGES.includes(rawView) ? rawView : LEGACY[rawView] ?? "home";
 
-  // Background video health. A failure swaps in the CSS starfield, but a
-  // transient decoder hiccup shouldn't cost the universe until restart —
-  // retry with backoff before giving up.
-  const [videoOk, setVideoOk] = useState(true);
-  const videoRetriesRef = useRef(0);
-  const handleVideoFail = useCallback(() => {
-    setVideoOk(false);
-    if (videoRetriesRef.current >= 2) return;
-    const delay = 15000 * (videoRetriesRef.current + 1);
-    videoRetriesRef.current += 1;
-    setTimeout(() => setVideoOk(true), delay);
-  }, []);
-
   // Pull saved appearance/voice settings from the brain once at startup and
   // push them into the visual stores (core, planets, background).
   const loadSettings = useSettingsStore((s) => s.load);
@@ -113,20 +98,9 @@ export default function App() {
 
   return (
     <div className="os-root">
-      {/* the living universe — always behind everything. Which universe is
-          the skin's call; the filmed one still falls back to the live
-          cosmos if the video can't play. */}
-      {backdrop === "video" ? (
-        videoOk ? (
-          <UniverseBackground state={auraState} onFail={handleVideoFail} />
-        ) : (
-          <CosmicBackground state={auraState} />
-        )
-      ) : backdrop === "cosmos" ? (
-        <CosmicBackground state={auraState} />
-      ) : (
-        <SkyBackground kind={backdrop} sky={skin.sky} state={auraState} />
-      )}
+      {/* the living universe — always behind everything; which one is the
+          skin's call (films fall back to a live sky if they can't play) */}
+      <WorldBackdrop backdrop={backdrop} skin={skin} state={auraState} />
       <ParticleField state={auraState} />
 
       <Sidebar

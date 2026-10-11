@@ -3,7 +3,13 @@ import type { AuraState } from "../types";
 
 interface Props {
   state: AuraState;
-  /** Called if the video file is missing/unplayable so App can fall back. */
+  /**
+   * Files to try, in order. Defaults to AURA's own universe; skins pass their
+   * film here. Read once per mount, so give this component a `key` that
+   * changes with the list.
+   */
+  sources?: string[];
+  /** Called if every source is missing/unplayable so the caller can fall back. */
   onFail?: () => void;
 }
 
@@ -11,7 +17,7 @@ interface Props {
 // (an absolute "/universe.mp4" resolves to the DISK root under file://).
 // The new "Aura Main" cosmos plays first; the original universe file is the
 // fallback if it's missing, before we give up to the CSS starfield.
-const SOURCES = ["./aura-main.mp4", "./universe.mp4"];
+export const UNIVERSE_SOURCES = ["./aura-main.mp4", "./universe.mp4"];
 /** Seconds of crossfade around the loop point so the restart is invisible. */
 const FADE_S = 0.9;
 
@@ -44,8 +50,11 @@ const FILTER: Record<string, string> = {
   speaking: "brightness(1.1) saturate(1.1)",
 };
 
-export default function UniverseBackground({ state, onFail }: Props) {
+export default function UniverseBackground({ state, sources = UNIVERSE_SOURCES, onFail }: Props) {
   const [srcIdx, setSrcIdx] = useState(0);
+  // Pinned for the life of the mount: an inline array from the caller would
+  // otherwise be a new dependency every render and restart playback.
+  const sourcesRef = useRef(sources);
   const wrapRef = useRef<HTMLDivElement>(null);
   const vaRef = useRef<HTMLVideoElement>(null);
   const vbRef = useRef<HTMLVideoElement>(null);
@@ -126,8 +135,8 @@ export default function UniverseBackground({ state, onFail }: Props) {
     const onError = () => {
       if (failed) return;
       failed = true;
-      // Step down the source list before surrendering to the CSS starfield.
-      if (srcIdx < SOURCES.length - 1) {
+      // Step down the source list before surrendering to the caller's fallback.
+      if (srcIdx < sourcesRef.current.length - 1) {
         setSrcIdx(srcIdx + 1); // effect reruns with fresh flags + new src
         return;
       }
@@ -194,7 +203,7 @@ export default function UniverseBackground({ state, onFail }: Props) {
     };
   }, [onFail, srcIdx]);
 
-  const SRC = SOURCES[srcIdx];
+  const SRC = sourcesRef.current[srcIdx];
 
   return (
     <div ref={wrapRef} className="universe-bg" aria-hidden="true">

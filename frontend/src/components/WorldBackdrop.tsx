@@ -19,14 +19,23 @@ function stillFor(backdrop: BackdropId): "cosmos" | SkyKind {
   return backdrop;
 }
 
+/** Re-checks per film, per run of the app, before it stays on its stand-in. */
+const MAX_RETRIES = 2;
+
 /**
  * Layer 1 — the living universe, always behind everything.
  *
  * Which universe is the skin's call: AURA's own filmed cosmos, a skin's
  * Higgsfield film, the constellation web, or one of the procedural skies.
- * A film that is missing or can't decode drops to its procedural stand-in,
- * and a transient decoder hiccup shouldn't cost the film until restart, so
- * it's retried with backoff (twice) before staying on the stand-in.
+ * A film that is missing or can't decode drops to its procedural stand-in.
+ *
+ * A transient decoder hiccup shouldn't cost the film until restart, so a
+ * failed film is re-checked with backoff, but the re-check is a probe: an
+ * off-screen <video> that hands the screen back to the film only once it
+ * can actually play. The stand-in stays mounted the whole time, so a file
+ * that simply isn't there never blanks the screen or reshuffles the sky.
+ * Failures and retry counts are kept per film, so switching between skins
+ * neither forgets that a film is missing nor restarts its retries.
  */
 export default function WorldBackdrop({ backdrop, skin, state }: Props) {
   const sources = useMemo(
@@ -35,24 +44,58 @@ export default function WorldBackdrop({ backdrop, skin, state }: Props) {
   );
   const key = sources ? sources.join("|") : "";
 
-  const [failedKey, setFailedKey] = useState<string | null>(null);
-  const retries = useRef({ key: "", n: 0 });
-  const timer = useRef(0);
-  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const [failed, setFailed] = useState<ReadonlySet<string>>(() => new Set());
+  const retries = useRef(new Map<string, number>());
+  const handleFail = useCallback(
+    () => setFailed((s) => (s.has(key) ? s : new Set(s).add(key))),
+    [key],
+  );
+  const isFailed = !!sources && failed.has(key);
 
-  const handleFail = useCallback(() => {
-    setFailedKey(key);
-    const r = retries.current;
-    if (r.key !== key) { r.key = key; r.n = 0; }
-    if (r.n >= 2) return;
-    const delay = 15000 * (r.n + 1);
-    r.n += 1;
-    window.clearTimeout(timer.current);
-    // only clear the failure if the same film is still the one wanted
-    timer.current = window.setTimeout(() => setFailedKey((k) => (k === key ? null : k)), delay);
-  }, [key]);
+  useEffect(() => {
+    if (!sources || !isFailed) return;
+    let probe: HTMLVideoElement | null = null;
+    let timer = 0;
 
-  if (sources && failedKey !== key) {
+    const release = () => {
+      if (!probe) return;
+      probe.removeAttribute("src");
+      probe.load(); // frees the decoder
+      probe = null;
+    };
+    const recovered = () =>
+      setFailed((s) => {
+        const next = new Set(s);
+        next.delete(key);
+        return next;
+      });
+    const tryFrom = (i: number) => {
+      if (i >= sources.length) { schedule(); return; } // nothing playable yet
+      const v = document.createElement("video");
+      v.muted = true;
+      v.preload = "auto";
+      v.addEventListener("canplay", () => { release(); recovered(); }, { once: true });
+      v.addEventListener("error", () => { release(); tryFrom(i + 1); }, { once: true });
+      probe = v;
+      v.src = sources[i];
+    };
+    function schedule() {
+      const n = retries.current.get(key) ?? 0;
+      if (n >= MAX_RETRIES) return; // stay on the stand-in until restart
+      timer = window.setTimeout(() => {
+        retries.current.set(key, n + 1);
+        tryFrom(0);
+      }, 15000 * (n + 1));
+    }
+    schedule();
+
+    return () => {
+      window.clearTimeout(timer);
+      release();
+    };
+  }, [isFailed, key, sources]);
+
+  if (sources && !isFailed) {
     return <UniverseBackground key={key} sources={sources} state={state} onFail={handleFail} />;
   }
   const still = stillFor(backdrop);

@@ -3,6 +3,8 @@ import { api, Settings } from "../../api";
 import { Layout, ColId, Size, CARD_TITLES, DEFAULT_LAYOUT } from "./layoutTypes";
 import MicCheck from "../MicCheck";
 import VoicePicker from "./VoicePicker";
+import SkinGallery, { type SkinChoice } from "./SkinGallery";
+import { useSettingsStore } from "../../stores/settingsStore";
 
 // ============================================================================
 // Focused settings editors. Clicking "Blackhole" in the settings card doesn't
@@ -14,12 +16,13 @@ import VoicePicker from "./VoicePicker";
 // ============================================================================
 
 export type SettingsCategory =
-  | "general" | "blackhole" | "planets" | "orbits" | "animations" | "wallpaper"
+  | "general" | "skins" | "blackhole" | "planets" | "orbits" | "animations" | "wallpaper"
   | "voice" | "autochat" | "privacy" | "behavior" | "keys" | "developer"
   | "experimental" | "layout";
 
 export const CATEGORY_META: Record<SettingsCategory, { icon: string; title: string; desc: string }> = {
   general: { icon: "▣", title: "General", desc: "Startup and window behaviour" },
+  skins: { icon: "✺", title: "Skins", desc: "Whole designs — the black hole, the background, the colours" },
   blackhole: { icon: "◉", title: "Blackhole", desc: "The core — glow, particles, rotation" },
   planets: { icon: "◍", title: "Planets", desc: "The constellation — orbits, rings, labels" },
   orbits: { icon: "◌", title: "Orbit Lines", desc: "The rings around the core — style, brightness, width" },
@@ -37,6 +40,7 @@ export const CATEGORY_META: Record<SettingsCategory, { icon: string; title: stri
 
 const KEYS: Record<Exclude<SettingsCategory, "layout" | "keys">, string[]> = {
   general: ["general.launch_on_boot", "general.start_minimized"],
+  skins: ["skin.id", "skin.core", "skin.backdrop"],
   blackhole: ["blackhole.glow", "blackhole.particles", "blackhole.rotation"],
   planets: ["planets.orbit_speed", "planets.rings", "planets.labels"],
   orbits: ["orbits.style", "orbits.opacity", "orbits.width"],
@@ -89,6 +93,15 @@ export default function SettingsOverlay({
     preset: layout.preset,
   }));
   const [dirty, setDirty] = useState(false);
+
+  // Skin keys may be missing from `settings` (brain offline, or never saved
+  // to the backend); the store always knows what is being worn.
+  const stored = useSettingsStore((s) => s.settings);
+  const skinValue = useMemo<SkinChoice>(() => ({
+    "skin.id": String(draft["skin.id"] ?? stored["skin.id"] ?? "aura"),
+    "skin.core": String(draft["skin.core"] ?? stored["skin.core"] ?? ""),
+    "skin.backdrop": String(draft["skin.backdrop"] ?? stored["skin.backdrop"] ?? ""),
+  }), [draft, stored]);
 
   const set = (k: string, v: number | boolean | string) => {
     setDraft((d) => ({ ...d, [k]: v }));
@@ -182,6 +195,8 @@ export default function SettingsOverlay({
 
   const preview = () => {
     switch (category) {
+      case "skins":
+        return null; // the gallery carries its own large live preview
       case "blackhole": {
         const glow = n("blackhole.glow") / 100;
         const density = Math.round((n("blackhole.particles") / 100) * particleDots.length);
@@ -354,6 +369,16 @@ export default function SettingsOverlay({
 
   const controls = () => {
     if (category === "keys") return null;
+    if (category === "skins") {
+      return (
+        <SkinGallery
+          value={skinValue}
+          onChange={(patch) => {
+            for (const [k, v] of Object.entries(patch)) set(k, v);
+          }}
+        />
+      );
+    }
     if (category === "layout") {
       return (
         <div className="setov__cards">
@@ -444,7 +469,7 @@ export default function SettingsOverlay({
 
   return (
     <div className="setov" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="setov__panel">
+      <div className={"setov__panel" + (category === "skins" ? " setov__panel--wide" : "")}>
         <header className="setov__head">
           <span className="setov__icon">{meta.icon}</span>
           <div className="setov__titles">

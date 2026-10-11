@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 // ============================================================================
 // The portal — pressing "Enter Workspace" doesn't switch screens, it crosses
@@ -40,14 +40,23 @@ export default function PortalTransition({ direction, onMid, onDone }: Props) {
     []
   );
 
+  // The callbacks live in refs so the timeline starts once per crossing.
+  // App passes onMid as an inline arrow, so depending on it restarted both
+  // timers on every App render; with the socket retrying in the background
+  // that could keep onDone from ever firing, leaving the overlay up for good.
+  const midRef = useRef(onMid);
+  midRef.current = onMid;
+  const doneRef = useRef(onDone);
+  doneRef.current = onDone;
+
   useEffect(() => {
-    const mid = setTimeout(onMid, entering ? 1150 : 650);
-    const done = setTimeout(onDone, entering ? 2250 : 1400);
+    const mid = setTimeout(() => midRef.current(), entering ? 1150 : 650);
+    const done = setTimeout(() => doneRef.current(), entering ? 2250 : 1400);
     return () => {
       clearTimeout(mid);
       clearTimeout(done);
     };
-  }, [entering, onMid, onDone]);
+  }, [entering]);
 
   return (
     <div className={"portal portal--" + direction} aria-hidden="true">

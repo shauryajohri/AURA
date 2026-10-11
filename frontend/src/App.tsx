@@ -9,9 +9,11 @@ import ChatDock from "./components/ChatDock";
 import HomeStatusCard from "./components/HomeStatusCard";
 import CosmicBackground from "./components/CosmicBackground";
 import UniverseBackground from "./components/UniverseBackground";
+import SkyBackground from "./components/SkyBackground";
 import ParticleField from "./components/ParticleField";
 import CursorLens from "./components/CursorLens";
 import PortalTransition from "./components/Domain/PortalTransition";
+import { useSkinDocument } from "./skins/useSkin";
 
 // Pages are code-split: Home boots instantly and the heavy panels (Domain's
 // editor, the settings overlay, the memory/task views) only download when you
@@ -77,6 +79,9 @@ export default function App() {
   const loadSettings = useSettingsStore((s) => s.load);
   useEffect(() => { loadSettings(); }, [loadSettings]);
 
+  // The skin being worn: tints :root's colour variables, and picks the sky.
+  const { skin, backdrop } = useSkinDocument();
+
   // ---- AURA Domain: the workspace beyond the portal -----------------------
   const [domainOpen, setDomainOpen] = useState(false);
   const [portal, setPortal] = useState<null | "in" | "out">(null);
@@ -108,11 +113,19 @@ export default function App() {
 
   return (
     <div className="os-root">
-      {/* the living universe — always behind everything, never replaced */}
-      {videoOk ? (
-        <UniverseBackground state={auraState} onFail={handleVideoFail} />
-      ) : (
+      {/* the living universe — always behind everything. Which universe is
+          the skin's call; the filmed one still falls back to the live
+          cosmos if the video can't play. */}
+      {backdrop === "video" ? (
+        videoOk ? (
+          <UniverseBackground state={auraState} onFail={handleVideoFail} />
+        ) : (
+          <CosmicBackground state={auraState} />
+        )
+      ) : backdrop === "cosmos" ? (
         <CosmicBackground state={auraState} />
+      ) : (
+        <SkyBackground kind={backdrop} sky={skin.sky} state={auraState} />
       )}
       <ParticleField state={auraState} />
 

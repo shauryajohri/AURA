@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useSkin } from "../skins/useSkin";
 
 /**
  * The cursor is a tiny black hole.
@@ -22,6 +23,10 @@ interface Spark { a: number; r: number; sp: number; sz: number; al: number; }
 
 export default function CursorLens() {
   const ref = useRef<HTMLCanvasElement>(null);
+  // the lens wears the skin's light, read per frame
+  const { skin } = useSkin();
+  const palRef = useRef(skin.pal);
+  palRef.current = skin.pal;
 
   useEffect(() => {
     const c = ref.current!;
@@ -76,6 +81,7 @@ export default function CursorLens() {
       if (!visible) return;
 
       ctx.clearRect(0, 0, S, S);
+      const pal = palRef.current;
       const cx = S / 2, cy = S / 2;
       const R = down ? 3.6 : hover ? 7 : 5; // the void's radius
 
@@ -87,7 +93,7 @@ export default function CursorLens() {
         sp.r -= 0.16 * sp.sp * (down ? 3 : 1);
         if (sp.r < R + 3) { sp.r = 24 + Math.random() * 40; sp.a = Math.random() * Math.PI * 2; }
         const f = Math.min(1, (sp.r - R) / 12);
-        ctx.fillStyle = `rgba(198,166,255,${sp.al * f})`;
+        ctx.fillStyle = `rgba(${pal.soft},${sp.al * f})`;
         ctx.beginPath();
         ctx.arc(cx + Math.cos(sp.a) * sp.r, cy + Math.sin(sp.a) * sp.r * 0.92, sp.sz, 0, Math.PI * 2);
         ctx.fill();
@@ -103,22 +109,22 @@ export default function CursorLens() {
         const rr = R + 4 + i * 4.4;
         const wob = 1 + 0.06 * Math.sin(t * 3.1 + i * 2.2);
         ctx.strokeStyle = i === 0
-          ? `rgba(243,217,255,${0.55 * (hover ? 1.4 : 1)})`
-          : `rgba(165,110,255,${(0.4 - i * 0.12) * (hover ? 1.4 : 1)})`;
+          ? `rgba(${pal.photon},${0.55 * (hover ? 1.4 : 1)})`
+          : `rgba(${pal.inner},${(0.4 - i * 0.12) * (hover ? 1.4 : 1)})`;
         ctx.lineWidth = i === 0 ? 1.4 : 1;
         ctx.beginPath(); ctx.arc(0, 0, rr * wob, 0, Math.PI * 2); ctx.stroke();
       }
       // one bright photon racing the innermost ring
-      ctx.strokeStyle = "rgba(255,250,255,0.85)";
+      ctx.strokeStyle = `rgba(${pal.white},0.85)`;
       ctx.lineWidth = 1.3;
       ctx.beginPath(); ctx.arc(0, 0, R + 4, t * 2.8, t * 2.8 + 1.1); ctx.stroke();
       ctx.restore();
 
-      // soft violet gravity glow — the void itself is the OS cursor image,
+      // soft gravity glow — the void itself is the OS cursor image,
       // so nothing solid is drawn here; only light.
       const g = ctx.createRadialGradient(cx, cy, R, cx, cy, R * 5);
-      g.addColorStop(0, `rgba(139,92,255,${down ? 0.5 : 0.32})`);
-      g.addColorStop(1, "rgba(139,92,255,0)");
+      g.addColorStop(0, `rgba(${pal.deep},${down ? 0.5 : 0.32})`);
+      g.addColorStop(1, `rgba(${pal.deep},0)`);
       ctx.fillStyle = g;
       ctx.beginPath(); ctx.arc(cx, cy, R * 5, 0, Math.PI * 2); ctx.fill();
       ctx.globalCompositeOperation = "source-over";

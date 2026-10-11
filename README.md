@@ -132,13 +132,15 @@ A skin is a whole design: which black hole sits at the core, what fills the full
 | Skin | Core | Background |
 |---|---|---|
 | **Aura** (default) | Horizon: violet ring, filaments, lens blade | Universe video |
-| **Gargantua** | Accretion disk lensed over the shadow | Deep field |
+| **Gargantua** | Accretion disk lensed over the shadow | Gargantua film (Deep field if missing) |
 | **Totality** | Eclipse: corona and a diamond-ring flare | Void |
 | **Quasar** | Disk with twin relativistic jets | Warp drive |
-| **Supernova** | Crimson horizon | Nebula |
-| **Borealis** | Emerald accretion disk | Aurora |
+| **Supernova** | Crimson horizon | Supernova film (Nebula if missing) |
+| **Borealis** | Emerald accretion disk | Borealis film (Aurora if missing) |
 | **Wormhole** | Rings falling into a tunnel | Cosmic web |
 | **Abyss** | Monochrome horizon | Void |
+
+The three films are seamless loops generated with Higgsfield and live in `frontend/public/skins/` (see the README there). A skin whose film is missing or won't play falls back to its live procedural sky, so the files are optional.
 
 Every core and every background reacts to AURA's state: thinking spins and speeds things up, speaking pulses with her voice. Each design does that in its own way: the quasar's jets flare, the warp field jumps to light speed, the aurora ripples.
 

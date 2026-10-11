@@ -69,12 +69,16 @@ export default function WorldBackdrop({ backdrop, skin, state }: Props) {
         next.delete(key);
         return next;
       });
+    // A re-check counts once it has an answer, not when it starts: a probe
+    // cut short by switching away mid-load (cleanup's release() swallows its
+    // events) must not use up one of the film's retries.
+    const counted = () => retries.current.set(key, (retries.current.get(key) ?? 0) + 1);
     const tryFrom = (i: number) => {
-      if (i >= sources.length) { schedule(); return; } // nothing playable yet
+      if (i >= sources.length) { counted(); schedule(); return; } // nothing playable yet
       const v = document.createElement("video");
       v.muted = true;
       v.preload = "auto";
-      v.addEventListener("canplay", () => { release(); recovered(); }, { once: true });
+      v.addEventListener("canplay", () => { release(); counted(); recovered(); }, { once: true });
       v.addEventListener("error", () => { release(); tryFrom(i + 1); }, { once: true });
       probe = v;
       v.src = sources[i];
@@ -82,10 +86,7 @@ export default function WorldBackdrop({ backdrop, skin, state }: Props) {
     function schedule() {
       const n = retries.current.get(key) ?? 0;
       if (n >= MAX_RETRIES) return; // stay on the stand-in until restart
-      timer = window.setTimeout(() => {
-        retries.current.set(key, n + 1);
-        tryFrom(0);
-      }, 15000 * (n + 1));
+      timer = window.setTimeout(() => tryFrom(0), 15000 * (n + 1));
     }
     schedule();
 

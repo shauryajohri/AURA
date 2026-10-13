@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { usePerfStore, PERF_FRAME_MS } from "../stores/perfStore";
 import type { AuraState } from "../types";
 
 interface Props {
@@ -56,6 +57,7 @@ export default function ParticleField({ state }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef<AuraState>(state);
   stateRef.current = state;
+  const perf = usePerfStore((st) => st.perf);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -99,7 +101,7 @@ export default function ParticleField({ state }: Props) {
       canvas.width = W * DPR; canvas.height = H * DPR;
       canvas.style.width = W + "px"; canvas.style.height = H + "px";
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-      const n = Math.min(2400, Math.round((W * H) / 900));
+      const n = Math.min(perf ? 600 : 2400, Math.round((W * H) / (perf ? 3600 : 900)));
       ps = Array.from({ length: n }, () => spawn(false));
       rings = [];
       const cometColors = ["216,196,255", "165,110,255", "139,92,255"];
@@ -117,6 +119,7 @@ export default function ParticleField({ state }: Props) {
     let prev = performance.now();
     const draw = (t: number) => {
       raf = requestAnimationFrame(draw);
+      if (perf && t - prev < PERF_FRAME_MS) return;
       const dt = Math.min(50, t - prev); prev = t;
 
       const st = stateRef.current as string;
@@ -278,7 +281,7 @@ export default function ParticleField({ state }: Props) {
       window.removeEventListener("mouseout", onLeave);
       document.removeEventListener("visibilitychange", onVis);
     };
-  }, []);
+  }, [perf]);
 
   return <canvas ref={canvasRef} className="particle-field" aria-hidden="true" />;
 }

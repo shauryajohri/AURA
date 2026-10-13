@@ -3,6 +3,7 @@ import type { AuraState } from "../types";
 import { useCoreStore } from "../stores/coreStore";
 import { usePlanetStore } from "../stores/planetStore";
 import { useSettingsStore } from "../stores/settingsStore";
+import { usePerfStore, PERF_FRAME_MS } from "../stores/perfStore";
 import { MODELS } from "../data/models";
 
 // ============================================================================
@@ -91,6 +92,8 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
   // the setup effect — changing it rebuilds the scene. Rotation and labels are
   // read per-frame through refs, so those apply instantly without a rebuild.
   const density = useSettingsStore((st) => st.density);
+  // Performance mode rebuilds the scene at 1x density without blur glows.
+  const perf = usePerfStore((st) => st.perf);
   const rotationMul = useSettingsStore((st) => st.rotationMul);
   const showLabels = useSettingsStore((st) => st.showLabels);
   const rotationMulRef = useRef(rotationMul);
@@ -150,7 +153,7 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
     // orbits are never cut off no matter where the core sits or how far out
     // an orbit goes. DPR is trimmed on huge canvases to keep memory sane.
     const D = Math.ceil(Math.hypot(window.innerWidth, window.innerHeight));
-    const DPR = Math.min(window.devicePixelRatio || 1, D > 1700 ? 1.5 : 2);
+    const DPR = perf ? 1 : Math.min(window.devicePixelRatio || 1, D > 1700 ? 1.5 : 2);
     canvas.width = D * DPR;
     canvas.height = D * DPR;
     canvas.style.width = D + "px";
@@ -164,7 +167,9 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
     // Particle counts scale with the Sanctuary "particles" setting — this is
     // also the performance dial on a weaker GPU, so it's clamped rather than
     // trusted blindly.
-    const dens = Math.max(0.1, Math.min(1.8, density));
+    const dens = Math.max(0.1, Math.min(1.8, density)) * (perf ? 0.5 : 1);
+    // shadowBlur is the most expensive canvas op there is; perf mode skips it.
+    const blurK = perf ? 0 : 1;
     const N = (base: number) => Math.max(4, Math.round(base * dens));
 
     // ---- Electric filaments — the crackling violet wisps of the reference.
@@ -349,6 +354,7 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
     let last = performance.now();
 
     const draw = (now: number) => {
+      if (perf && now - last < PERF_FRAME_MS) { raf = requestAnimationFrame(draw); return; }
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       const os: OrbState = (stateRef.current as OrbState) in SPIN ? (stateRef.current as OrbState) : "idle";
@@ -485,19 +491,19 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
       ctx.save();
       // wide outer violet halo
       ctx.shadowColor = rgba(MAIN, 1);
-      ctx.shadowBlur = 34 * s;
+      ctx.shadowBlur = 34 * s * blurK;
       ctx.strokeStyle = rgba(MAIN, 0.45 * glow + 0.18);
       ctx.lineWidth = 9 * s;
       ctx.beginPath(); ctx.arc(cx, cy, ringR * 1.06, 0, Math.PI * 2); ctx.stroke();
       // bright violet band
       ctx.shadowColor = rgba(INNER, 1);
-      ctx.shadowBlur = 24 * s;
+      ctx.shadowBlur = 24 * s * blurK;
       ctx.strokeStyle = rgba(INNER, 0.7 * glow + 0.22);
       ctx.lineWidth = 4.5 * s;
       ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, Math.PI * 2); ctx.stroke();
       // white-hot inner filament — brightness rides the flicker
       ctx.shadowColor = rgba(PHOTON, 1);
-      ctx.shadowBlur = 15 * s;
+      ctx.shadowBlur = 15 * s * blurK;
       ctx.strokeStyle = rgba(PHOTON, (0.72 + 0.28 * glow) * flicker);
       ctx.lineWidth = 2.1 * s;
       ctx.beginPath(); ctx.arc(cx, cy, ringR * 0.985, 0, Math.PI * 2); ctx.stroke();
@@ -508,7 +514,7 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
         const dir2 = si2 % 2 ? -1 : 1;
         const sa = rot * (1.6 + si2 * 0.7) * dir2 + si2 * 2.3;
         const alen = 0.7 + 0.35 * Math.sin(pulse * 1.7 + si2 * 2.1);
-        ctx.shadowBlur = 20 * s;
+        ctx.shadowBlur = 20 * s * blurK;
         ctx.strokeStyle = rgba(PHOTON, (0.2 + 0.22 * Math.sin(pulse * 2.4 + si2 * 1.4)) * glow + 0.05);
         ctx.lineWidth = 2.6 * s;
         ctx.beginPath(); ctx.arc(cx, cy, ringR, sa, sa + alen); ctx.stroke();
@@ -716,17 +722,17 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
         ctx.globalCompositeOperation = "lighter";
         ctx.save();
         ctx.shadowColor = rgba(pl.c, 1);
-        ctx.shadowBlur = 10 * s;
+        ctx.shadowBlur = 10 * s * blurK;
         ctx.strokeStyle = rgba(pl.c, isAct ? 0.5 : 0.3);
         ctx.lineWidth = 1.6 * s;
         ctx.beginPath(); ctx.arc(x, y, pr * 0.99, 0, Math.PI * 2); ctx.stroke();
         // hot lit arc facing the core
-        ctx.shadowBlur = 14 * s;
+        ctx.shadowBlur = 14 * s * blurK;
         ctx.strokeStyle = rgba(pl.c, isAct ? 0.95 : 0.75);
         ctx.lineWidth = 2.2 * s;
         ctx.beginPath(); ctx.arc(x, y, pr * 0.97, toCore - 1.25, toCore + 1.25); ctx.stroke();
         ctx.shadowColor = "rgba(255,255,255,1)";
-        ctx.shadowBlur = 8 * s;
+        ctx.shadowBlur = 8 * s * blurK;
         ctx.strokeStyle = "rgba(255,255,255,0.55)";
         ctx.lineWidth = 1 * s;
         ctx.beginPath(); ctx.arc(x, y, pr * 0.96, toCore - 0.8, toCore + 0.8); ctx.stroke();
@@ -803,7 +809,7 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
     return () => cancelAnimationFrame(raf);
     // `density` is a real dependency: particle arrays are sized once at setup,
     // so changing it has to rebuild the scene rather than just re-render.
-  }, [size, density]);
+  }, [size, density, perf]);
 
   // Dragging the core is only possible in edit mode (Core menu → Edit).
   // Position persists on Save, so AURA is exactly where you left her on relaunch.

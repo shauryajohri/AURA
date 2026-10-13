@@ -2,6 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react"
 import { useAuraSocket } from "./hooks/useAuraSocket";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 import { useSettingsStore } from "./stores/settingsStore";
+import { usePerfStore } from "./stores/perfStore";
 import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
 import Stage from "./components/Stage";
@@ -74,6 +75,7 @@ export default function App() {
 
   // Pull saved appearance/voice settings from the brain once at startup and
   // push them into the visual stores (core, planets, background).
+  const perf = usePerfStore((s) => s.perf);
   const loadSettings = useSettingsStore((s) => s.load);
   useEffect(() => { loadSettings(); }, [loadSettings]);
 
@@ -166,8 +168,9 @@ export default function App() {
         />
       )}
 
-      {/* the pointer is a tiny black hole — lives above everything */}
-      <CursorLens />
+      {/* the pointer is a tiny black hole — lives above everything
+          (skipped in performance mode; the OS cursor image stays) */}
+      {!perf && <CursorLens />}
     </div>
   );
 }

@@ -20,5 +20,12 @@ pandas
 pyperclip
 keyboard
 
+# Desktop control (phone remote, screen reading)
+pyautogui
+pygetwindow
+mss
+pytesseract
+Pillow
+
 # Optional — local should_respond gate (falls back gracefully if absent)
 ollama

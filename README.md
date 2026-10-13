@@ -140,6 +140,21 @@ Plain statements ("my name is …", "I'm learning …", "I prefer short replies"
 - **Yours to control** — Memory → **Habits** shows it all; pause it, hide an app forever, or forget everything. The same switch lives in Settings → Privacy.
 - **In the chat** — ordinary turns get one background line ("right now: Excel for 40m; usually VS Code, YouTube"); ask *"how much time did I spend on YouTube?"* or *"what are my habits?"* and she gets the full picture.
 
+### She can do it for you — `/do`
+
+Type `/do open notepad and write a shopping list` and AURA takes the screen (`core/desktop_agent.py`). Each step she takes a screenshot, numbers the buttons and fields of the window in front (Windows UI Automation), asks the vision model for ONE action — "click element 12" rather than guessing pixels — then does it with the mouse and keyboard.
+
+Safety comes first:
+
+- **Esc**, the **Stop** button, `/stop`, or just **moving the mouse** hands control back instantly (slamming the mouse into a screen corner works too).
+- She **never types passwords, PINs or card numbers** — those fields are blocked and she asks you to do that part.
+- Anything that **deletes, sends, pays, buys, posts, closes apps or runs terminal commands** — or that the model itself flags — waits for you to press **Allow**. No answer within a minute means no.
+- Hard limits: 25 steps, 5 minutes.
+- In the desktop app her main window minimizes and a small **always-on-top control bar** shows what she's doing, with Stop and Allow / Deny. It never steals focus from the app she's using.
+- Settings → Behavior: turn screen control off entirely, or have her **ask before every action**.
+
+Needs Windows plus `pip install pyautogui uiautomation mss Pillow` (in `requirements.txt`) and a vision model key (`OPENROUTER_API_KEY`; set `AURA_VISION_MODEL` to pick a stronger model — free models are slow and miss sometimes).
+
 ### Privacy switches do what they say
 
 Settings → Privacy has two switches, both on by default. Each is read on every message and every screen look, so flipping one counts from the next message without a restart.
@@ -286,6 +301,7 @@ GET/POST/PUT/DELETE  /api/quests            daily commitments + screen verificat
 GET  /api/models · POST /api/models/{n}/toggle    model lock
 GET  /api/links · /api/stats · /api/nature · /api/settings
 GET  /api/habits?days=7 · DELETE /api/habits[?app_name=]   habits (read / forget)
+GET  /api/agent · POST /api/agent/run · /stop · /confirm    screen control (/do)
 POST /api/voice/transcribe                  WAV → text fallback
 GET  /api/phone-report                      what a call would say right now
 POST /api/phone-report/call                 ring the saved number
@@ -354,6 +370,7 @@ core/
   persona.py           relationship modes: buddy / assistant / mentor / custom
   phone_report.py      the spoken progress report + the call scheduler
   habits.py            which apps/tools you use and when (foreground sampler)
+  desktop_agent.py     /do: look → decide → safety check → act, on your screen
   response_composer.py persona layer + 5 reply styles
   engagement.py        when to speak, when to shut up
   quest_verify.py      screenshot verification (vision model)
@@ -439,6 +456,7 @@ python tests/test_model_lock.py       # model locks + routing work without PySid
 python tests/test_backend_only.py     # backend-only install: forex / clipboard say what's missing
 python tests/test_room_routing.py     # rooms: a message stays in the chat it was typed into
 python test_habits.py                 # habit tracker: naming, crediting, privacy
+python test_desktop_agent.py          # /do: parsing, safety rules, stop/confirm loop
 python test_reasoning_leak.py         # chain-of-thought never reaches the user
 python test_phone_report.py           # the phone report + call scheduler (fake Twilio)
 python tests/test_reply_recovery.py   # streamed + coding replies: answer recovered, code kept in history
@@ -503,6 +521,8 @@ cd frontend && npx tsc --noEmit       # frontend typecheck
 Live and used daily: routing, memory, voice, screen awareness, error intelligence, quests, the Project Brain (backend + UI), Code Review, Research capture, relationship modes, habit tracking.
 
 Not yet built: documentation generator, roadmap view, release management, and a project-grounded Domain chat rail (the per-node ask exists; the right rail is still generic).
+
+New and needs real-world testing: `/do` screen control, and the phone remote's vision loop.
 
 ---
 

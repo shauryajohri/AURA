@@ -15,6 +15,7 @@ import ParticleField from "./components/ParticleField";
 import CursorLens from "./components/CursorLens";
 import PortalTransition from "./components/Domain/PortalTransition";
 import { useSkinDocument } from "./skins/useSkin";
+import AgentBar from "./components/AgentBar";
 
 // Pages are code-split: Home boots instantly and the heavy panels (Domain's
 // editor, the settings overlay, the memory/task views) only download when you
@@ -69,8 +70,8 @@ const LEGACY: Record<string, string> = {
 const PAGES = ["home", "chats", "memory", "tasks", "models", "themes", "settings", "labs"];
 
 export default function App() {
-  const { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, roomEvent, activity, send,
-          loadTurns, clearTurns } = useAuraSocket();
+  const { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, roomEvent, activity, agent,
+          send, loadTurns, clearTurns } = useAuraSocket();
   useBuddyRelay(status, auraState, presence, turns, send);
   const [collapsed, setCollapsed] = useLocalStorage<boolean>("aura.sidebarMin", false);
   const [rawView, setView] = useLocalStorage<string>("aura.view", "home");
@@ -190,6 +191,9 @@ export default function App() {
           onDone={portalDone}
         />
       )}
+
+      {/* AURA operating the screen (/do): what she's doing, Stop, Allow/Deny */}
+      <AgentBar agent={agent} />
 
       {/* the pointer is a tiny black hole — lives above everything
           (skipped in performance mode; the OS cursor image stays) */}

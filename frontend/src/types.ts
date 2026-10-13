@@ -64,6 +64,17 @@ export interface RoomEvent {
   messages?: { role: string; text: string; created_at: string | null }[];
 }
 
+// A step from the desktop agent (core/desktop_agent.py) — AURA operating the
+// screen after /do. "confirm" means she's waiting for Allow / Deny.
+export interface AgentEvent {
+  state: "idle" | "running" | "confirm" | "done" | "stopped" | "failed" | "ask";
+  goal?: string;
+  step?: number;
+  action?: string;
+  message?: string;
+  confirm_id?: string;
+}
+
 // Server -> Client
 export type ServerMessage =
   | { type: "state"; payload: { state: AuraState } }
@@ -75,6 +86,7 @@ export type ServerMessage =
   | { type: "v3"; payload: V3Event }
   | { type: "quest"; payload: QuestEvent }
   | { type: "activity"; payload: ActivityEvent }
+  | { type: "agent"; payload: AgentEvent }
   | { type: "error"; payload: { message: string } }
   | { type: "guard"; payload: GuardDecision }
   | { type: "room"; payload: RoomEvent }
@@ -162,6 +174,8 @@ declare global {
       buddy?: BuddyBridge;
       /** The brain's launch token (see auth.ts). */
       getToken?: () => Promise<string>;
+      /** Desktop app only: show/hide the always-on-top agent control bar. */
+      agentOverlay?: (state: { active: boolean; height: number }) => void;
     };
   }
 }

@@ -45,4 +45,10 @@ contextBridge.exposeInMainWorld("aura", {
   // The brain's launch token (local_auth.py). Asked for again whenever the
   // brain refuses the current one — it changes every time the brain restarts.
   getToken: () => ipcRenderer.invoke("aura:token"),
+  // Desktop agent (/do): show or hide the always-on-top control bar.
+  agentOverlay: (state) =>
+    ipcRenderer.send("agent:overlay", {
+      active: !!(state && state.active),
+      height: Number(state && state.height) || 64,
+    }),
 });

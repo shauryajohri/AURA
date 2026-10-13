@@ -71,6 +71,8 @@ const DEFAULTS: Settings = {
   "habits.ignore": [],
   "behavior.proactive": true,
   "behavior.interrupt_work": false,
+  "agent.enabled": true,
+  "agent.confirm_all": false,
   // Developer / experimental
   "dev.verbose_logs": false,
   "dev.show_intents": false,

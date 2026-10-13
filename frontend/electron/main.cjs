@@ -131,9 +131,10 @@ function createWindow() {
   // Settings switch, or its own "Hide until restart" puts it away.
   win.on("closed", () => {
     mainWin = null;
-    // Closing AURA still puts her to sleep — the buddy must not keep the
-    // app (and the brain) alive on its own.
+    // Closing AURA still puts her to sleep — the buddy and the agent bar
+    // must not keep the app (and the brain) alive on their own.
     if (alive(buddyWin)) buddyWin.destroy();
+    if (alive(overlayWin)) overlayWin.destroy();
   });
 
   // Belt and braces for links. The renderer routes clicks through the preload
@@ -340,6 +341,69 @@ ipcMain.on("win:close", (e) => BrowserWindow.fromWebContents(e.sender)?.close())
 ipcMain.on("shell:open-external", (_e, url) => openExternal(url));
 // Only AURA's own pages may ask for the token — never a page that somehow
 // ended up in a window (will-navigate already keeps the app on its own UI).
+// ---------------------------------------------------------------------------
+// The agent control bar: while AURA operates the screen (/do) her main window
+// gets out of the way, and this small always-on-top bar shows what she's doing
+// with Stop and Allow / Deny. It never takes focus, so clicking it doesn't
+// pull the keyboard away from the app she's working in.
+// ---------------------------------------------------------------------------
+const OVERLAY_WIDTH = 580;
+let overlayWin = null;
+let minimizedForAgent = false;
+
+function createOverlay() {
+  const { width } = screen.getPrimaryDisplay().workAreaSize;
+  overlayWin = new BrowserWindow({
+    width: OVERLAY_WIDTH,
+    height: 64,
+    x: Math.round((width - OVERLAY_WIDTH) / 2),
+    y: 6,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    focusable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    alwaysOnTop: true,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  overlayWin.setAlwaysOnTop(true, "screen-saver");
+  overlayWin.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  overlayWin.webContents.on("will-navigate", (e) => e.preventDefault());
+  if (isDev) overlayWin.loadURL("http://localhost:5173/#agent-overlay");
+  else overlayWin.loadFile(path.join(__dirname, "..", "dist", "index.html"), { hash: "agent-overlay" });
+  overlayWin.on("closed", () => { overlayWin = null; });
+}
+
+// Only the bar itself shows or hides the bar (and minimizes the main window).
+ipcMain.on("agent:overlay", (e, state) => {
+  if (!alive(overlayWin) || e.sender !== overlayWin.webContents) return;
+  const active = !!(state && state.active);
+  const height = Math.max(48, Math.min(200, Number(state && state.height) || 64));
+  if (active) {
+    const b = overlayWin.getBounds();
+    overlayWin.setBounds({ ...b, height });
+    if (!overlayWin.isVisible()) overlayWin.showInactive();
+    if (alive(mainWin) && !mainWin.isMinimized()) {
+      mainWin.minimize();
+      minimizedForAgent = true;
+    }
+  } else {
+    overlayWin.hide();
+    // Come back to report — but only if WE minimized her.
+    if (minimizedForAgent && alive(mainWin)) mainWin.restore();
+    minimizedForAgent = false;
+  }
+});
+
 ipcMain.handle("aura:token", async (e) => {
   let from = "";
   try {
@@ -355,6 +419,8 @@ app.whenReady().then(() => {
   if (!isDev) startBrainIfNeeded(); // in dev you run server.py yourself
   createWindow();
   createBuddyWindow();
+  createOverlay();
+  createOverlay();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

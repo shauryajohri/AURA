@@ -18,12 +18,13 @@ pandas
 # Utilities
 pyperclip
 
-# Desktop control (phone remote, screen reading)
+# Screen: reading it (habits, quests) and operating it (/do, phone remote)
 pyautogui
 pygetwindow
 mss
 pytesseract
 Pillow
+uiautomation; sys_platform == "win32"
 
 # Optional — local should_respond gate (falls back gracefully if absent)
 ollama

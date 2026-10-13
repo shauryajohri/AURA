@@ -1157,6 +1157,9 @@ DEFAULT_SETTINGS = {
     # Habits — which apps they use and when (core/habits.py)
     "habits.enabled": True,        # off = nothing is sampled or stored
     "habits.ignore": [],           # app names never tracked
+    # Screen control — /do <task> (core/desktop_agent.py)
+    "agent.enabled": True,         # off = /do refuses
+    "agent.confirm_all": False,    # ask before EVERY action, not just risky ones
 }
 
 

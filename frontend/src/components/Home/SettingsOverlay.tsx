@@ -35,7 +35,7 @@ export const CATEGORY_META: Record<SettingsCategory, { icon: string; title: stri
   autochat: { icon: "✦", title: "Auto-chat", desc: "How chatty AURA is on her own" },
   phone: { icon: "☏", title: "Phone Report", desc: "AURA calls you with progress, meetings and what needs your approval" },
   privacy: { icon: "⛨", title: "Privacy", desc: "What AURA may see and store" },
-  behavior: { icon: "◎", title: "Behavior", desc: "When she speaks up, when she stays quiet — not active yet" },
+  behavior: { icon: "◎", title: "Behavior", desc: "When she speaks up, when she stays quiet, and /do screen control" },
   keys: { icon: "⚿", title: "API Keys", desc: "Which providers are connected" },
   developer: { icon: "⌥", title: "Developer", desc: "Logs, intents, diagnostics — not active yet" },
   experimental: { icon: "⚗", title: "Experimental", desc: "Unfinished features — not active yet" },
@@ -63,7 +63,7 @@ const KEYS: Record<Exclude<SettingsCategory, "layout" | "keys">, string[]> = {
           "phone.milestones", "phone.meeting_alert", "phone.meeting_lead",
           "phone.quiet_start", "phone.quiet_end"],
   privacy: ["privacy.screen_reading", "privacy.store_conversations", "habits.enabled"],
-  behavior: ["behavior.proactive", "behavior.interrupt_work"],
+  behavior: ["behavior.proactive", "behavior.interrupt_work", "agent.enabled", "agent.confirm_all"],
   developer: ["dev.verbose_logs", "dev.show_intents"],
   experimental: ["experimental.plugins", "experimental.cloud_sync"],
 };
@@ -434,6 +434,8 @@ export default function SettingsOverlay({
   const LABELS: Record<string, string> = {
     "buddy.enabled": "desktop buddy",
     "habits.enabled": "learn my habits",
+    "agent.enabled": "let AURA control my screen (/do)",
+    "agent.confirm_all": "ask before every action",
   };
   const label = (k: string) => LABELS[k] ?? k.split(".")[1].replace(/_/g, " ");
 

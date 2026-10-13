@@ -76,6 +76,7 @@ async def _lifespan(app: FastAPI):
     _init_director()
     _init_v3()
     _start_auto_chat()
+    _start_remote()
     yield
 
 
@@ -95,6 +96,24 @@ try:
     print("[AURA bridge] Domain API mounted")
 except Exception:  # noqa: BLE001
     traceback.print_exc()
+
+# Phone remote control. The desktop-side controls (/api/remote) mount here, on
+# localhost. The phone-facing routes run on their OWN port (remote_api), so
+# /ws, which has no auth, never has to be exposed to the network.
+try:
+    from remote_api import local_router as _remote_local_router
+    app.include_router(_remote_local_router)
+except Exception:  # noqa: BLE001
+    traceback.print_exc()
+
+
+def _start_remote() -> None:
+    try:
+        from remote_api import start_in_background
+        start_in_background()
+    except Exception:  # noqa: BLE001
+        traceback.print_exc()
+
 
 # Public web surface (/web/api/*) — the sandboxed demo behind the landing
 # page. Deliberately separate from /ws: it never touches the personal store,

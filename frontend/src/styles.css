@@ -2092,7 +2092,9 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
      conversation is the thing being read, so it gets an opaque backing and
      the cosmos stays outside it. */
   background: rgba(9, 10, 24, 0.94);
-  backdrop-filter: var(--glass-blur);
+  /* No backdrop-filter: at 94% opacity the blur was invisible, yet the GPU
+     re-blurred the whole dock every frame because the video and canvases
+     behind it never stop moving. That was a big part of the chat lag. */
   box-shadow: var(--glass-highlight), 0 18px 50px rgba(0, 0, 0, 0.5);
   overflow: hidden;
   transition: max-height 0.4s cubic-bezier(0.22, 0.8, 0.3, 1);

@@ -4,7 +4,7 @@ AURA is a self-hosted AI companion that lives on your desktop and works alongsid
 
 Voice, screen awareness, durable memory, quests, proactive nudges — and **you decide who she is to you**: a buddy, an assistant, a mentor, or a role you describe yourself (Settings → Relationship).
 
-> AURA Domain (the coding workspace / Project Brain) was removed so AURA can be a companion rather than a tool you have to learn. It lives on in the `domain-archive` git tag.
+> AURA Domain (the coding workspace / Project Brain) was removed so AURA can be a companion rather than a tool you have to learn. The full Domain code is still in git history at commit `c752187` (the last commit before it was removed).
 
 ---
 

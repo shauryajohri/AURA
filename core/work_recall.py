@@ -11,8 +11,8 @@ stored session summary and recaps, not guess from eight lines of history.
                            the message is actually asking about past work.
 
 (This used to read the AURA Domain project graph too. Domain was removed when
-AURA became a companion rather than a dev workspace; the graph lives on in the
-`domain-archive` git tag.)
+AURA became a companion rather than a dev workspace; the graph is still in
+git history at commit c752187.)
 
 Design rules:
   · Never raise. A chat turn must not fail because a table is missing; every

@@ -41,6 +41,7 @@
   .hist { font-size: 14px; border-top: 1px solid var(--line); padding: 8px 0; }
   .hist:first-child { border-top: 0; }
   .hidden { display: none !important; }
+  #screen { width: 100%; border-radius: 10px; border: 1px solid var(--line); margin-top: 10px; display: block; }
 </style>
 </head>
 <body>
@@ -70,6 +71,7 @@
     <div id="result" class="card hidden">
       <div class="tag" id="resultTag"></div>
       <div class="reply" id="reply"></div>
+      <img id="screen" class="hidden" alt="What AURA sees on the laptop">
       <ol id="steps"></ol>
       <div class="row hidden" id="confirmRow">
         <button id="cancel" class="ghost">Cancel</button>
@@ -90,6 +92,8 @@
   let token = "";
   try { token = localStorage.getItem("aura_remote_token") || ""; } catch (_) {}
   let pendingId = null;
+  let pollTimer = null;
+  let shownScreen = { id: null, v: -1 };
 
   async function api(path, opts = {}) {
     const res = await fetch("/remote/api" + path, {
@@ -128,7 +132,7 @@
   }
 
   const TAGS = { done: "Done", pending: "Needs your OK", declined: "Declined", failed: "Didn't finish",
-                 stopped: "Stopped", cancelled: "Cancelled", expired: "Expired", running: "Running" };
+                 stopped: "Stopped", cancelled: "Cancelled", expired: "Expired", running: "Working…" };
 
   function render(job) {
     $("result").classList.remove("hidden");
@@ -147,7 +151,33 @@
     });
     pendingId = job.status === "pending" ? job.id : null;
     $("confirmRow").classList.toggle("hidden", !pendingId);
-    loadHistory();
+    if (job.mode === "vision") showScreen(job); else $("screen").classList.add("hidden");
+
+    // A vision job keeps working after the request returns: poll until it settles.
+    clearTimeout(pollTimer);
+    const live = job.mode === "vision" && (job.status === "running" || job.status === "pending");
+    busy(job.status === "running");
+    if (live) pollTimer = setTimeout(() => poll(job.id), 1500);
+    else loadHistory();
+  }
+
+  async function poll(id) {
+    try { render(await api(`/jobs/${id}`)); }
+    catch (e) { pollTimer = setTimeout(() => poll(id), 3000); }
+  }
+
+  async function showScreen(job) {
+    if (!job.screen_version || (shownScreen.id === job.id && shownScreen.v === job.screen_version)) return;
+    shownScreen = { id: job.id, v: job.screen_version };
+    try {
+      const res = await fetch(`/remote/api/jobs/${job.id}/screen`, { headers: { "Authorization": "Bearer " + token } });
+      if (!res.ok) return;
+      const img = $("screen");
+      const old = img.src;
+      img.src = URL.createObjectURL(await res.blob());
+      img.classList.remove("hidden");
+      if (old.startsWith("blob:")) URL.revokeObjectURL(old);
+    } catch (_) {}
   }
 
   function busy(on) {
@@ -158,9 +188,12 @@
 
   async function run(path, body) {
     busy(true);
-    try { render(await api(path, { method: "POST", body: body ? JSON.stringify(body) : undefined })); }
-    catch (e) { render({ status: "failed", reply: "Couldn't reach AURA: " + e.message, steps: [] }); }
-    finally { busy(false); refreshStatus(); }
+    let job = null;
+    try { job = await api(path, { method: "POST", body: body ? JSON.stringify(body) : undefined }); }
+    catch (e) { job = { status: "failed", reply: "Couldn't reach AURA: " + e.message, steps: [] }; }
+    busy(false);
+    render(job);
+    refreshStatus();
   }
 
   async function loadHistory() {

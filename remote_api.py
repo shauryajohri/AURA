@@ -9,7 +9,9 @@ one of them needs the token.
 
     GET  /                       the phone page (remote_ui/index.html)
     GET  /remote/api/status      is the laptop active? (presence gate)
-    POST /remote/api/command     {"text": "..."} → job (declined | pending | done | failed | stopped)
+    POST /remote/api/command     {"text": "..."} → job (declined | pending | running | done | failed | stopped)
+    GET  /remote/api/jobs/{id}   poll a running vision job
+    GET  /remote/api/jobs/{id}/screen   the laptop screen AURA last looked at (JPEG)
     POST /remote/api/jobs/{id}/approve
     POST /remote/api/jobs/{id}/cancel
     POST /remote/api/stop        abort the running job (between steps / keystroke chunks)
@@ -29,6 +31,8 @@ Env
   AURA_REMOTE_CONFIRM       risky (default) | all | none
   AURA_REMOTE_ALLOW_SHELL   "1" lets AURA plan run_shell steps (always asks first)
   AURA_REMOTE_MAX_IDLE_MIN  decline if the laptop has been idle longer (0 = off)
+  AURA_REMOTE_VISION        auto (default) | off — use the vision loop for non-trivial commands
+  AURA_VISION_MAX_STEPS     look-act rounds per command (default 15)
 
 Run standalone:  python remote_api.py
 """
@@ -44,9 +48,10 @@ from collections import deque
 from pathlib import Path
 
 from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from core import remote_control as rc
+from core import vision_agent
 
 HERE = Path(__file__).resolve().parent
 UI_PATH = HERE / "remote_ui" / "index.html"
@@ -112,12 +117,26 @@ def status() -> dict:
     gate = rc.presence()
     gate["confirm_mode"] = rc.confirm_mode()
     gate["shell_allowed"] = rc.shell_allowed()
+    gate["vision"], gate["vision_why"] = vision_agent.available()
     return gate
 
 
 @router.post("/command")
 def command(body: dict = Body(...)) -> dict:
     return rc.submit(str(body.get("text") or "")).public()
+
+
+@router.get("/jobs/{job_id}")
+def job(job_id: str) -> dict:
+    return _job_or_404(rc.get_job(job_id))
+
+
+@router.get("/jobs/{job_id}/screen")
+def job_screen(job_id: str) -> Response:
+    img = rc.latest_screen(job_id)
+    if img is None:
+        raise HTTPException(404, "no screenshot for that job")
+    return Response(img, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 @router.post("/jobs/{job_id}/approve")

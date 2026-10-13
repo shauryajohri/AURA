@@ -12,7 +12,7 @@ import { useSettingsStore } from "../stores/settingsStore";
 const SECTIONS: Array<{ title: string; cats: SettingsCategory[] }> = [
   { title: "System", cats: ["general", "keys", "privacy", "behavior"] },
   { title: "Appearance", cats: ["blackhole", "planets", "orbits", "animations", "wallpaper", "layout"] },
-  { title: "Voice & Personality", cats: ["voice", "autochat"] },
+  { title: "Voice & Personality", cats: ["relationship", "voice", "autochat"] },
   { title: "Advanced", cats: ["developer", "experimental"] },
 ];
 

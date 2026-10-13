@@ -1,4 +1,4 @@
-// Shared Sanctuary layout types — used by SanctuarySection and SettingsOverlay.
+// Shared Sanctuary layout types — used by SettingsOverlay.
 
 export type ColId = "left" | "center" | "right";
 export type Preset = "default" | "compact" | "custom";
@@ -13,8 +13,8 @@ export interface Layout {
 
 export const DEFAULT_LAYOUT: Layout = {
   cols: {
-    left: ["tasks", "memory", "music"],
-    center: ["domain"],
+    left: ["tasks", "music"],
+    center: ["memory"],
     right: ["links", "portfolio", "settings"],
   },
   hidden: [],
@@ -24,5 +24,5 @@ export const DEFAULT_LAYOUT: Layout = {
 
 export const CARD_TITLES: Record<string, string> = {
   tasks: "Tasks", memory: "Memory", music: "Music",
-  domain: "AURA Domain", links: "Quick Shortcuts", portfolio: "Portfolio", settings: "Settings",
+  links: "Quick Shortcuts", portfolio: "Portfolio", settings: "Settings",
 };

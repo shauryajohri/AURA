@@ -15,8 +15,7 @@ Groq), same personality, but:
     in a per-session object that expires; nothing touches memory/store.py.
   * **no reads of the personal store** — the demo's "memory" is the visitor's
     own session facts, not shaurya's; the Project Brain preview serves a
-    curated snapshot (`web/demo_project.json`) unless
-    `AURA_WEB_LIVE_DOMAIN=1` explicitly opts the real graph in.
+    curated snapshot (`web/demo_project.json`).
   * **no tools** — no filesystem, no shell, no screen, no git.
   * **budgeted** — per-session message cap, per-IP rate limit, small model by
     default, so a demo tab can never eat the quota the desktop app needs.
@@ -42,7 +41,6 @@ Env
   AURA_WEB_MSG_LIMIT    messages per session   (default: 20)
   AURA_WEB_IP_PER_MIN   requests per IP/minute (default: 30)
   AURA_WEB_TTL_MIN      idle session lifetime  (default: 45)
-  AURA_WEB_LIVE_DOMAIN  "1" → serve the REAL Project Brain (self-host only)
   AURA_WEB_SITE         "0" → don't mount the static site
 """
 
@@ -77,8 +75,6 @@ MAX_SESSIONS = 500
 MAX_TURNS = 12          # transcript window handed to the model
 MAX_FACTS = 12
 MAX_INPUT_CHARS = 1200
-
-LIVE_DOMAIN = os.getenv("AURA_WEB_LIVE_DOMAIN", "") == "1"
 
 
 # ---------------------------------------------------------------------------
@@ -211,8 +207,9 @@ def _notes_block(s: WebSession) -> str:
 
 def _build_system(s: WebSession) -> str:
     try:
-        from core.personality import DONNA_SYSTEM_PROMPT
-        base = DONNA_SYSTEM_PROMPT
+        from core.personality import system_prompt
+        # use_saved=False: the demo must never read the owner's personal store
+        base = system_prompt(use_saved=False)
     except Exception:  # noqa: BLE001
         base = "You are AURA, a sharp, dry, useful AI companion."
     return base + _WEB_ADDON + _facts_block(s) + _notes_block(s)
@@ -259,7 +256,6 @@ async def web_session(x_aura_session: str | None = Header(default=None)) -> dict
     return {
         **s.public(),
         "model": DEMO_MODEL,
-        "live_domain": LIVE_DOMAIN,
         "capabilities": {
             "chat": True, "memory": True, "domain": True,
             "voice": False, "screen": False, "files": False, "terminal": False,
@@ -444,24 +440,8 @@ def _demo_data() -> dict[str, Any]:
     return _DEMO_CACHE
 
 
-def _live_projects() -> list[dict[str, Any]] | None:
-    if not LIVE_DOMAIN:
-        return None
-    try:
-        from core.domain import brain_store
-        return [
-            {"id": p["id"], "name": p["name"], "root": "", "repo_url": ""}
-            for p in brain_store.list_projects()
-        ]
-    except Exception:  # noqa: BLE001
-        return None
-
-
 @router.get("/domain/projects")
 async def web_projects() -> dict[str, Any]:
-    live = _live_projects()
-    if live is not None:
-        return {"projects": live, "source": "live"}
     return {
         "projects": [
             {"id": p["id"], "name": p["name"], "summary": p.get("summary", "")}
@@ -473,24 +453,6 @@ async def web_projects() -> dict[str, Any]:
 
 @router.get("/domain/project/{pid}")
 async def web_project(pid: str) -> dict[str, Any]:
-    if LIVE_DOMAIN:
-        try:
-            from core.domain import brain_store, progress
-            proj = brain_store.get_project(pid)
-            if proj:
-                return {
-                    "source": "live",
-                    "project": {"id": proj["id"], "name": proj["name"],
-                                "summary": proj.get("summary", "")},
-                    "overall": progress.overall(pid),
-                    "features": progress.feature_progress(pid),
-                    "blocker": progress.biggest_blocker(pid),
-                    "counts": brain_store.counts(pid),
-                    "timeline": [],
-                    "graph": {"nodes": [], "edges": []},
-                }
-        except Exception:  # noqa: BLE001
-            pass
     for p in _demo_data().get("projects", []):
         if p["id"] == pid:
             return {"source": "sample", **p}

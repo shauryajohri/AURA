@@ -210,17 +210,10 @@ def conversational_recall(query: str) -> str:
     AURA actually knows (session snapshot, recent conversation, knowledge
     hits) and let the LLM answer naturally."""
     parts = []
-    # The project graph first — when they ask "what were we doing", the answer
-    # is almost always a project, not a chat line. This is the same block the
-    # ordinary chat turn gets, expanded.
+    # Session memory first — when they ask "what were we doing", the answer is
+    # usually in the last session summary and recaps.
     try:
         from core import work_recall
-        # If the question names a project she knows, lead with THAT project's
-        # detail — "what did we decide on the portfolio?" should answer about
-        # the portfolio, not about whatever was touched most recently.
-        focused = work_recall.find_project(query)
-        if focused:
-            parts.append(work_recall.focus_block(focused, query))
         work = work_recall.answer_context(query)
         if work:
             parts.append(work)
@@ -567,35 +560,17 @@ def build_context_prompt(query: str, intent: str, thought_context: str, comeback
     thought_section = f"\nContext: {thought_context}" if thought_context else ""
     facts_section = f"\n{facts_text}" if facts_text else ""
 
-    # The Project Brain, in the conversation. Without this the chat could see
-    # eight lines of history and nothing else, so "what project were we on last
-    # time?" was answered by guessing — while the whole project graph (features,
-    # tasks, decisions, commits, progress) sat in the same SQLite file. Compact
-    # on ordinary turns; expanded when they're actually asking about the work.
-    #
-    # Gated as of 2026-08-20. It used to run on EVERY turn: the third tier of
-    # work_recall.prompt_section() is an unconditional per-project summary, so
-    # "hey" and "what time is it" both arrived carrying the project graph. That
-    # is what the user meant by "AURA should not read the whole context" — the
-    # message drowned in background. It now loads only when the turn is
-    # actually about the work.
+    # Session memory, in the conversation — only when the turn is actually
+    # asking about past work, so "hey" doesn't arrive carrying old recaps.
     work_memory_section = ""
     try:
         from core import work_recall
-        asked_about_work = work_recall.is_work_question(query)
-        names_a_project = bool(work_recall.find_project(query))
-        wants_work_context = (
-            asked_about_work
-            or names_a_project
-            or intent in {"CODING", "PLAN", "RESEARCH", "SEARCH", "RECALL"}
-        )
-        if asked_about_work:
+        if work_recall.is_work_question(query):
             try:
                 from core import activity
                 activity.emit("Searching memory…", "memory")
             except Exception:  # noqa: BLE001
                 pass
-        if wants_work_context:
             block = work_recall.prompt_section(query)
             if block:
                 work_memory_section = f"\n{block}"
@@ -1120,17 +1095,12 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
         # A compiled prompt is deliberately NOT wrapped in the usual context —
         # but "what were we working on" asked inside a workspace mode is still a
         # memory question, and answering it from nothing looked like amnesia.
-        # Append the project block only for those, so ordinary compiled prompts
-        # stay exactly as the engine built them.
-        # Also for a question that names a project: "/code ... how do I upgrade
-        # the portfolio?" is a question about a real codebase, and answering it
-        # from nothing is the same amnesia in a different mode.
         try:
             from core import work_recall
-            if work_recall.is_work_question(query) or work_recall.find_project(query):
+            if work_recall.is_work_question(query):
                 block = work_recall.prompt_section(query)
                 if block:
-                    full_prompt = f"{query}\n\nWHAT YOU KNOW ABOUT THE WORK:\n{block}"
+                    full_prompt = f"{query}\n\nWHAT YOU REMEMBER:\n{block}"
         except Exception:
             pass
     elif _re.search(r'https?://', query):

@@ -50,7 +50,6 @@ scripted replies rather than showing errors.
 | `AURA_WEB_MSG_LIMIT` | `20` | messages per visitor session |
 | `AURA_WEB_IP_PER_MIN` | `30` | requests per IP per minute |
 | `AURA_WEB_TTL_MIN` | `45` | idle session lifetime |
-| `AURA_WEB_LIVE_DOMAIN` | unset | `1` serves the **real** Project Brain — self-host only |
 | `AURA_WEB_SITE` | `1` | `0` skips mounting the static site |
 
 ## Endpoints
@@ -76,10 +75,8 @@ returns on `/session` and `/chat`.
 
 1. Put it behind a reverse proxy with TLS, and disable proxy buffering so SSE
    streams (`proxy_buffering off;` in nginx).
-2. Keep `AURA_WEB_LIVE_DOMAIN` unset — the sample graph is what strangers
-   should see.
-3. Run a **separate** process from your personal instance, with its own API key
+2. Run a **separate** process from your personal instance, with its own API key
    and its own (empty) `memory/` directory. The demo doesn't read that database,
    but a second process means a bug can't reach it either.
-4. Tighten CORS: `server.py` currently allows `*` because the Electron shell
+3. Tighten CORS: `server.py` currently allows `*` because the Electron shell
    loads from `file://`.

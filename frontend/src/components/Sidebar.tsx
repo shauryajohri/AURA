@@ -1,8 +1,7 @@
 /**
  * The fixed glass sidebar — AURA OS navigation.
  *
- * Six destinations. "Aura Domain" is special: it doesn't swap the page, it
- * crosses the portal into the dedicated coding workspace. Collapsed mode is
+ * Every destination swaps the page with a crossfade. Collapsed mode is
  * icons-only; the width animates (CSS) and labels fade out, nothing snaps.
  * The bottom is reserved for identity: profile, version, plan.
  */
@@ -12,13 +11,11 @@ interface NavItem {
   label: string;
   icon: string;
   hint: string;
-  domain?: boolean;
 }
 
 const NAV: NavItem[] = [
   { id: "home", label: "Home", icon: "⌂", hint: "The AURA core" },
   { id: "chats", label: "Chats", icon: "◈", hint: "Rooms · chats · history" },
-  { id: "domain", label: "Aura Domain", icon: "❖", hint: "Coding workspace", domain: true },
   { id: "memory", label: "Memory", icon: "❋", hint: "Timeline · search · bookmarks" },
   { id: "tasks", label: "Tasks", icon: "✓", hint: "Today · projects · quests" },
   { id: "models", label: "Models", icon: "◈", hint: "Planets · routing · orbits" },
@@ -30,7 +27,6 @@ interface Props {
   active: string;
   collapsed: boolean;
   onNavigate: (id: string) => void;
-  onLaunchDomain: () => void;
   onToggle: () => void;
   listening?: boolean;
 }
@@ -39,7 +35,6 @@ export default function Sidebar({
   active,
   collapsed,
   onNavigate,
-  onLaunchDomain,
   onToggle,
   listening = false,
 }: Props) {
@@ -60,10 +55,9 @@ export default function Sidebar({
             key={item.id}
             className={
               "osbar__item" +
-              (active === item.id && !item.domain ? " osbar__item--active" : "") +
-              (item.domain ? " osbar__item--domain" : "")
+              (active === item.id ? " osbar__item--active" : "")
             }
-            onClick={() => (item.domain ? onLaunchDomain() : onNavigate(item.id))}
+            onClick={() => onNavigate(item.id)}
             title={collapsed ? item.label : undefined}
           >
             <span className="osbar__icon">{item.icon}</span>
@@ -71,7 +65,7 @@ export default function Sidebar({
               <span className="osbar__label">{item.label}</span>
               <span className="osbar__hint">{item.hint}</span>
             </span>
-            {active === item.id && !item.domain && <span className="osbar__glowline" />}
+            {active === item.id && <span className="osbar__glowline" />}
           </button>
         ))}
       </nav>

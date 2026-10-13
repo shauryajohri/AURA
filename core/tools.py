@@ -129,11 +129,10 @@ def _search_code(query: str = "", **_) -> str:
 
 
 def _recall_project(query: str = "", **_) -> str:
-    """What AURA knows about the project itself: features, open tasks, recent
-    decisions, session recaps, where we left off."""
+    """What AURA remembers about recent work: the last session and recaps."""
     try:
         from core import work_recall
-        return work_recall.answer_context(query or "") or "(nothing recorded about the project yet)"
+        return work_recall.answer_context(query or "") or "(nothing recorded about recent sessions yet)"
     except Exception as e:  # noqa: BLE001
         return f"project recall unavailable: {e}"
 
@@ -167,7 +166,7 @@ TOOLS: dict[str, dict] = {
     },
     "recall_project": {
         "fn": _recall_project, "args": '{"query": "..."}',
-        "help": "what AURA knows about the project: features, open tasks, decisions, where we left off",
+        "help": "what AURA remembers about recent sessions: where you left off, earlier recaps",
     },
     "list_rooms": {
         "fn": _list_rooms, "args": "{}",

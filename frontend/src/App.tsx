@@ -11,12 +11,10 @@ import CosmicBackground from "./components/CosmicBackground";
 import UniverseBackground from "./components/UniverseBackground";
 import ParticleField from "./components/ParticleField";
 import CursorLens from "./components/CursorLens";
-import PortalTransition from "./components/Domain/PortalTransition";
 
-// Pages are code-split: Home boots instantly and the heavy panels (Domain's
-// editor, the settings overlay, the memory/task views) only download when you
-// actually open them. This is the single biggest startup win available.
-const DomainScreen = lazy(() => import("./components/Domain/DomainScreen"));
+// Pages are code-split: Home boots instantly and the heavy panels (the
+// settings overlay, the memory/task views) only download when you actually
+// open them. This is the single biggest startup win available.
 const MemoryPage = lazy(() => import("./views/MemoryPage"));
 const TasksPage = lazy(() => import("./views/TasksPage"));
 const ModelsPage = lazy(() => import("./views/ModelsPage"));
@@ -39,8 +37,7 @@ function PageLoading() {
  *
  * Home is the permanent landing page: the core at the center, the chat dock
  * at the bottom, one small status card. The glass sidebar opens every other
- * page with a crossfade, and "Aura Domain" crosses the portal into the
- * dedicated coding workspace. The old second "Village" screen is gone — what
+ * page with a crossfade. The old second "Village" screen is gone — what
  * lived there (tasks, links vault, memory, settings) lives in the pages now.
  */
 
@@ -76,13 +73,6 @@ export default function App() {
   // push them into the visual stores (core, planets, background).
   const loadSettings = useSettingsStore((s) => s.load);
   useEffect(() => { loadSettings(); }, [loadSettings]);
-
-  // ---- AURA Domain: the workspace beyond the portal -----------------------
-  const [domainOpen, setDomainOpen] = useState(false);
-  const [portal, setPortal] = useState<null | "in" | "out">(null);
-  const enterDomain = useCallback(() => setPortal("in"), []);
-  const exitDomain = useCallback(() => setPortal("out"), []);
-  const portalDone = useCallback(() => setPortal(null), []);
 
   const goHome = useCallback(() => setView("home"), [setView]);
 
@@ -120,7 +110,6 @@ export default function App() {
         active={view}
         collapsed={collapsed}
         onNavigate={setView}
-        onLaunchDomain={enterDomain}
         onToggle={() => setCollapsed(!collapsed)}
         listening={presence === "working" || auraState === "thinking"}
       />
@@ -147,24 +136,6 @@ export default function App() {
           </div>
         )}
       </main>
-
-      {/* ---- The Domain: a different workspace entirely ---- */}
-      {domainOpen && (
-        <div className="screen screen--domain">
-          <Suspense fallback={<PageLoading />}>
-            <DomainScreen onExit={exitDomain} />
-          </Suspense>
-        </div>
-      )}
-
-      {/* ---- Portal overlay: crossing the threshold ---- */}
-      {portal && (
-        <PortalTransition
-          direction={portal}
-          onMid={() => setDomainOpen(portal === "in")}
-          onDone={portalDone}
-        />
-      )}
 
       {/* the pointer is a tiny black hole — lives above everything */}
       <CursorLens />

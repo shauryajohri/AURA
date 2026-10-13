@@ -84,18 +84,6 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 
-# Domain routes (filesystem, terminal, GitHub, OAuth connectors) live in their
-# own module — if one of them fails to import, the brain still comes up.
-try:
-    from domain_api import router as domain_router
-    app.include_router(domain_router)
-    # Project Brain graph (Domain V2) shares the memory DB — create its tables.
-    from core.domain import brain_store as _brain_store
-    _brain_store.init_db()
-    print("[AURA bridge] Domain API mounted")
-except Exception:  # noqa: BLE001
-    traceback.print_exc()
-
 # Public web surface (/web/api/*) — the sandboxed demo behind the landing
 # page. Deliberately separate from /ws: it never touches the personal store,
 # has no tools, and is budgeted. The static site itself is mounted at the very
@@ -576,6 +564,9 @@ async def api_save_settings(req: Request) -> dict[str, Any]:
     if not isinstance(patch, dict):
         return {"ok": False, "error": "settings object required"}
     store.set_settings(patch)
+    if any(str(k).startswith("persona.") for k in patch):
+        from core import persona
+        persona.invalidate()   # the next reply speaks in the new role
     return {"ok": True, "settings": store.get_settings()}
 
 
@@ -1033,8 +1024,8 @@ async def api_v3_mistakes() -> dict[str, Any]:
 async def api_v3_explain(req: Request) -> dict[str, Any]:
     """Classify an arbitrary error blob.
 
-    `record` defaults to False so the Domain code panel can preview a
-    classification without inflating today's mistake count.
+    `record` defaults to False so a caller can preview a classification
+    without inflating today's mistake count.
     """
     from core import v3_bridge
     body = await req.json()
@@ -1047,8 +1038,8 @@ async def api_v3_explain(req: Request) -> dict[str, Any]:
 
 @app.post("/api/v3/build")
 async def api_v3_build(req: Request) -> dict[str, Any]:
-    """Report a build/test result — the Domain terminal calls this so runs
-    outside the screen watcher still feed momentum and confidence."""
+    """Report a build/test result so runs outside the screen watcher still
+    feed momentum and confidence."""
     from core import v3_bridge
     body = await req.json()
     line = v3_bridge.report_build(bool(body.get("success", False)))

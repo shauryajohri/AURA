@@ -120,7 +120,7 @@ def _announce(name: str, args: dict) -> None:
         pretty = {
             "repo_state": "Checking the repo…",
             "search_code": "Searching the codebase…",
-            "recall_project": "Recalling the project…",
+            "recall_project": "Recalling past sessions…",
             "list_rooms": "Checking rooms…",
         }.get(name, "Looking something up…")
         activity.emit(pretty, "memory")

@@ -70,26 +70,6 @@ check("four words is still plausible",
       _launch_target("open android studio dev channel") == "android studio dev channel")
 
 
-print("\n[a known project is talk, not a launch]")
-# _launch_target asks work_recall, so a project he's discussing doesn't get
-# handed to subprocess. Stub the store rather than touching the real db.
-from core import work_recall as W  # noqa: E402
-
-W._list_projects = lambda: [                                     # type: ignore[assignment]
-    {"id": "p9", "name": "Wasabikiri_remake", "root": "", "updated_at": "2026-07-30 10:00:00"},
-]
-W._nodes = lambda pid, kind: []                                  # type: ignore[assignment]
-W._INDEX.clear()
-check("'open wasabikiri_remake' is project talk, not a launch",
-      _launch_target("open wasabikiri_remake") is None)
-check("an unrelated app still launches", _launch_target("open chrome") == "chrome")
-
-W._list_projects = lambda: (_ for _ in ()).throw(RuntimeError("db gone"))  # type: ignore[assignment]
-W._INDEX.clear()
-check("a broken brain doesn't break the launcher",
-      _launch_target("open chrome") == "chrome")
-
-
 print("\n" + "=" * 40)
 print(f"{passed} passed, {failed} failed")
 print("=" * 40)

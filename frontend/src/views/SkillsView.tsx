@@ -59,7 +59,7 @@ const SKILLS: Skill[] = [
   },
   {
     icon: "▣", name: "Plan & organise projects",
-    blurb: "Breaks goals into plans, keeps projects, boards, notes and code together in the Domain workspace.",
+    blurb: "Breaks goals into plans and keeps track of what you're working on.",
     routes: "Nemotron 3 Super", live: true,
   },
   {

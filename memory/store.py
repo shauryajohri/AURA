@@ -1095,6 +1095,10 @@ DEFAULT_SETTINGS = {
     # Auto-chat (proactive / attention / curiosity pushes)
     "autochat.enabled": True,
     "autochat.frequency": 40,      # 0-100 how chatty AURA is on her own
+    # Relationship — who AURA is to the user (core/persona.py)
+    "persona.mode": "buddy",       # buddy | assistant | mentor | custom
+    "persona.user_name": "",       # what AURA calls them
+    "persona.custom": "",          # their own role description (mode=custom)
 }
 
 

@@ -307,15 +307,6 @@ def _launch_target(q: str) -> str | None:
         return None
     if len(words) > MAX_APP_NAME_WORDS:
         return None
-    # A project he's discussing is not an app to launch. This is the same
-    # brain the chat uses, so "open wasabikiri_remake" stays a launch only if
-    # it isn't a known project — otherwise it's a conversation about the work.
-    try:
-        from core import work_recall
-        if work_recall.find_project(rest):
-            return None
-    except Exception:  # noqa: BLE001 — the launcher must work without the brain
-        pass
     return rest
 
 

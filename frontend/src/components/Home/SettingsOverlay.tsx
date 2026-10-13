@@ -15,7 +15,7 @@ import VoicePicker from "./VoicePicker";
 
 export type SettingsCategory =
   | "general" | "blackhole" | "planets" | "orbits" | "animations" | "wallpaper"
-  | "voice" | "autochat" | "privacy" | "behavior" | "keys" | "developer"
+  | "relationship" | "voice" | "autochat" | "privacy" | "behavior" | "keys" | "developer"
   | "experimental" | "layout";
 
 export const CATEGORY_META: Record<SettingsCategory, { icon: string; title: string; desc: string }> = {
@@ -25,6 +25,7 @@ export const CATEGORY_META: Record<SettingsCategory, { icon: string; title: stri
   orbits: { icon: "◌", title: "Orbit Lines", desc: "The rings around the core — style, brightness, width" },
   animations: { icon: "≈", title: "Animations", desc: "Motion intensity across the whole OS" },
   wallpaper: { icon: "❖", title: "Wallpaper", desc: "The living cosmos behind everything" },
+  relationship: { icon: "♡", title: "Relationship", desc: "Who AURA is to you — buddy, assistant, mentor or your own" },
   voice: { icon: "♪", title: "Voice", desc: "Which voice she speaks with, plus mic and wake word" },
   autochat: { icon: "✦", title: "Auto-chat", desc: "How chatty AURA is on her own" },
   privacy: { icon: "⛨", title: "Privacy", desc: "What AURA may see and store" },
@@ -46,6 +47,8 @@ const KEYS: Record<Exclude<SettingsCategory, "layout" | "keys">, string[]> = {
   // rows, but it must be listed here or save() would never put it in the patch.
   voice: ["voice.enabled", "voice.name", "voice.rate", "voice.sensitivity",
           "voice.wake_word", "voice.noise_suppression"],
+  // Edited by the relationship controls below, not the generic rows.
+  relationship: ["persona.mode", "persona.user_name", "persona.custom"],
   autochat: ["autochat.enabled", "autochat.frequency"],
   privacy: ["privacy.screen_reading", "privacy.store_conversations"],
   behavior: ["behavior.proactive", "behavior.interrupt_work"],
@@ -65,6 +68,17 @@ const PROVIDERS = [
 ];
 
 const ORBIT_STYLES = ["dashed", "solid", "dotted", "hidden"] as const;
+
+// Mirrors core/persona.py MODES. The backend owns the actual prompt text; this
+// is only what the picker shows.
+const PERSONA_MODES = [
+  { id: "buddy", label: "Buddy", blurb: "A sharp, close friend. Teases, notices things, keeps it real." },
+  { id: "assistant", label: "Assistant", blurb: "A capable chief of staff. Warm, efficient, a step ahead." },
+  { id: "mentor", label: "Mentor", blurb: "Helps you get better, not just get answers. Hints first, honest feedback." },
+  { id: "custom", label: "Custom", blurb: "Describe exactly who you want AURA to be." },
+] as const;
+const MAX_CUSTOM_CHARS = 1200; // core/persona.py MAX_CUSTOM_CHARS
+const MAX_NAME_CHARS = 40;     // core/persona.py MAX_NAME_CHARS
 
 interface Props {
   category: SettingsCategory;
@@ -297,6 +311,18 @@ export default function SettingsOverlay({
           </div>
         );
       }
+      case "relationship": {
+        const mode = PERSONA_MODES.find((m) => m.id === draft["persona.mode"]) ?? PERSONA_MODES[0];
+        const name = String(draft["persona.user_name"] ?? "").trim();
+        return (
+          <div className="setov__stage setov__stage--short">
+            <div className="setov__genicon">{meta.icon}</div>
+            <p className="setov__hint">
+              {name ? `To ${name}, ` : ""}AURA is your <b>{mode.label.toLowerCase()}</b>. {mode.blurb}
+            </p>
+          </div>
+        );
+      }
       case "keys":
         return (
           <div className="setov__stage setov__stage--short">
@@ -334,10 +360,11 @@ export default function SettingsOverlay({
           <div className="setov__minimap">
             {(["left", "center", "right"] as ColId[]).map((c) => (
               <div key={c} className="setov__minicol">
-                {layoutDraft.cols[c].map((id) => (
+                {/* filter: layouts saved before Domain was removed still list it */}
+                {layoutDraft.cols[c].filter((id) => CARD_TITLES[id]).map((id) => (
                   <div
                     key={id}
-                    className={"setov__minicard" + (layoutDraft.sizes[id] === "tall" ? " setov__minicard--tall" : "") + (id === "domain" ? " setov__minicard--hero" : "")}
+                    className={"setov__minicard" + (layoutDraft.sizes[id] === "tall" ? " setov__minicard--tall" : "")}
                   >
                     {CARD_TITLES[id]}
                   </div>
@@ -354,6 +381,57 @@ export default function SettingsOverlay({
 
   const controls = () => {
     if (category === "keys") return null;
+    if (category === "relationship") {
+      const mode = String(draft["persona.mode"] ?? "buddy");
+      const custom = String(draft["persona.custom"] ?? "");
+      return (
+        <div className="setov__controls">
+          <div className="setov__row">
+            <span className="setov__label">AURA is your</span>
+            <span className="setov__stylepick">
+              {PERSONA_MODES.map((m) => (
+                <button
+                  key={m.id}
+                  className={"setov__stylebtn" + (mode === m.id ? " setov__stylebtn--on" : "")}
+                  onClick={() => set("persona.mode", m.id)}
+                  title={m.blurb}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </span>
+          </div>
+          <div className="setov__row">
+            <span className="setov__label">Call me</span>
+            <input
+              className="setov__text"
+              type="text"
+              maxLength={MAX_NAME_CHARS}
+              placeholder="your name (optional)"
+              value={String(draft["persona.user_name"] ?? "")}
+              onChange={(e) => set("persona.user_name", e.target.value)}
+            />
+          </div>
+          {mode === "custom" && (
+            <div className="setov__field">
+              <textarea
+                className="setov__textarea"
+                rows={5}
+                maxLength={MAX_CUSTOM_CHARS}
+                placeholder="e.g. Be my gym coach and study partner. Push me hard, keep it short, hype me up when I hit a goal."
+                value={custom}
+                onChange={(e) => set("persona.custom", e.target.value)}
+              />
+              <span className="setov__fieldnote">
+                {custom.trim()
+                  ? `${custom.length}/${MAX_CUSTOM_CHARS}`
+                  : "Empty — AURA stays your buddy until you describe a role."}
+              </span>
+            </div>
+          )}
+        </div>
+      );
+    }
     if (category === "layout") {
       return (
         <div className="setov__cards">

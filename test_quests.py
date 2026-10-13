@@ -259,7 +259,7 @@ check(
 check(
     "Claude, naming real modules",
     m("Claude", "Claude",
-      "the sanctuary cards and the domain workspace need the settings store wired") == aura,
+      "the screen_observer and the attention_engine need the settings store wired") == aura,
 )
 check(
     "ChatGPT, one snake_case symbol is enough",

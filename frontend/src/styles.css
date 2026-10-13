@@ -975,7 +975,6 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
 .san-eq--on span:nth-child(3n) { animation-delay: 0.3s; }
 .san-eq--on span:nth-child(5n) { animation-delay: 0.45s; }
 
-.san-domain__enter { margin: 6px 0 4px; }
 .sanctuary__grid, .sanctuary__top { position: relative; z-index: 1; }
 
 /* ============ Sanctuary ============ */
@@ -1074,35 +1073,11 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
   opacity: 0.92 !important;
   cursor: grabbing;
 }
-/* the hero card fills its column, everything centered — no dead space */
-.sancard--domain {
-  flex: 1; height: 100%;
-  justify-content: center; align-items: center;
-  text-align: center;
-  gap: 22px;
-  padding: 34px 44px;
-  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.4), 0 0 44px rgba(139, 92, 255, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-}
-.sancard--domain .sancard__head { width: 100%; justify-content: center; }
-.sancard--domain .san-muted { font-size: 14px; }
-.sancard--domain .san-domstats { width: min(480px, 100%); gap: 12px; }
-.sancard--domain .san-domstat { padding: 16px 6px; }
-.sancard--domain .san-domstat__num { font-size: 26px; }
-.sancard--domain .san-domstat__label { font-size: 10.5px; }
-.sancard--domain .san-primarybtn {
-  width: min(420px, 100%);
-  padding: 15px 20px; font-size: 15px; letter-spacing: 0.6px;
-}
-.sancard--domain .san-domcontinue { width: min(420px, 100%); padding: 12px 16px; font-size: 13px; }
-.sancard--domain .san-shortcuts { width: min(480px, 100%); gap: 16px; margin-top: 4px; }
-.sancard--domain .san-shortcut { padding: 16px 10px; font-size: 13px; }
-.sancard--domain .san-shortcut__icon { font-size: 19px; }
 .sancard--tall { min-height: 300px; }
 .sanctuary--compact .sancard { padding: 13px 16px; gap: 6px; border-radius: 16px; }
 
 .sancard__head { display: flex; align-items: center; justify-content: space-between; }
 .sancard__title { font-family: var(--font-display); font-size: 13px; letter-spacing: 3px; color: rgba(235, 230, 255, 0.85); }
-.sancard--domain .sancard__title { font-size: 21px; letter-spacing: 5px; }
 .sancard__tools { display: flex; gap: 6px; }
 .sancard__tools button { background: rgba(255,255,255,0.06); border: none; border-radius: 7px; color: var(--muted); font-size: 11px; width: 24px; height: 24px; }
 .sancard__tools button:hover { color: var(--text); background: rgba(139, 92, 255, 0.3); }
@@ -1270,42 +1245,6 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
 ::-webkit-scrollbar-track { background: transparent; }
 
 /* ============ Sanctuary live cards (backend-wired) ============ */
-
-/* domain card: live workspace pulse */
-.san-domstats {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
-}
-.san-domstat {
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
-  border: 1px solid rgba(150, 125, 255, 0.16); border-radius: 13px;
-  background: rgba(255, 255, 255, 0.04); padding: 10px 4px;
-  transition: border-color 250ms ease, box-shadow 250ms ease;
-}
-.san-domstat:hover { border-color: rgba(150, 125, 255, 0.4); box-shadow: 0 0 16px rgba(139, 92, 255, 0.15); }
-.san-domstat__num {
-  font-family: var(--font-display); font-size: 19px; color: #fff;
-  text-shadow: 0 0 14px rgba(177, 139, 255, 0.6);
-}
-.san-domstat__label { font-size: 9.5px; letter-spacing: 1.2px; text-transform: uppercase; color: rgba(139, 143, 202, 0.9); }
-
-.san-domcontinue {
-  display: grid; grid-template-columns: auto 1fr auto; align-items: center;
-  column-gap: 10px; row-gap: 6px;
-  border: 1px solid rgba(150, 125, 255, 0.18); border-radius: 13px;
-  background: rgba(255, 255, 255, 0.045); color: var(--text);
-  padding: 10px 14px; font-family: var(--font-body); font-size: 12.5px; text-align: left;
-  transition: background 250ms ease, border-color 250ms ease, transform 250ms ease;
-}
-.san-domcontinue:hover { background: rgba(139, 92, 255, 0.12); border-color: rgba(150, 125, 255, 0.4); transform: translateY(-1px); }
-.san-domcontinue__dot { width: 9px; height: 9px; border-radius: 50%; }
-.san-domcontinue__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(236, 234, 254, 0.85); }
-.san-domcontinue__text b { color: #fff; font-weight: 600; }
-.san-domcontinue__pct { font-size: 11px; color: var(--muted); }
-.san-domcontinue__bar {
-  grid-column: 1 / -1; height: 3px; border-radius: 3px;
-  background: rgba(255, 255, 255, 0.08); overflow: hidden;
-}
-.san-domcontinue__bar i { display: block; height: 100%; border-radius: 3px; transition: width 600ms ease; }
 
 /* tasks: check + inline edit */
 .san-check {
@@ -1984,8 +1923,6 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
   border-color: rgba(150, 125, 255, 0.35);
   color: var(--text);
 }
-.osbar__item--domain { color: var(--cyan); }
-.osbar__item--domain:hover { background: rgba(56, 225, 255, 0.1); box-shadow: 0 0 18px rgba(56, 225, 255, 0.12); }
 .osbar__icon { width: 22px; flex: 0 0 auto; text-align: center; font-size: 16px; }
 .osbar__meta { display: flex; flex-direction: column; min-width: 0; }
 .osbar__label { font-size: 13.5px; white-space: nowrap; }
@@ -3053,6 +2990,16 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
 /* ---------- Orbit Lines settings ---------------------------------------- */
 .setov__orbitsvg { width: 100%; max-width: 300px; height: auto; }
 .setov__stylepick { display: flex; gap: 6px; flex-wrap: wrap; }
+.setov__text, .setov__textarea {
+  background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border);
+  border-radius: 10px; color: var(--text); font-family: var(--font-body); font-size: 13px;
+  padding: 8px 12px; outline: none;
+}
+.setov__text { flex: 1; min-width: 0; }
+.setov__text:focus, .setov__textarea:focus { border-color: rgba(150, 125, 255, 0.55); }
+.setov__field { display: flex; flex-direction: column; gap: 6px; }
+.setov__textarea { width: 100%; resize: vertical; line-height: 1.5; box-sizing: border-box; }
+.setov__fieldnote { font-size: 11px; color: var(--muted); align-self: flex-end; }
 .setov__stylebtn {
   padding: 6px 13px;
   border: 1px solid var(--border);

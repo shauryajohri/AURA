@@ -40,6 +40,10 @@ const DEFAULTS: Settings = {
   "voice.noise_suppression": true,
   "autochat.enabled": true,
   "autochat.frequency": 40,
+  // Relationship — who AURA is to you (core/persona.py)
+  "persona.mode": "buddy",
+  "persona.user_name": "",
+  "persona.custom": "",
   // General / Appearance
   "general.start_minimized": false,
   "general.launch_on_boot": false,

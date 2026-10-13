@@ -4,6 +4,7 @@ import SettingsOverlay, { SettingsCategory, CATEGORY_META } from "../components/
 import { Layout, DEFAULT_LAYOUT } from "../components/Home/layoutTypes";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useSettingsStore } from "../stores/settingsStore";
+import { usePerfStore } from "../stores/perfStore";
 
 // Settings — a menu → focused editor flow. Pick a category, edit it with a
 // live preview, save, and you're back here. Grouped into sections so fourteen
@@ -21,6 +22,8 @@ export default function SettingsView() {
   const [offline, setOffline] = useState(false);
   const [focus, setFocus] = useState<SettingsCategory | null>(null);
   const applySettings = useSettingsStore((s) => s.apply);
+  const perf = usePerfStore((s) => s.perf);
+  const setPerf = usePerfStore((s) => s.setPerf);
   // Sanctuary layout is edited here too — same store the sanctuary reads.
   const [layout, setLayout] = useLocalStorage<Layout>("aura.sanctuary", DEFAULT_LAYOUT);
 
@@ -33,6 +36,28 @@ export default function SettingsView() {
       <div className="setview__head">
         <h2>Settings</h2>
         <p>Tune AURA's world. Each area opens with a live preview.</p>
+      </div>
+
+      {/* Per-machine and instant — not part of a category draft, and works
+          even while the brain is offline. */}
+      <div className="setview__perf">
+        <span className="san-setopt__icon">⚡</span>
+        <span className="san-setopt__meta">
+          <span className="san-setopt__name">Performance mode</span>
+          <span className="san-setopt__desc">
+            Smoother on laptops: 30 fps effects, fewer particles, no live glass blur.
+            Saved on this computer only.
+          </span>
+        </span>
+        <button
+          className={"san-toggle" + (perf ? " san-toggle--on" : "")}
+          onClick={() => setPerf(!perf)}
+          role="switch"
+          aria-checked={perf}
+          aria-label="Performance mode"
+        >
+          <span className="san-toggle__knob" />
+        </button>
       </div>
 
       {SECTIONS.map((sec) => (

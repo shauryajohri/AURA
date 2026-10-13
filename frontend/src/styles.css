@@ -3244,3 +3244,30 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
   .chatspage__body { flex-direction: column; }
   .chatspage__rail { flex: 0 0 auto; max-height: 190px; }
 }
+
+/* ============ Performance mode (stores/perfStore.ts sets html.perf) ============
+   Glass panels re-blur the moving video and canvases behind them every frame;
+   on integrated graphics that alone can halve the frame rate. In perf mode
+   the blur goes and the panels get a more opaque tint so text stays legible. */
+html.perf {
+  --panel: rgba(16, 18, 40, 0.72);
+  --panel-solid: rgba(12, 14, 30, 0.86);
+}
+html.perf *,
+html.perf *::before,
+html.perf *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.setview__perf {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 22px;
+  padding: 15px 18px;
+  border-radius: 16px;
+  background: rgba(22, 18, 48, 0.34);
+  border: 1px solid var(--border);
+}
+.setview__perf .san-setopt__meta { flex: 1; min-width: 0; }

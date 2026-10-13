@@ -62,7 +62,7 @@ const KEYS: Record<Exclude<SettingsCategory, "layout" | "keys">, string[]> = {
   phone: ["phone.enabled", "phone.number", "phone.daily", "phone.daily_time",
           "phone.milestones", "phone.meeting_alert", "phone.meeting_lead",
           "phone.quiet_start", "phone.quiet_end"],
-  privacy: ["privacy.screen_reading", "privacy.store_conversations"],
+  privacy: ["privacy.screen_reading", "privacy.store_conversations", "habits.enabled"],
   behavior: ["behavior.proactive", "behavior.interrupt_work"],
   developer: ["dev.verbose_logs", "dev.show_intents"],
   experimental: ["experimental.plugins", "experimental.cloud_sync"],
@@ -431,7 +431,10 @@ export default function SettingsOverlay({
   // ---- controls ------------------------------------------------------------
   // A row is labelled by its key's second half ("launch_on_boot"), unless
   // that alone would just read "enabled".
-  const LABELS: Record<string, string> = { "buddy.enabled": "desktop buddy" };
+  const LABELS: Record<string, string> = {
+    "buddy.enabled": "desktop buddy",
+    "habits.enabled": "learn my habits",
+  };
   const label = (k: string) => LABELS[k] ?? k.split(".")[1].replace(/_/g, " ");
 
   const controls = () => {

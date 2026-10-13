@@ -2636,6 +2636,32 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
 .pane-card__when { color: var(--muted); font-size: 10.5px; }
 .pane-card__del { margin-left: auto; background: none; border: none; color: var(--muted); font-size: 12px; }
 .pane-card__del:hover { color: #e85a5a; }
+
+/* Memory → Habits */
+.habits { display: flex; flex-direction: column; gap: 18px; }
+.habits__bar { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  border: 1px solid var(--border); border-radius: 13px; background: rgba(255, 255, 255, 0.04); padding: 10px 14px; }
+.habits__status { font-size: 13px; color: rgba(230, 226, 255, 0.85); }
+.habits__status b { color: #fff; font-weight: 600; }
+.habits__section { display: flex; flex-direction: column; gap: 8px; }
+.habits__chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.habits__chip { border: 1px solid var(--border); border-radius: 999px; background: rgba(255, 255, 255, 0.04);
+  color: var(--text); font-size: 12.5px; padding: 5px 12px; }
+.habits__chip b { color: var(--violet-bright); font-weight: 600; margin-left: 4px; }
+.habits__chip--off { cursor: pointer; color: var(--muted); }
+.habits__chip--off:hover { color: var(--text); border-color: var(--border-bright); }
+.habits__row { display: flex; align-items: center; gap: 12px; }
+.habits__app { font-weight: 600; min-width: 120px; }
+.habits__hours { display: grid; grid-template-columns: repeat(24, 1fr); gap: 3px; height: 70px; align-items: end; }
+.habits__hour { height: 100%; display: flex; align-items: flex-end; }
+.habits__hour i { display: block; width: 100%; min-height: 2px; border-radius: 3px 3px 0 0;
+  background: linear-gradient(180deg, var(--violet-bright), rgba(139, 92, 255, 0.35)); }
+.habits__axis { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--muted); }
+.habits__foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.habits__forget, .habits__confirm button { background: none; border: 1px solid var(--border); border-radius: 9px;
+  color: var(--muted); font-size: 12px; padding: 6px 12px; }
+.habits__forget:hover, .habits__confirm button:first-of-type:hover { color: #e85a5a; border-color: rgba(232, 90, 90, 0.5); }
+.habits__confirm { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text); }
 .pane-chip {
   font-size: 9px; letter-spacing: 1px; text-transform: uppercase;
   padding: 2px 8px; border-radius: 6px;

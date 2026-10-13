@@ -634,6 +634,15 @@ def build_context_prompt(query: str, intent: str, thought_context: str, comeback
     except Exception as e:  # noqa: BLE001 — context is a bonus, never a blocker
         print(f"[AURA] work_recall skipped: {e}")
 
+    # Habits: which apps and tools they use and when (core/habits.py). One
+    # line on ordinary turns; the full picture when they ask about their time.
+    habits_section = ""
+    try:
+        from core import habits
+        habits_section = habits.prompt_block(query)
+    except Exception as e:  # noqa: BLE001 — context is a bonus, never a blocker
+        print(f"[AURA] habits skipped: {e}")
+
     # If the user is asking about AURA herself, surface her fuller self-knowledge
     # so "who are you / who made you / what can you do" answers as her, not as a
     # generic assistant or a third-party tool.
@@ -776,6 +785,7 @@ def build_context_prompt(query: str, intent: str, thought_context: str, comeback
             history_block,
             facts_section,
             work_memory_section,
+            habits_section,
             identity_section,
             screen_info,
             thought_section,

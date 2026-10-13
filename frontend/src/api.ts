@@ -91,7 +91,27 @@ export interface NatureInfo {
   icon: string;
 }
 
-export type Settings = Record<string, number | boolean | string>;
+export type Settings = Record<string, number | boolean | string | string[]>;
+
+/** core/habits.py summary — which apps they use, how long, and when. */
+export interface HabitApp {
+  app: string;
+  seconds: number;
+  days_used: number;
+  avg_per_day: number;
+  peak_hours: number[];
+  part_of_day: string;
+}
+export interface Habits {
+  enabled: boolean;
+  ignore: string[];
+  days: number;
+  tracked_days: number;
+  today: { app: string; seconds: number }[];
+  top: HabitApp[];
+  hours: number[];
+  current: { app: string; seconds: number } | null;
+}
 
 /** One saved conversation. Mirrors memory/store.list_chat_sessions(). */
 export interface Chat {
@@ -520,6 +540,15 @@ export const api = {
     }
     return URL.createObjectURL(await res.blob());
   },
+
+  // Habits — which apps they use, how long, and when (core/habits.py)
+  getHabits: (days = 7) => j<Habits>(`/api/habits?days=${days}`),
+  /** Forget every habit, or only one app's. Irreversible. */
+  forgetHabits: (app?: string) =>
+    j<{ ok: boolean; removed: number }>(
+      "/api/habits" + (app ? `?app_name=${encodeURIComponent(app)}` : ""),
+      { method: "DELETE" },
+    ),
 
   // App settings
   getSettings: () => j<{ settings: Settings }>("/api/settings").then((r) => r.settings),

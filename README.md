@@ -132,6 +132,14 @@ You can also tell her what to call you. The **nature** lock (Chill / Focus / Sav
 
 Plain statements ("my name is …", "I'm learning …", "I prefer short replies", "the project is called …") become durable facts (`modules/fact_extractor.py`). The same words inside a question, a hypothetical, a quote or something someone else said, a joke or sarcasm, or a pasted line of code don't, and a negation is never a fact: "can you call me later?" doesn't make your name "later", and "my name is not important" saves nothing. Only a handful of facts fit in the prompt, so your name and role are pinned first, then facts you typed into the Memory panel, then projects and preferences, then the rest, newest first. You can edit or delete any of them in the Memory panel.
 
+### She learns your routine
+
+`core/habits.py` reads the foreground app every 5 seconds (process name + window title only, no screenshots) and keeps per-hour totals: which apps and tools you use, how long, and when. Browsers count as the site when it's a well-known one (YouTube, GitHub, Gmail…), otherwise just as the browser.
+
+- **Private by design** — only app names are stored, never window titles; AFK time, sleep gaps and AURA's own window are never counted.
+- **Yours to control** — Memory → **Habits** shows it all; pause it, hide an app forever, or forget everything. The same switch lives in Settings → Privacy.
+- **In the chat** — ordinary turns get one background line ("right now: Excel for 40m; usually VS Code, YouTube"); ask *"how much time did I spend on YouTube?"* or *"what are my habits?"* and she gets the full picture.
+
 ### Privacy switches do what they say
 
 Settings → Privacy has two switches, both on by default. Each is read on every message and every screen look, so flipping one counts from the next message without a restart.
@@ -277,6 +285,7 @@ GET  /api/recaps · DELETE /api/recaps/{id}  session snapshots
 GET/POST/PUT/DELETE  /api/quests            daily commitments + screen verification
 GET  /api/models · POST /api/models/{n}/toggle    model lock
 GET  /api/links · /api/stats · /api/nature · /api/settings
+GET  /api/habits?days=7 · DELETE /api/habits[?app_name=]   habits (read / forget)
 POST /api/voice/transcribe                  WAV → text fallback
 GET  /api/phone-report                      what a call would say right now
 POST /api/phone-report/call                 ring the saved number
@@ -344,6 +353,7 @@ core/
   work_recall.py       project memory injected into every chat turn
   persona.py           relationship modes: buddy / assistant / mentor / custom
   phone_report.py      the spoken progress report + the call scheduler
+  habits.py            which apps/tools you use and when (foreground sampler)
   response_composer.py persona layer + 5 reply styles
   engagement.py        when to speak, when to shut up
   quest_verify.py      screenshot verification (vision model)
@@ -370,7 +380,7 @@ local_auth.py          launch token: /api/* and /ws only obey AURA's own window
     github_import.py   clone a repo into a project
 modules/               error_intelligence, developer_state, screen_reader,
                        relationship_engine, decision_engine, forex_report
-memory/store.py        SQLite: conversations, facts, notes, recaps, tasks, quests
+memory/store.py        SQLite: conversations, facts, notes, recaps, tasks, quests, habits
 frontend/src/
   App.tsx              Sanctuary ⇄ Domain, portal transition
   api.ts               companion REST client
@@ -428,6 +438,7 @@ python tests/test_local_auth.py       # launch token: /api/* and /ws refuse othe
 python tests/test_model_lock.py       # model locks + routing work without PySide6
 python tests/test_backend_only.py     # backend-only install: forex / clipboard say what's missing
 python tests/test_room_routing.py     # rooms: a message stays in the chat it was typed into
+python test_habits.py                 # habit tracker: naming, crediting, privacy
 python test_reasoning_leak.py         # chain-of-thought never reaches the user
 python test_phone_report.py           # the phone report + call scheduler (fake Twilio)
 python tests/test_reply_recovery.py   # streamed + coding replies: answer recovered, code kept in history
@@ -489,7 +500,7 @@ cd frontend && npx tsc --noEmit       # frontend typecheck
 
 ## Status
 
-Live and used daily: routing, memory, voice, screen awareness, error intelligence, quests, the Project Brain (backend + UI), Code Review, Research capture.
+Live and used daily: routing, memory, voice, screen awareness, error intelligence, quests, the Project Brain (backend + UI), Code Review, Research capture, relationship modes, habit tracking.
 
 Not yet built: documentation generator, roadmap view, release management, and a project-grounded Domain chat rail (the per-node ask exists; the right rail is still generic).
 

@@ -12,6 +12,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+os.environ["AURA_REMOTE_VISION"] = "off"   # this file covers the blind planner path
 
 from core import actions, remote_control as rc  # noqa: E402
 

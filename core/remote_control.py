@@ -42,7 +42,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from core import actions
+from core import actions, vision_agent
 
 _REPO = Path(__file__).resolve().parent.parent
 LOG_PATH = _REPO / "memory" / "remote_actions.jsonl"
@@ -314,6 +314,9 @@ class Job:
     results: list[dict] = field(default_factory=list)
     created: float = field(default_factory=time.time)
     finished: float = 0.0
+    mode: str = "plan"        # plan = steps decided up front | vision = look, act, look again
+    question: str = ""        # what a pending job is waiting on the phone to answer
+    screen_version: int = 0   # bumps each time the vision loop takes a new screenshot
 
     def needs_confirm(self) -> bool:
         # A confirm-level step always asks, whatever the mode — "none" only
@@ -342,7 +345,7 @@ def _remember(job: Job) -> None:
 def get_job(job_id: str) -> Job | None:
     with _JOBS_LOCK:
         job = _JOBS.get(job_id)
-    if job and job.status == "pending" and time.time() - job.created > PENDING_TTL:
+    if job and job.mode == "plan" and job.status == "pending" and time.time() - job.created > PENDING_TTL:
         job.status = "expired"
         job.reply = "That plan expired. Send the command again."
     return job
@@ -389,7 +392,10 @@ def submit(text: str) -> Job:
         _log(job)
         return job
 
-    job.steps, job.say = plan(text)
+    quick = quick_plan(text)
+    if quick is None and vision_agent.available()[0]:
+        return _start_vision(job)
+    job.steps, job.say = quick or plan(text)
     if not job.steps:
         job.status = "declined"
         job.reply = job.say or "I couldn't work out how to do that on the laptop."
@@ -408,6 +414,8 @@ def approve(job_id: str) -> Job | None:
     job = get_job(job_id)
     if job is None or job.status != "pending":
         return job
+    if job.mode == "vision":
+        return _answer_vision(job, True)
     gate = presence()
     if not gate["active"]:
         job.status, job.reply = "declined", gate["reason"]
@@ -418,6 +426,8 @@ def approve(job_id: str) -> Job | None:
 
 def cancel(job_id: str) -> Job | None:
     job = get_job(job_id)
+    if job and job.mode == "vision" and job.status == "pending":
+        return _answer_vision(job, False)
     if job and job.status == "pending":
         job.status, job.reply = "cancelled", "Okay, I won't do it."
         _log(job)
@@ -467,6 +477,115 @@ def execute(job: Job) -> Job:
         _announce(f"Remote {job.status}: {job.text}")
         _log(job)
         return job
+    finally:
+        actions.STOP.clear()
+        _RUN_LOCK.release()
+
+
+# ---------------------------------------------------------------------------
+# Vision jobs: run in the background, the phone polls GET /jobs/{id}
+# ---------------------------------------------------------------------------
+_VISION: dict[str, dict] = {}   # job id → {"event", "answer", "screen", "started"}
+
+
+def latest_screen(job_id: str) -> bytes | None:
+    st = _VISION.get(job_id)
+    return st["screen"] if st and st["screen"] else None
+
+
+def _start_vision(job: Job) -> Job:
+    job.mode = "vision"
+    _VISION[job.id] = {"event": threading.Event(), "answer": None, "screen": b"", "started": False}
+    if confirm_mode() == "all":
+        job.status, job.question = "pending", "Want me to start on this?"
+        job.reply = "I'll work it out on the screen as I go. Approve and I'll start."
+        _announce(f"Waiting for approval: {job.text}")
+        return job
+    return _launch_vision(job)
+
+
+def _launch_vision(job: Job) -> Job:
+    if not _RUN_LOCK.acquire(blocking=False):
+        job.status, job.reply = "declined", "I'm still doing the last thing you asked. Give me a second."
+        return job
+    _VISION[job.id]["started"] = True
+    job.status, job.question, job.reply = "running", "", "On it, watching the screen."
+    threading.Thread(target=_run_vision, args=(job,), name=f"aura-vision-{job.id}", daemon=True).start()
+    return job
+
+
+def _answer_vision(job: Job, yes: bool) -> Job:
+    st = _VISION.get(job.id)
+    if st is None:
+        return job
+    if not st["started"]:               # the up-front "start?" under confirm=all
+        if not yes:
+            job.status, job.question, job.reply = "cancelled", "", "Okay, I won't do it."
+            _log(job)
+            return job
+        gate = presence()
+        if not gate["active"]:
+            job.status, job.question, job.reply = "declined", "", gate["reason"]
+            _log(job)
+            return job
+        return _launch_vision(job)
+    st["answer"] = yes
+    st["event"].set()
+    return job
+
+
+class _VisionCtx:
+    def __init__(self, job: Job) -> None:
+        self.job = job
+        self.state = _VISION[job.id]
+
+    def check(self) -> str | None:
+        if actions.STOP.is_set():
+            return "Stopped, like you asked."
+        gate = presence()
+        return None if gate["active"] else gate["reason"]
+
+    def ask(self, question: str) -> bool:
+        job, st = self.job, self.state
+        st["answer"] = None
+        st["event"].clear()
+        job.status, job.question = "pending", question
+        job.reply = question
+        _announce(f"Asking: {question}")
+        deadline = time.time() + PENDING_TTL
+        while not st["event"].wait(0.25):
+            if actions.STOP.is_set() or time.time() > deadline:
+                break
+        yes = bool(st["answer"])
+        job.status, job.question = "running", ""
+        job.reply = "On it, watching the screen."
+        return yes
+
+    def record(self, desc: str, ok: bool, result: str) -> None:
+        step = {"name": "vision", "args": {}, "desc": desc, "risk": "safe"}
+        self.job.steps.append(step)
+        self.job.results.append({"step": desc, "ok": ok, "result": result})
+        _announce(desc)
+
+    def show(self, screen) -> None:
+        self.state["screen"] = screen.phone_jpeg
+        self.job.screen_version += 1
+
+
+def _run_vision(job: Job) -> None:
+    try:
+        actions.STOP.clear()
+        _announce(f"Remote: {job.text}")
+        try:
+            status, reply = vision_agent.run(job.text, _VisionCtx(job))
+        except actions.Stopped as e:
+            status, reply = "stopped", f"Stopped ({e})."
+        except Exception as e:  # noqa: BLE001
+            status, reply = "failed", f"Something broke while I was working: {e}"
+        job.status, job.reply, job.question = status, reply, ""
+        job.finished = time.time()
+        _announce(f"Remote {job.status}: {job.text}")
+        _log(job)
     finally:
         actions.STOP.clear()
         _RUN_LOCK.release()

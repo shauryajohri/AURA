@@ -55,6 +55,8 @@ const DEFAULTS: Settings = {
   // Privacy & behaviour
   "privacy.screen_reading": true,
   "privacy.store_conversations": true,
+  "habits.enabled": true,
+  "habits.ignore": [],
   "behavior.proactive": true,
   "behavior.interrupt_work": false,
   // Developer / experimental

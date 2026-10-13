@@ -76,7 +76,13 @@ async def _lifespan(app: FastAPI):
     _init_director()
     _init_v3()
     _start_auto_chat()
+    _start_habits()
     yield
+    try:
+        from core import habits
+        habits.get_tracker().flush()   # don't lose the last minute on shutdown
+    except Exception:  # noqa: BLE001
+        pass
 
 
 app = FastAPI(title="AURA Bridge", lifespan=_lifespan)
@@ -175,6 +181,15 @@ def _start_auto_chat() -> None:
         traceback.print_exc()
 
     print("[AURA bridge] auto-chat loops started")
+
+
+def _start_habits() -> None:
+    """Learn which apps and tools they use, and when (core/habits.py)."""
+    try:
+        from core import habits
+        habits.start()
+    except Exception:  # noqa: BLE001
+        traceback.print_exc()
 
 
 def _init_v3() -> None:
@@ -567,7 +582,32 @@ async def api_save_settings(req: Request) -> dict[str, Any]:
     if any(str(k).startswith("persona.") for k in patch):
         from core import persona
         persona.invalidate()   # the next reply speaks in the new role
+    if any(str(k).startswith("habits.") for k in patch):
+        from core import habits
+        habits.get_tracker().refresh_settings()   # pause / ignore take effect now
     return {"ok": True, "settings": store.get_settings()}
+
+
+# ── Habits: which apps they use, how long, and when ────────────────────────
+@app.get("/api/habits")
+async def api_habits(days: int = 7) -> dict[str, Any]:
+    from core import habits
+    from memory import store
+    days = max(1, min(int(days), 30))
+    s = store.get_settings()
+    return {
+        "enabled": s.get("habits.enabled", True) is not False,
+        "ignore": s.get("habits.ignore") or [],
+        **habits.summary(days=days),
+    }
+
+
+@app.delete("/api/habits")
+async def api_forget_habits(app_name: str | None = None) -> dict[str, Any]:
+    """Forget every habit, or only one app's (?app_name=YouTube)."""
+    from core import habits
+    removed = habits.forget(app_name or None)
+    return {"ok": True, "removed": removed}
 
 
 

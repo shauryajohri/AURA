@@ -87,6 +87,14 @@ You can also tell her what to call you. The **nature** lock (Chill / Focus / Sav
 
 Ask *"what were we doing last time?"* and `core/work_recall.py` answers from the last session summary and earlier recaps, not a guess. It's only added to the prompt when you're actually asking about past work, and it's empty on purpose when nothing is stored — she says it's fuzzy rather than inventing something.
 
+### She learns your routine
+
+`core/habits.py` reads the foreground app every 5 seconds (process name + window title only, no screenshots) and keeps per-hour totals: which apps and tools you use, how long, and when. Browsers count as the site when it's a well-known one (YouTube, GitHub, Gmail…), otherwise just as the browser.
+
+- **Private by design** — only app names are stored, never window titles; AFK time, sleep gaps and AURA's own window are never counted.
+- **Yours to control** — Memory → **Habits** shows it all; pause it, hide an app forever, or forget everything. The same switch lives in Settings → Privacy.
+- **In the chat** — ordinary turns get one background line ("right now: Excel for 40m; usually VS Code, YouTube"); ask *"how much time did I spend on YouTube?"* or *"what are my habits?"* and she gets the full picture.
+
 ### The chat answers, it doesn't narrate
 
 Reasoning models leak their deliberation as ordinary content ("So answer: …", "The user wants …", "That's one sentence?"). Three layers stop it:
@@ -113,6 +121,7 @@ GET  /api/recaps · DELETE /api/recaps/{id}  session snapshots
 GET/POST/PUT/DELETE  /api/quests            daily commitments + screen verification
 GET  /api/models · POST /api/models/{n}/toggle    model lock
 GET  /api/links · /api/stats · /api/nature · /api/settings
+GET  /api/habits?days=7 · DELETE /api/habits[?app_name=]   habits (read / forget)
 POST /api/voice/transcribe                  WAV → text fallback
 GET  /api/v3/snapshot · /session · /mistakes       developer state
 POST /api/v3/explain · /api/v3/build              error intelligence
@@ -130,13 +139,14 @@ core/
   ai_router.py         5 models, cost-aware routing, leak sanitiser
   work_recall.py       session memory for "where did we leave off"
   persona.py           relationship modes: buddy / assistant / mentor / custom
+  habits.py            which apps/tools you use and when (foreground sampler)
   response_composer.py persona layer + 5 reply styles
   engagement.py        when to speak, when to shut up
   quest_verify.py      screenshot verification (vision model)
   identity.py          who AURA is
 modules/               error_intelligence, developer_state, screen_reader,
                        relationship_engine, decision_engine, forex_report
-memory/store.py        SQLite: conversations, facts, notes, recaps, tasks, quests
+memory/store.py        SQLite: conversations, facts, notes, recaps, tasks, quests, habits
 frontend/src/
   App.tsx              the shell: Home + sidebar pages
   api.ts               companion REST client
@@ -171,6 +181,7 @@ set PYTHONPATH=.                      # Windows;  export PYTHONPATH=. on Unix
 
 python test_work_recall.py            # session memory in the chat
 python test_persona.py                # relationship modes
+python test_habits.py                 # habit tracker: naming, crediting, privacy
 python test_reasoning_leak.py         # chain-of-thought never reaches the user
 python test_memory.py                 # durable facts + context
 python test_engine.py                 # routing + intent
@@ -207,9 +218,9 @@ cd frontend && npx tsc --noEmit       # frontend typecheck
 
 ## Status
 
-Live and used daily: routing, memory, voice, screen awareness, error intelligence, quests, relationship modes.
+Live and used daily: routing, memory, voice, screen awareness, error intelligence, quests, relationship modes, habit tracking.
 
-Next: a habit tracker (which apps and tools you use, and when) so AURA can help without being asked, then letting AURA do tasks on your screen when you tell her to.
+Next: letting AURA do tasks on your screen when you tell her to.
 
 ---
 

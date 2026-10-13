@@ -50,7 +50,7 @@ const KEYS: Record<Exclude<SettingsCategory, "layout" | "keys">, string[]> = {
   // Edited by the relationship controls below, not the generic rows.
   relationship: ["persona.mode", "persona.user_name", "persona.custom"],
   autochat: ["autochat.enabled", "autochat.frequency"],
-  privacy: ["privacy.screen_reading", "privacy.store_conversations"],
+  privacy: ["privacy.screen_reading", "privacy.store_conversations", "habits.enabled"],
   behavior: ["behavior.proactive", "behavior.interrupt_work"],
   developer: ["dev.verbose_logs", "dev.show_intents"],
   experimental: ["experimental.plugins", "experimental.cloud_sync"],
@@ -377,7 +377,8 @@ export default function SettingsOverlay({
   };
 
   // ---- controls ------------------------------------------------------------
-  const label = (k: string) => k.split(".")[1].replace(/_/g, " ");
+  const LABELS: Record<string, string> = { "habits.enabled": "learn my habits" };
+  const label = (k: string) => LABELS[k] ?? k.split(".")[1].replace(/_/g, " ");
 
   const controls = () => {
     if (category === "keys") return null;

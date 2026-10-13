@@ -1099,6 +1099,9 @@ DEFAULT_SETTINGS = {
     "persona.mode": "buddy",       # buddy | assistant | mentor | custom
     "persona.user_name": "",       # what AURA calls them
     "persona.custom": "",          # their own role description (mode=custom)
+    # Habits — which apps they use and when (core/habits.py)
+    "habits.enabled": True,        # off = nothing is sampled or stored
+    "habits.ignore": [],           # app names never tracked
 }
 
 
@@ -1134,6 +1137,67 @@ def set_settings(patch: dict):
                 (str(k), _json.dumps(v)),
             )
         conn.commit()
+    finally:
+        conn.close()
+
+
+# ── Habits: which apps they use, how long, and when ─────────────────────────
+# core/habits.py samples the foreground app every few seconds and flushes
+# per-hour totals here. Only the app (or a well-known site name for browsers)
+# is stored — never window titles, which can hold email subjects or file names.
+
+_HABITS_DDL = '''
+    CREATE TABLE IF NOT EXISTS habit_usage (
+        day      TEXT    NOT NULL,   -- local YYYY-MM-DD
+        hour     INTEGER NOT NULL,   -- local 0-23
+        app      TEXT    NOT NULL,
+        seconds  INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (day, hour, app)
+    )
+'''
+
+
+def add_habit_seconds(rows: list) -> None:
+    """Add [(day, hour, app, seconds), ...] onto the stored totals."""
+    if not rows:
+        return
+    conn = _connect()
+    try:
+        conn.execute(_HABITS_DDL)
+        conn.executemany(
+            'INSERT INTO habit_usage (day, hour, app, seconds) VALUES (?, ?, ?, ?) '
+            'ON CONFLICT(day, hour, app) DO UPDATE SET seconds = seconds + excluded.seconds',
+            [(str(d), int(h), str(a), int(sec)) for d, h, a, sec in rows if sec > 0],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_habit_usage(since_day: str) -> list:
+    """[(day, hour, app, seconds), ...] from since_day (inclusive) onward."""
+    conn = _connect()
+    try:
+        conn.execute(_HABITS_DDL)
+        cur = conn.execute(
+            'SELECT day, hour, app, seconds FROM habit_usage WHERE day >= ? '
+            'ORDER BY day, hour', (since_day,))
+        return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def clear_habits(app: str | None = None) -> int:
+    """Forget every habit row, or only one app's. Returns rows removed."""
+    conn = _connect()
+    try:
+        conn.execute(_HABITS_DDL)
+        if app:
+            cur = conn.execute('DELETE FROM habit_usage WHERE app = ?', (app,))
+        else:
+            cur = conn.execute('DELETE FROM habit_usage')
+        conn.commit()
+        return cur.rowcount
     finally:
         conn.close()
 

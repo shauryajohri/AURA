@@ -137,6 +137,16 @@ def _recall_project(query: str = "", **_) -> str:
         return f"project recall unavailable: {e}"
 
 
+def _habits(query: str = "", **_) -> str:
+    """Which apps and tools they use, how long, and at what time of day."""
+    try:
+        from core import habits
+        block = habits.prompt_block("what are my habits")
+        return block or "(no habits recorded yet)"
+    except Exception as e:  # noqa: BLE001
+        return f"habits unavailable: {e}"
+
+
 def _list_rooms(**_) -> str:
     """Every room, its topic, and which one is currently active."""
     try:
@@ -167,6 +177,10 @@ TOOLS: dict[str, dict] = {
     "recall_project": {
         "fn": _recall_project, "args": '{"query": "..."}',
         "help": "what AURA remembers about recent sessions: where you left off, earlier recaps",
+    },
+    "habits": {
+        "fn": _habits, "args": "{}",
+        "help": "which apps and tools the user uses, for how long, and when",
     },
     "list_rooms": {
         "fn": _list_rooms, "args": "{}",

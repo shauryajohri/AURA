@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, Fact, MemoryNote, MemoryRecap, SavedLink } from "../api";
 import MemoryView from "./MemoryView";
+import HabitsPane from "./HabitsPane";
 import PageShell from "./PageShell";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 
@@ -310,6 +311,7 @@ export default function MemoryPage() {
         { id: "timeline", label: "Timeline", body: <TimelinePane /> },
         { id: "conversations", label: "Conversations", body: <ConversationsPane /> },
         { id: "search", label: "Search", body: <SearchPane /> },
+        { id: "habits", label: "Habits", body: <HabitsPane /> },
         { id: "bookmarks", label: "Bookmarks", body: <BookmarksPane /> },
         { id: "manage", label: "Manage", body: <MemoryView /> },
       ]}

@@ -278,6 +278,7 @@ python tests/test_domain_foundation.py    # brain e2e on this repo
 python tests/test_domain_api_contract.py  # every endpoint shape the UI reads
 python tests/test_idea_capture.py          # conversation → knowledge
 python tests/test_remote_control.py         # phone control: gate, plans, approval, auth
+python tests/test_vision_agent.py           # vision loop: pointing, questions, stuck/stop, background jobs
 
 cd frontend && npx tsc --noEmit       # frontend typecheck
 ```

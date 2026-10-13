@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ActivityEvent,
+  AgentEvent,
   AuraState,
   ChatTurn,
   ClientMessage,
@@ -65,6 +66,8 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
   // The live "what is AURA doing" line. Cleared automatically when the brain
   // goes back to idle after an answer completes.
   const [activity, setActivity] = useState<ActivityEvent | null>(null);
+  // The desktop agent's latest step (/do). Drives the control bar.
+  const [agent, setAgent] = useState<AgentEvent | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -161,6 +164,9 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
             useNotifyStore.getState().add("quest", `Quest complete: ${msg.payload.title ?? ""}`.trim());
           }
           break;
+        case "agent":
+          setAgent(msg.payload);
+          break;
         case "error":
           pushMessage("[error] " + msg.payload.message, "error");
           finishStream();
@@ -219,5 +225,5 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
 
   const clearTurns = useCallback(() => setTurns([]), []);
 
-  return { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, activity, send, loadTurns, clearTurns };
+  return { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, activity, agent, send, loadTurns, clearTurns };
 }

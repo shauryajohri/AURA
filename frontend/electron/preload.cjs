@@ -12,4 +12,10 @@ contextBridge.exposeInMainWorld("aura", {
   // Links in chat. Without this an <a href> NAVIGATES THIS WINDOW — the whole
   // UI is replaced by the website and the socket to the brain dies with it.
   openExternal: (url) => ipcRenderer.send("shell:open-external", String(url)),
+  // Desktop agent (/do): show or hide the always-on-top control bar.
+  agentOverlay: (state) =>
+    ipcRenderer.send("agent:overlay", {
+      active: !!(state && state.active),
+      height: Number(state && state.height) || 64,
+    }),
 });

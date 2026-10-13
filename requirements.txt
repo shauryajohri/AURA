@@ -20,5 +20,11 @@ pandas
 pyperclip
 keyboard
 
+# Screen: reading it (habits, quests) and operating it (/do)
+mss
+Pillow
+pyautogui
+uiautomation; sys_platform == "win32"
+
 # Optional — local should_respond gate (falls back gracefully if absent)
 ollama

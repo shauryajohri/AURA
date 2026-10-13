@@ -3,7 +3,7 @@
 // the built dist/index.html AND boots the Python brain itself, so a single
 // double-click brings the whole of AURA to life — and closing the window
 // puts her back to sleep (the brain is killed with the app).
-const { app, BrowserWindow, ipcMain, Menu, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, screen, shell } = require("electron");
 const { spawn } = require("child_process");
 const path = require("path");
 const net = require("net");
@@ -68,6 +68,8 @@ function stopBrain() {
 // ---------------------------------------------------------------------------
 Menu.setApplicationMenu(null); // AURA owns its chrome: no OS titlebar, no menu bar.
 
+let mainWin = null;
+
 function createWindow() {
   const iconPath = path.join(__dirname, "aura.ico");
   const win = new BrowserWindow({
@@ -84,6 +86,11 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+  mainWin = win;
+  win.on("closed", () => {
+    mainWin = null;
+    if (overlayWin && !overlayWin.isDestroyed()) overlayWin.destroy();
   });
 
   // Always full: open maximized, and if anything un-maximizes it,
@@ -118,6 +125,66 @@ function createWindow() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// The agent control bar: while AURA operates the screen (/do) her main window
+// gets out of the way, and this small always-on-top bar shows what she's doing
+// with Stop and Allow / Deny. It never takes focus, so clicking it doesn't
+// pull the keyboard away from the app she's working in.
+// ---------------------------------------------------------------------------
+const OVERLAY_WIDTH = 580;
+let overlayWin = null;
+let minimizedForAgent = false;
+
+function createOverlay() {
+  const { width } = screen.getPrimaryDisplay().workAreaSize;
+  overlayWin = new BrowserWindow({
+    width: OVERLAY_WIDTH,
+    height: 64,
+    x: Math.round((width - OVERLAY_WIDTH) / 2),
+    y: 6,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    focusable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    alwaysOnTop: true,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  overlayWin.setAlwaysOnTop(true, "screen-saver");
+  if (isDev) overlayWin.loadURL("http://localhost:5173/#agent-overlay");
+  else overlayWin.loadFile(path.join(__dirname, "..", "dist", "index.html"), { hash: "agent-overlay" });
+  overlayWin.on("closed", () => { overlayWin = null; });
+}
+
+ipcMain.on("agent:overlay", (_e, state) => {
+  if (!overlayWin || overlayWin.isDestroyed()) return;
+  const active = !!(state && state.active);
+  const height = Math.max(48, Math.min(200, Number(state && state.height) || 64));
+  if (active) {
+    const b = overlayWin.getBounds();
+    overlayWin.setBounds({ ...b, height });
+    if (!overlayWin.isVisible()) overlayWin.showInactive();
+    if (mainWin && !mainWin.isMinimized()) {
+      mainWin.minimize();
+      minimizedForAgent = true;
+    }
+  } else {
+    overlayWin.hide();
+    // Come back to report — but only if WE minimized her.
+    if (minimizedForAgent && mainWin) mainWin.restore();
+    minimizedForAgent = false;
+  }
+});
+
 /** Hand a URL to the OS browser — http(s) only, never file:// or a custom
  *  scheme, which is how "open this link" turns into "run this program". */
 function openExternal(raw) {
@@ -137,6 +204,7 @@ ipcMain.on("shell:open-external", (_e, url) => openExternal(url));
 app.whenReady().then(() => {
   if (!isDev) startBrainIfNeeded(); // in dev you run server.py yourself
   createWindow();
+  createOverlay();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

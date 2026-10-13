@@ -11,6 +11,7 @@ import CosmicBackground from "./components/CosmicBackground";
 import UniverseBackground from "./components/UniverseBackground";
 import ParticleField from "./components/ParticleField";
 import CursorLens from "./components/CursorLens";
+import AgentBar from "./components/AgentBar";
 
 // Pages are code-split: Home boots instantly and the heavy panels (the
 // settings overlay, the memory/task views) only download when you actually
@@ -50,8 +51,8 @@ const LEGACY: Record<string, string> = {
 const PAGES = ["home", "chats", "memory", "tasks", "models", "settings", "labs"];
 
 export default function App() {
-  const { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, activity, send,
-          loadTurns, clearTurns } = useAuraSocket();
+  const { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, activity, agent,
+          send, loadTurns, clearTurns } = useAuraSocket();
   const [collapsed, setCollapsed] = useLocalStorage<boolean>("aura.sidebarMin", false);
   const [rawView, setView] = useLocalStorage<string>("aura.view", "home");
   const view = PAGES.includes(rawView) ? rawView : LEGACY[rawView] ?? "home";
@@ -136,6 +137,9 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* AURA operating the screen (/do): what she's doing, Stop, Allow/Deny */}
+      <AgentBar agent={agent} />
 
       {/* the pointer is a tiny black hole — lives above everything */}
       <CursorLens />

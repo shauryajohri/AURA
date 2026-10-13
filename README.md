@@ -95,6 +95,21 @@ Ask *"what were we doing last time?"* and `core/work_recall.py` answers from the
 - **Yours to control** — Memory → **Habits** shows it all; pause it, hide an app forever, or forget everything. The same switch lives in Settings → Privacy.
 - **In the chat** — ordinary turns get one background line ("right now: Excel for 40m; usually VS Code, YouTube"); ask *"how much time did I spend on YouTube?"* or *"what are my habits?"* and she gets the full picture.
 
+### She can do it for you — `/do`
+
+Type `/do open notepad and write a shopping list` and AURA takes the screen (`core/desktop_agent.py`). Each step she takes a screenshot, numbers the buttons and fields of the window in front (Windows UI Automation), asks the vision model for ONE action — "click element 12" rather than guessing pixels — then does it with the mouse and keyboard.
+
+Safety comes first:
+
+- **Esc**, the **Stop** button, `/stop`, or just **moving the mouse** hands control back instantly (slamming the mouse into a screen corner works too).
+- She **never types passwords, PINs or card numbers** — those fields are blocked and she asks you to do that part.
+- Anything that **deletes, sends, pays, buys, posts, closes apps or runs terminal commands** — or that the model itself flags — waits for you to press **Allow**. No answer within a minute means no.
+- Hard limits: 25 steps, 5 minutes.
+- In the desktop app her main window minimizes and a small **always-on-top control bar** shows what she's doing, with Stop and Allow / Deny. It never steals focus from the app she's using.
+- Settings → Behavior: turn screen control off entirely, or have her **ask before every action**.
+
+Needs Windows plus `pip install pyautogui uiautomation mss Pillow` (in `requirements.txt`) and a vision model key (`OPENROUTER_API_KEY`; set `AURA_VISION_MODEL` to pick a stronger model — free models are slow and miss sometimes).
+
 ### The chat answers, it doesn't narrate
 
 Reasoning models leak their deliberation as ordinary content ("So answer: …", "The user wants …", "That's one sentence?"). Three layers stop it:
@@ -122,6 +137,7 @@ GET/POST/PUT/DELETE  /api/quests            daily commitments + screen verificat
 GET  /api/models · POST /api/models/{n}/toggle    model lock
 GET  /api/links · /api/stats · /api/nature · /api/settings
 GET  /api/habits?days=7 · DELETE /api/habits[?app_name=]   habits (read / forget)
+GET  /api/agent · POST /api/agent/run · /stop · /confirm    screen control (/do)
 POST /api/voice/transcribe                  WAV → text fallback
 GET  /api/v3/snapshot · /session · /mistakes       developer state
 POST /api/v3/explain · /api/v3/build              error intelligence
@@ -140,6 +156,7 @@ core/
   work_recall.py       session memory for "where did we leave off"
   persona.py           relationship modes: buddy / assistant / mentor / custom
   habits.py            which apps/tools you use and when (foreground sampler)
+  desktop_agent.py     /do: look → decide → safety check → act, on your screen
   response_composer.py persona layer + 5 reply styles
   engagement.py        when to speak, when to shut up
   quest_verify.py      screenshot verification (vision model)
@@ -182,6 +199,7 @@ set PYTHONPATH=.                      # Windows;  export PYTHONPATH=. on Unix
 python test_work_recall.py            # session memory in the chat
 python test_persona.py                # relationship modes
 python test_habits.py                 # habit tracker: naming, crediting, privacy
+python test_desktop_agent.py          # /do: parsing, safety rules, stop/confirm loop
 python test_reasoning_leak.py         # chain-of-thought never reaches the user
 python test_memory.py                 # durable facts + context
 python test_engine.py                 # routing + intent
@@ -220,7 +238,7 @@ cd frontend && npx tsc --noEmit       # frontend typecheck
 
 Live and used daily: routing, memory, voice, screen awareness, error intelligence, quests, relationship modes, habit tracking.
 
-Next: letting AURA do tasks on your screen when you tell her to.
+New and needs real-world testing: `/do` screen control.
 
 ---
 

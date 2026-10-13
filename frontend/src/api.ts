@@ -518,6 +518,14 @@ export const api = {
       { method: "DELETE" },
     ),
 
+  // Desktop agent — AURA operating the screen (/do)
+  agentStop: () => j<{ ok: boolean }>("/api/agent/stop", { method: "POST" }),
+  agentConfirm: (confirm_id: string, allow: boolean) =>
+    j<{ ok: boolean }>("/api/agent/confirm", {
+      method: "POST",
+      body: JSON.stringify({ confirm_id, allow }),
+    }),
+
   // App settings
   getSettings: () => j<{ settings: Settings }>("/api/settings").then((r) => r.settings),
   saveSettings: (patch: Settings) =>

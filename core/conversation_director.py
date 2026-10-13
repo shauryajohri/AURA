@@ -43,7 +43,7 @@ class Mode:
 
 @dataclass
 class Directive:
-    kind: str            # "reply" | "chat" | "plan" | "generate" | "llm_once" | "execute_prompt"
+    kind: str            # "reply" | "chat" | "plan" | "generate" | "llm_once" | "execute_prompt" | "agent" | "agent_stop"
     text: str = ""       # reply text, or the (possibly augmented) chat/plan text
     system: str = ""     # llm_once only
     user: str = ""       # llm_once only
@@ -384,6 +384,16 @@ class ConversationDirector:
             return Directive("reply",
                 f"{was.capitalize()} mode closed — back to normal chat.")
 
+        # ── Screen control: /do <task> runs it, /stop takes the screen back ──
+        if head == "/do":
+            if not rest:
+                return Directive("reply",
+                    "Tell me what to do, e.g. /do open notepad and write a shopping list. "
+                    "I'll take the screen — press Esc or move the mouse to stop me.")
+            return Directive("agent", rest)
+        if cmd == "/stop":
+            return Directive("agent_stop")
+
         if cmd in ("/prompt", "/prompt start"):
             self._set_mode(Mode.PROMPT)
             self.prompt_session.clear()
@@ -420,6 +430,7 @@ class ConversationDirector:
                 "🧠 /discussion — brainstorming that challenges your idea\n"
                 "📋 /plan — turn an idea into an executable roadmap\n"
                 "✍️ /prompt — prompt engineering (buffers, /prompt_end to build)\n"
+                "🖱 /do <task> — I take the screen and do it (Esc or /stop to stop)\n"
                 "Tip: /research <goal> enters the mode AND runs it in one go.\n"
                 "Prompt extras: /prompt clear · /prompt save · /prompt export")
 

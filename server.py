@@ -77,6 +77,7 @@ async def _lifespan(app: FastAPI):
     _init_v3()
     _start_auto_chat()
     _start_habits()
+    _init_agent()
     yield
     try:
         from core import habits
@@ -181,6 +182,22 @@ def _start_auto_chat() -> None:
         traceback.print_exc()
 
     print("[AURA bridge] auto-chat loops started")
+
+
+def _init_agent() -> None:
+    """Every desktop-agent step goes to the UI (control bar + chat)."""
+    try:
+        from core import desktop_agent
+
+        def sink(payload: dict) -> None:
+            broadcast({"type": "agent", "payload": payload})
+            # The outcome also lands in the chat, so there's a record of it.
+            if payload.get("state") in {"done", "stopped", "failed", "ask"}:
+                broadcast_push(payload.get("message", ""), "agent")
+
+        desktop_agent.get_agent().set_sink(sink)
+    except Exception:  # noqa: BLE001
+        traceback.print_exc()
 
 
 def _start_habits() -> None:
@@ -586,6 +603,37 @@ async def api_save_settings(req: Request) -> dict[str, Any]:
         from core import habits
         habits.get_tracker().refresh_settings()   # pause / ignore take effect now
     return {"ok": True, "settings": store.get_settings()}
+
+
+# ── Desktop agent: AURA operates the screen on request ─────────────────────
+@app.get("/api/agent")
+async def api_agent_status() -> dict[str, Any]:
+    from core import desktop_agent
+    agent = desktop_agent.get_agent()
+    return {"busy": agent.busy(), **agent.state, **desktop_agent.settings()}
+
+
+@app.post("/api/agent/run")
+async def api_agent_run(req: Request) -> dict[str, Any]:
+    from core import desktop_agent
+    body = await req.json()
+    ok, msg = desktop_agent.start_task(str(body.get("goal", "")))
+    return {"ok": ok, "message": msg}
+
+
+@app.post("/api/agent/stop")
+async def api_agent_stop() -> dict[str, Any]:
+    from core import desktop_agent
+    desktop_agent.get_agent().stop("you pressed Stop")
+    return {"ok": True}
+
+
+@app.post("/api/agent/confirm")
+async def api_agent_confirm(req: Request) -> dict[str, Any]:
+    from core import desktop_agent
+    body = await req.json()
+    ok = desktop_agent.get_agent().confirm(body.get("confirm_id"), bool(body.get("allow")))
+    return {"ok": ok}
 
 
 # ── Habits: which apps they use, how long, and when ────────────────────────
@@ -1208,6 +1256,8 @@ _REASON_LABEL = {
     "generate":       ("⌨  CODE",          "explicit code request → generating"),
     "execute_prompt": ("⌨  CODE",          "running the built prompt as a coding task"),
     "llm_once":       ("✍  PROMPT BUILD",  "one clean LLM call from /prompt"),
+    "agent":          ("🖱  SCREEN",        "taking the screen to do it (/do)"),
+    "agent_stop":     ("🖱  SCREEN",        "handing the screen back (/stop)"),
 }
 # how the intent tag maps to a human-readable "what she thought"
 _INTENT_THOUGHT = {
@@ -1296,6 +1346,22 @@ async def _dispatch(ws: WebSocket, text: str) -> None:
     if kind == "reply":
         # Instant local answer (mode ack, /help, options menu) - no LLM.
         await _send(ws, {"type": "push", "payload": {"text": directive.text, "source": "reply"}})
+        await _send(ws, {"type": "state", "payload": {"state": "idle"}})
+        return
+
+    if kind == "agent":
+        from core import desktop_agent
+        ok, msg = desktop_agent.start_task(directive.text)
+        await _send(ws, {"type": "push", "payload": {"text": msg, "source": "agent" if ok else "reply"}})
+        await _send(ws, {"type": "state", "payload": {"state": "idle"}})
+        return
+
+    if kind == "agent_stop":
+        from core import desktop_agent
+        agent = desktop_agent.get_agent()
+        text = "Stopping." if agent.busy() else "I'm not controlling anything right now."
+        agent.stop("you told me to stop")
+        await _send(ws, {"type": "push", "payload": {"text": text, "source": "reply"}})
         await _send(ws, {"type": "state", "payload": {"state": "idle"}})
         return
 

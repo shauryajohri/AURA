@@ -51,7 +51,7 @@ const KEYS: Record<Exclude<SettingsCategory, "layout" | "keys">, string[]> = {
   relationship: ["persona.mode", "persona.user_name", "persona.custom"],
   autochat: ["autochat.enabled", "autochat.frequency"],
   privacy: ["privacy.screen_reading", "privacy.store_conversations", "habits.enabled"],
-  behavior: ["behavior.proactive", "behavior.interrupt_work"],
+  behavior: ["behavior.proactive", "behavior.interrupt_work", "agent.enabled", "agent.confirm_all"],
   developer: ["dev.verbose_logs", "dev.show_intents"],
   experimental: ["experimental.plugins", "experimental.cloud_sync"],
 };
@@ -377,7 +377,11 @@ export default function SettingsOverlay({
   };
 
   // ---- controls ------------------------------------------------------------
-  const LABELS: Record<string, string> = { "habits.enabled": "learn my habits" };
+  const LABELS: Record<string, string> = {
+    "habits.enabled": "learn my habits",
+    "agent.enabled": "let AURA control my screen (/do)",
+    "agent.confirm_all": "ask before every action",
+  };
   const label = (k: string) => LABELS[k] ?? k.split(".")[1].replace(/_/g, " ");
 
   const controls = () => {

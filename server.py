@@ -146,6 +146,13 @@ async def _safe_send(ws: WebSocket, data: str) -> None:
 def broadcast(msg: dict[str, Any]) -> None:
     if MAIN_LOOP is None:
         return
+    # Buddy Lock: everything broadcast here — quest progress, V3 error
+    # explanations, activity lines, presence, proactive pushes — is built from
+    # the owner's day. While the lock says the owner isn't around, nobody else
+    # at the keyboard (or on a socket) gets it, same as the 423 on REST.
+    from core.guard import owner_present
+    if not owner_present():
+        return
     data = json.dumps(msg)
     for ws in list(CLIENTS):
         asyncio.run_coroutine_threadsafe(_safe_send(ws, data), MAIN_LOOP)
@@ -178,8 +185,8 @@ def _start_auto_chat() -> None:
         print(f"[AURA bridge] audio prewarm skipped: {e}")
 
     # Buddy Lock: AURA only speaks up on her own when her buddy is around. A
-    # proactive line is built from his day — his quests, his errors, his
-    # screen — and is nobody else's business.
+    # proactive line is built from the owner's day — their quests, their
+    # errors, their screen — and is nobody else's business.
     from core.guard import owner_present
 
     def speak_fn(text: str) -> None:
@@ -190,14 +197,10 @@ def _start_auto_chat() -> None:
         except Exception as e:  # noqa: BLE001
             print(f"[AURA bridge] TTS skipped: {e}")
 
-    def push_if_owner(text: str, source: str) -> None:
-        if owner_present():
-            broadcast_push(text, source)
-
     try:
         start_proactive(
             speak_fn=speak_fn,
-            on_suggestion_fn=lambda t: push_if_owner(t, "proactive"),
+            on_suggestion_fn=lambda t: broadcast_push(t, "proactive"),
             on_presence_fn=lambda s: broadcast({"type": "presence", "payload": {"state": s}}),
         )
     except Exception:  # noqa: BLE001
@@ -206,7 +209,7 @@ def _start_auto_chat() -> None:
     try:
         start_curiosity_loop(
             speak_fn=speak_fn,
-            on_curiosity_fn=lambda t: push_if_owner(t, "curiosity"),
+            on_curiosity_fn=lambda t: broadcast_push(t, "curiosity"),
         )
     except Exception:  # noqa: BLE001
         traceback.print_exc()
@@ -1356,11 +1359,14 @@ async def _say_locally(ws: WebSocket, text: str, source: str) -> None:
     await _send(ws, {"type": "state", "payload": {"state": "idle"}})
 
 
-async def _guarded_dispatch(ws: WebSocket, text: str, payload: dict[str, Any]) -> None:
+async def _guarded_dispatch(ws: WebSocket, text: str, payload: dict[str, Any],
+                            session: dict[str, Any] | None = None) -> None:
     """Buddy Lock in front of every chat message.
 
     Typed messages carry a camera frame, voice messages carry the utterance
-    audio (see core/guard/policy.py for how each is judged). The owner goes
+    audio (see core/guard/policy.py for how each is judged). `session` is this
+    connection's own evidence record: a message is never judged on what
+    another connection (or the presence loop) showed the camera. The owner goes
     on to the full brain; a guest the owner vouched for gets the isolated
     guest lane; anyone else gets no answer at all — just a notice in the UI,
     never a model call and never a spoken word.
@@ -1379,7 +1385,8 @@ async def _guarded_dispatch(ws: WebSocket, text: str, payload: dict[str, Any]) -
         via = "voice" if payload.get("via") == "voice" else "text"
         try:
             d = await asyncio.to_thread(
-                g.authorize, text, via, b64bytes(payload.get("frame")), b64bytes(payload.get("audio")))
+                g.authorize, text, via, b64bytes(payload.get("frame")),
+                b64bytes(payload.get("audio")), session)
         except Exception:  # noqa: BLE001
             traceback.print_exc()
             d = Decision(False, None, "error", "Buddy Lock hit an error, so I'm not answering.")
@@ -1409,6 +1416,7 @@ async def _guarded_dispatch(ws: WebSocket, text: str, payload: dict[str, Any]) -
 async def ws_endpoint(ws: WebSocket) -> None:
     await ws.accept()
     CLIENTS.add(ws)
+    guard_session: dict[str, Any] = {}  # Buddy Lock evidence for THIS socket only
     await _send(ws, {"type": "state", "payload": {"state": "idle"}})
     await _send(ws, {"type": "mode", "payload": {"mode": getattr(DIRECTOR, "mode", "CHAT")}})
 
@@ -1433,7 +1441,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
                 if not text:
                     await _send(ws, {"type": "error", "payload": {"message": "empty message"}})
                 else:
-                    await _guarded_dispatch(ws, text, payload)
+                    await _guarded_dispatch(ws, text, payload, guard_session)
             else:
                 await _send(ws, {"type": "error", "payload": {"message": f"unknown type: {mtype}"}})
     except WebSocketDisconnect:

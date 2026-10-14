@@ -34,12 +34,21 @@ def get_guard() -> Guard:
     return _guard
 
 
+# How long after the owner was last clearly seen AURA may still speak up on
+# her own. Longer than the UI's 90 s lock: while AURA is minimised the
+# renderer's timers are throttled to about one presence frame a minute, and a
+# missed frame or two must not mute the companion mid-work. Someone else
+# sitting down still ends it at once (the stranger-takeover rule).
+PROACTIVE_WINDOW_S = 180
+
+
 def owner_present() -> bool:
-    """True when AURA may speak up on her own: the lock is off, or the owner
-    is around. Never raises — a guard failure must not kill the proactive
-    loops, it just keeps them quiet."""
+    """True when AURA may speak up on her own (proactive lines, and the
+    quest / V3 / activity events the UI streams): the lock is off, or the
+    owner is around. Never raises — a guard failure must not kill the
+    background loops, it just keeps them quiet."""
     try:
         g = get_guard()
-        return (not g.active) or g.owner_present()
+        return (not g.active) or g.owner_present(PROACTIVE_WINDOW_S)
     except Exception:  # noqa: BLE001
         return False

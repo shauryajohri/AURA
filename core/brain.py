@@ -1302,6 +1302,10 @@ def start_proactive(speak_fn=None, on_suggestion_fn=None, on_presence_fn=None):
         import modules.voice_output as tts
         from modules.speech_planner import plan
         def _speak(text):
+            # Buddy Lock: no unprompted lines unless the owner is around.
+            from core.guard import owner_present
+            if not owner_present():
+                return
             tts.speak_chunks(plan(text, "CHAT"))
         get_ae().start(_speak, on_suggestion_fn)
     except Exception as e:

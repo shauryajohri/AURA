@@ -1,5 +1,6 @@
 // REST client for the Domain's backend: real filesystem, real terminal,
 // GitHub project vitals, and the OAuth connectors.
+import { assertNotRefused } from "./guardApi";
 const BASE = "http://127.0.0.1:8760";
 
 export interface FsEntry {
@@ -216,6 +217,7 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
+  assertNotRefused(res);
   return res.json() as Promise<T>;
 }
 

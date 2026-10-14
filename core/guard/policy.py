@@ -24,8 +24,9 @@ Rules for a message
 3. Fresh frame shows a face that is *probably* the owner (looking down at the
    keyboard drags the score) and the owner was clearly seen in the last
    LOCK_AFTER_S                                     → owner
-4. Frame shows nobody, owner clearly seen within GRACE_S → owner
-   (detection misses are common; a stranger in frame is never excused)
+4. Frame shows nobody, and THIS connection showed the owner within GRACE_S
+   → owner (detection misses are common; a stranger in frame is never
+   excused, and a message never borrows another connection's evidence)
 5. PIN session open                                 → owner
 6. A guest pass covers the face in frame            → guest
 7. Otherwise                                        → not answered
@@ -41,8 +42,9 @@ Guest passes
 Granted only by a message that already passed as the owner ("you can help
 him"). If the guest is in frame at that moment the pass is bound to their
 face; if not, it's *unclaimed* and binds to the first unfamiliar face that
-shows up — so "help him" can't be picked up by a third person later. Passes
-live in memory only: a restart ends them.
+shows up — so "help him" can't be picked up by a third person later. A pass
+always needs a face to match, so guests need the camera on. Passes live in
+memory only: a restart ends them.
 """
 
 from __future__ import annotations
@@ -57,7 +59,7 @@ from core.guard.face import best_match, cosine
 
 LOCK_AFTER_S = 90         # owner unseen this long → UI and API lock
 GRACE_S = 20              # empty frame tolerated this long after a clear sighting
-FRESH_S = 6               # a sighting this recent can stand in for a missing frame
+FRESH_S = 6               # how recent "who's in frame" must be to bind a guest pass
 PIN_SESSION_S = 10 * 60
 # "Probably the owner": OpenCV's published SFace same-person threshold. Only
 # honoured right after a clear (>= face_threshold) sighting — it's what lets
@@ -214,13 +216,12 @@ class Guard:
 
     def _guest_pass_for(self, s: Sighting | None, now: float) -> GuestPass | None:
         thr = self.vault.tuning("face_threshold")
+        if s is None:
+            return None  # a pass is for a face; no frame, nobody to match
         for p in self._passes_now(now):
-            if not p.claimed:
-                # Owner said "help him" and nobody has claimed it yet. With a
-                # camera frame it would have been bound in observe(); without
-                # one (camera off) the owner's word is all there is.
-                return p
-            if s and any(best_match(e, p.faces) >= thr for e in s.strangers):
+            # An unclaimed pass was already bound to the first new face in
+            # observe(); unclaimed here means this frame had nobody new.
+            if p.claimed and any(best_match(e, p.faces) >= thr for e in s.strangers):
                 return p
         return None
 
@@ -243,10 +244,21 @@ class Guard:
 
     # ── the decision ───────────────────────────────────────────────────────
     def authorize(self, text: str, via: str = "text", frame: bytes | None = None,
-                  audio: bytes | None = None) -> Decision:
+                  audio: bytes | None = None, session: dict | None = None) -> Decision:
+        """Judge one message.
+
+        `session` is per-connection state (one dict per WebSocket). Evidence
+        only counts for the connection it arrived on: the detection-miss grace
+        leans on an owner sighting from an earlier message ON THE SAME SOCKET,
+        never on the presence frames the UI posts. Otherwise anything that can
+        open a socket — a sandboxed iframe on any website gets in with Origin
+        "null", same as the packaged app — would ride on the owner sitting at
+        the camera with a frameless or blank-frame message.
+        """
         if not self.active:
             return Decision(True, "owner", "guard_off")
         now = self.clock()
+        session = session if session is not None else {}
         detail: dict = {"via": via}
 
         # 1. voice
@@ -258,6 +270,7 @@ class Guard:
             if vscore is not None and vscore >= self.vault.tuning("voice_threshold"):
                 with self._lock:
                     self._owner_seen_at = now
+                session["owner_at"] = now
                 return self._owner(text, "voice", detail)
 
         # 2-4. camera
@@ -267,8 +280,8 @@ class Guard:
                 s = self.observe(frame)
             except (RuntimeError, ValueError) as e:
                 detail["camera_error"] = str(e)
-        if s is None and self._last and now - self._last.at <= FRESH_S:
-            s = self._last
+        # A message with no frame of its own has nothing to go on: presence
+        # frames posted elsewhere are not evidence for it (see docstring).
         if s is not None:
             detail.update(faces=s.faces, face_score=round(s.owner_score, 3))
             if s.owner:
@@ -276,14 +289,18 @@ class Guard:
                                     and vscore < self.vault.tuning("voice_threshold"))
                 if voice_says_other and s.faces >= 2:
                     return Decision(True, "guest", "owner_present", detail=detail)
+                session["owner_at"] = now
                 return self._owner(text, "face", detail)
+            # "Probably the owner" needs a face that actually resembles them;
+            # the clear sighting it leans on may come from presence frames.
             if (s.faces and s.owner_score >= CONTINUITY_THRESHOLD
                     and now - self._owner_seen_at <= LOCK_AFTER_S):
+                session["owner_at"] = now
                 return self._owner(text, "face_continuity", detail)
-            if s.faces == 0 and now - self._owner_seen_at <= GRACE_S:
+            # Nobody in frame (looking down at the keyboard): excused only if
+            # THIS connection showed the owner a moment ago.
+            if s.faces == 0 and now - session.get("owner_at", 0.0) <= GRACE_S:
                 return self._owner(text, "face_recent", detail)
-        elif now - self._owner_seen_at <= GRACE_S:
-            return self._owner(text, "face_recent", detail)
 
         # 5. PIN
         if now < self._pin_until:

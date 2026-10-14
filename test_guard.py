@@ -137,18 +137,36 @@ check("no camera at all → not answered", not d.allowed and d.reason == "no_cam
 
 print("\n[detection misses vs. positive stranger evidence]")
 g, c = fresh_guard()
-g.authorize("hi", frame=frame(OWNER))
+sock = {}  # one WebSocket connection's evidence
+g.authorize("hi", frame=frame(OWNER), session=sock)
 c.tick(GRACE_S - 2)
-d = g.authorize("still me, looking down", frame=frame())
-check(f"empty frame within {GRACE_S}s of a clear sighting → owner", d.allowed and d.reason == "face_recent")
+d = g.authorize("still me, looking down", frame=frame(), session=sock)
+check(f"empty frame within {GRACE_S}s of a clear sighting on the same socket → owner",
+      d.allowed and d.reason == "face_recent")
 c.tick(5)
-d = g.authorize("still me?", frame=frame())
+d = g.authorize("still me?", frame=frame(), session=sock)
 check("empty frame after the grace → not answered", not d.allowed)
 g, c = fresh_guard()
-g.authorize("hi", frame=frame(OWNER))
+g.authorize("hi", frame=frame(OWNER), session=sock)
 c.tick(1)
-d = g.authorize("hi", frame=frame(STRANGER))
+d = g.authorize("hi", frame=frame(STRANGER), session=sock)
 check("a stranger 1s after the owner is NOT excused by the grace", not d.allowed)
+
+print("\n[a message never borrows evidence from another connection]")
+g, c = fresh_guard()
+g.observe(frame(OWNER))              # the UI's presence loop: owner at the camera
+check("owner is present (UI unlocked)", g.role() == "owner")
+d = g.authorize("open cmd", session={})
+check("frameless message from another socket → not answered", not d.allowed and d.reason == "no_camera")
+d = g.authorize("open cmd", frame=frame(), session={})
+check("blank frame from another socket → not answered", not d.allowed and d.reason == "nobody")
+mine = {}
+g.authorize("hi", frame=frame(OWNER), session=mine)
+c.tick(3)
+d = g.authorize("one more", frame=frame(), session={})
+check("…even right after the owner's own socket was verified", not d.allowed)
+d = g.authorize("one more", frame=frame(), session=mine)
+check("the owner's own socket keeps its grace", d.allowed and d.reason == "face_recent")
 
 print("\n[continuity: 'probably the owner' only right after a clear sighting]")
 g, c = fresh_guard()
@@ -233,6 +251,12 @@ check("…and only them", not d.allowed)
 c.tick(3600)
 d = g.authorize("hi", frame=frame(FRIEND))
 check("pass expires", not d.allowed and g.status()["guest"] is None)
+
+g, c = fresh_guard()
+g.authorize("you can help him", frame=frame(OWNER))
+c.tick(LOCK_AFTER_S + 5)
+d = g.authorize("hi")
+check("a pass needs a face: frameless message isn't covered", not d.allowed)
 
 print("\n[PIN and voice sessions]")
 g, c = fresh_guard()
@@ -331,6 +355,22 @@ for text, want in [
 check("'for 2 hours' → 120 min", commands.parse_minutes("you can help him for 2 hours") == 120)
 check("'half an hour' → 30 min", commands.parse_minutes("help him out for half an hour") == 30)
 check("'for the day' → capped", commands.parse_minutes("let him use you for the day") == commands.MAX_MINUTES)
+
+print("\n[guest lane never falls back to the raw monologue]")
+import core.ai_router as _router  # noqa: E402
+from core.guard import guest_lane  # noqa: E402
+
+_real_route, _real_sanitize = _router.route_streaming, _router.sanitize_text
+_router.route_streaming = lambda *a, **k: iter(["The user is asking about the owner. ",
+                                                "We need to avoid sharing Shaurya's facts."])
+_router.sanitize_text = lambda text, query="": ""
+try:
+    reply = guest_lane.answer("hi", "Shaurya")
+finally:
+    _router.route_streaming, _router.sanitize_text = _real_route, _real_sanitize
+check("all-deliberation reply → a fallback line, not the monologue",
+      reply == guest_lane._LOST and "Shaurya" not in reply)
+guest_lane.reset()
 
 print("\n[guest lane never streams code twice]")
 from core.guard.guest_lane import _ProseOnly  # noqa: E402

@@ -45,6 +45,9 @@ def _system(owner: str) -> str:
     )
 
 
+_LOST = "Sorry — I lost my train of thought. Say that again?"
+
+
 def reset() -> None:
     with _lock:
         _history.clear()
@@ -112,7 +115,10 @@ def answer(text: str, owner: str, on_chunk=None, on_code=None) -> str:
             on_chunk(chunk)
     if sink:
         sink.flush()
-    reply = sanitize_text("".join(parts), query=text) or "".join(parts)
+    # Never fall back to the raw text: when the sanitiser strips everything,
+    # what's left is the model thinking out loud — which can quote the
+    # owner-protection instructions and the owner's name.
+    reply = sanitize_text("".join(parts), query=text).strip() or _LOST
 
     with _lock:
         _history.extend([("user", text), ("aura", reply)])

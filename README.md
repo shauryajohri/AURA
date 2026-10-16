@@ -105,11 +105,13 @@ Siri knows your voice. AURA knows your face *and* your voice — and once Buddy 
 | A friend uses it **while you're there** | Answered (as a guest if their voice clearly isn't yours). |
 | You say *"AURA, you can help him"* | A guest pass (30 min default, *"for an hour"* works) bound to **that person's face**. Nobody in frame yet? It binds to the next new face — and only that one. *"Stop helping him"* ends it. |
 | You walk away | Locks after 90 s — or within ~5 s if the camera sees someone else take your seat. |
-| Camera can't see you | Backup **PIN** or *"Use my voice"* on the lock screen: a 10-minute session. |
+| Camera can't see you | Backup **PIN** or *"Use my voice"* on the lock screen: a 10-minute session, tied to whoever is at the camera — it ends if someone else sits down. |
 
 **Guests get real help, not your life.** They're answered by an isolated lane (`core/guard/guest_lane.py`): no durable facts, no past chats, no project memory, no screen reading, no app/task/quest commands, and nothing they say is written to your memory. Memory, Chats, Tasks, Settings and the Domain show *"That's Shaurya's"*; the REST API returns 403 for anything but the chat. AURA's proactive lines are muted too — they're built from your day, and only speak up while you're around.
 
 **Set it up:** Settings → Security → *Set up Buddy Lock* (name → face, five poses → voice, three lines, optional → PIN → on). The first run downloads the three models (~80 MB) into `models/guard/`. Turning it off, re-enrolling, changing the PIN or granting a guest needs your face in the camera *at that moment*, or the PIN.
+
+**The camera stays on while Buddy Lock is on** — including while AURA is minimised, because that's when her proactive help matters and she mutes it the moment she can't tell you're there. Turn the lock off and the camera turns off.
 
 **What's stored:** `memory/guard/buddy.json` (gitignored) — face/voice *embeddings* and a salted PBKDF2 PIN hash. Frames and audio are processed in memory and dropped.
 

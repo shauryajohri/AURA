@@ -149,6 +149,20 @@ class Vault:
         with self._lock:
             self._data["pin"] = {"salt": salt.hex(), "hash": digest.hex(),
                                  "iterations": PIN_ITERATIONS}
+            self._data.pop("pin_lockout", None)  # a new PIN starts clean
+            self._write()
+
+    def pin_lockout(self) -> tuple[int, float]:
+        """(wrong attempts so far, blocked-until timestamp)."""
+        rec = self._data.get("pin_lockout") or {}
+        return int(rec.get("failures", 0)), float(rec.get("blocked_until", 0.0))
+
+    def set_pin_lockout(self, failures: int, blocked_until: float) -> None:
+        with self._lock:
+            if failures or blocked_until:
+                self._data["pin_lockout"] = {"failures": failures, "blocked_until": blocked_until}
+            else:
+                self._data.pop("pin_lockout", None)
             self._write()
 
     def check_pin(self, pin: str) -> bool:

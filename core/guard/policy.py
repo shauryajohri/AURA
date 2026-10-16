@@ -82,6 +82,7 @@ class Sighting:
     owner: bool                       # a face cleared the owner threshold
     owner_score: float                # best score of any face in frame
     strangers: list = field(default_factory=list, repr=False)  # embeddings, largest first
+    embeddings: list = field(default_factory=list, repr=False)  # every face, largest first
 
 
 @dataclass
@@ -119,10 +120,10 @@ class Guard:
         self._last_frame_at = 0.0
         self._camera_error = ""
         self._pin_until = 0.0
-        self._pin_failures = 0
-        self._pin_blocked_until = 0.0
         self._passes: list[GuestPass] = []
         self._stranger_streak = 0
+        self._session_face = None    # who the PIN/voice session belongs to
+        self._session_streak = 0
 
     # ── basic state ────────────────────────────────────────────────────────
     @property
@@ -183,7 +184,7 @@ class Guard:
                      if scores[i] < CONTINUITY_THRESHOLD]
         s = Sighting(at=now, faces=len(faces), owner=owner,
                      owner_score=scores[owner_idx] if faces else 0.0,
-                     strangers=strangers)
+                     strangers=strangers, embeddings=[f.embedding for f in faces])
         with self._lock:
             self._last = s
             self._last_frame_at = now
@@ -198,8 +199,41 @@ class Guard:
             elif faces:
                 self._stranger_streak = 0  # "probably the owner"
             # an empty frame says nothing about who's there: streak unchanged
+            self._watch_session(s, now)
             self._note_guests(s, now)
         return s
+
+    def _watch_session(self, s: Sighting, now: float) -> None:
+        """A PIN/voice session belongs to the person at the camera when it
+        opened (or the first face seen after). It survives that person not
+        being *recognised* — the reason to use the PIN is usually that the
+        camera can't place them — but someone else sitting down ends it,
+        same as the owner-presence takeover."""
+        if now >= self._pin_until or not s.embeddings:
+            return
+        if self._session_face is None:
+            self._session_face = s.embeddings[0]
+            self._session_streak = 0
+            return
+        thr = self.vault.tuning("face_threshold")
+        if s.owner or any(cosine(e, self._session_face) >= thr for e in s.embeddings):
+            self._session_streak = 0
+            return
+        self._session_streak += 1
+        if self._session_streak >= STRANGER_TAKEOVER_FRAMES:
+            print("[Guard] someone else took the seat — PIN/voice session ended")
+            self._end_session()
+
+    def _open_session(self, now: float) -> None:
+        last = self._last if self._last and now - self._last.at <= FRESH_S else None
+        self._pin_until = now + PIN_SESSION_S
+        self._session_face = last.embeddings[0] if last and last.embeddings else None
+        self._session_streak = 0
+
+    def _end_session(self) -> None:
+        self._pin_until = 0.0
+        self._session_face = None
+        self._session_streak = 0
 
     def _note_guests(self, s: Sighting, now: float) -> None:
         """Bind unclaimed passes to the first unfamiliar face; refresh the
@@ -373,17 +407,22 @@ class Guard:
 
     # ── PIN ────────────────────────────────────────────────────────────────
     def _check_pin(self, pin: str) -> tuple[bool, str]:
-        """Verify the PIN with brute-force backoff. Opens nothing."""
+        """Verify the PIN with brute-force backoff. Opens nothing. The
+        failure count lives in the vault, so restarting AURA doesn't hand
+        out five fresh guesses."""
         now = self.clock()
-        if now < self._pin_blocked_until:
-            return False, f"Too many wrong PINs — try again in {int(self._pin_blocked_until - now) + 1}s."
+        failures, blocked_until = self.vault.pin_lockout()
+        if now < blocked_until:
+            return False, f"Too many wrong PINs — try again in {int(blocked_until - now) + 1}s."
         if not self.vault.check_pin(pin):
-            self._pin_failures += 1
-            if self._pin_failures >= PIN_FREE_ATTEMPTS:
-                wait = 30 * 2 ** (self._pin_failures - PIN_FREE_ATTEMPTS)
-                self._pin_blocked_until = now + min(wait, 3600)
+            failures += 1
+            if failures >= PIN_FREE_ATTEMPTS:
+                wait = 30 * 2 ** (failures - PIN_FREE_ATTEMPTS)
+                blocked_until = now + min(wait, 3600)
+            self.vault.set_pin_lockout(failures, blocked_until)
             return False, "That PIN isn't right."
-        self._pin_failures = 0
+        if failures:
+            self.vault.set_pin_lockout(0, 0.0)
         return True, ""
 
     def unlock_pin(self, pin: str) -> tuple[bool, str]:
@@ -391,7 +430,8 @@ class Guard:
         camera isn't consulted (that's the point — it couldn't see you)."""
         ok, why = self._check_pin(pin)
         if ok:
-            self._pin_until = self.clock() + PIN_SESSION_S
+            with self._lock:
+                self._open_session(self.clock())
         return ok, why
 
     def unlock_voice(self, audio: bytes) -> tuple[bool, str]:
@@ -407,7 +447,7 @@ class Guard:
         now = self.clock()
         with self._lock:
             self._owner_seen_at = now
-            self._pin_until = now + PIN_SESSION_S
+            self._open_session(now)
         return True, ""
 
     def verify_owner_now(self, frame: bytes | None = None, pin: str | None = None) -> bool:
@@ -427,7 +467,7 @@ class Guard:
     def lock_now(self) -> None:
         with self._lock:
             self._owner_seen_at = 0.0
-            self._pin_until = 0.0
+            self._end_session()
             self._last = None
             self._stranger_streak = 0
 

@@ -28,9 +28,12 @@ export default function LockScreen() {
   const hasVoice = (status?.vault.voice_samples ?? 0) > 0;
   const corrupt = !!status?.vault.corrupt;
 
+  // Ask for the camera once on mount — not on every camera-state change, or
+  // each failure (starting → error) would immediately ask again.
+  useEffect(() => { void startCamera(); }, []);
+
   // Mirror the shared stream into the visible preview.
   useEffect(() => {
-    void startCamera();
     const v = videoRef.current;
     if (v && camera === "on") {
       v.srcObject = cameraStream();
@@ -120,6 +123,12 @@ export default function LockScreen() {
             {busy === "voice" && (
               <span className="lock__meter" style={{ "--lvl": level } as React.CSSProperties} />
             )}
+          </button>
+        )}
+
+        {(camera === "denied" || camera === "error") && !corrupt && (
+          <button className="lock__voice" onClick={() => void startCamera(true)} disabled={!!busy}>
+            Try the camera again
           </button>
         )}
 

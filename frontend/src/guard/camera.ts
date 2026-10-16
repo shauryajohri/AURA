@@ -6,8 +6,10 @@
  * enforcing). Nothing is kept: a frame is a JPEG string that lives for one
  * request.
  *
- * The camera only runs while Buddy Lock needs it (lock active, or setup) AND
- * the window is visible. Minimise AURA and the light goes off.
+ * The camera runs while Buddy Lock needs it (lock active, or setup) — and
+ * that includes while AURA is minimised: the presence check is how she knows
+ * her buddy is still at the desk, and her proactive help is muted the moment
+ * she can't tell. Switch the lock off and the light goes off.
  */
 
 export type CameraState = "off" | "starting" | "on" | "denied" | "error";
@@ -18,9 +20,15 @@ const JPEG_QUALITY = 0.82;
 let stream: MediaStream | null = null;
 let video: HTMLVideoElement | null = null;
 let canvas: HTMLCanvasElement | null = null;
+let capture: any = null; // ImageCapture on the live track (see grabFrameFresh)
 let starting: Promise<boolean> | null = null;
 let state: CameraState = "off";
 let lastError = "";
+// After a failure (no camera, permission denied, busy) wait before asking
+// again. Without this every state change re-triggered getUserMedia and a
+// missing camera spun hundreds of attempts a second.
+const RETRY_AFTER_MS = 8000;
+let failedAt = 0;
 const listeners = new Set<(s: CameraState) => void>();
 
 function setState(s: CameraState) {
@@ -46,10 +54,14 @@ export function cameraStream(): MediaStream | null {
   return stream;
 }
 
-export function startCamera(): Promise<boolean> {
+/** Start the camera. After a failure this is a no-op for RETRY_AFTER_MS
+ *  unless `force` (an explicit "try again" from the user). */
+export function startCamera(force = false): Promise<boolean> {
   if (stream) return Promise.resolve(true);
   if (starting) return starting;
-  setState("starting");
+  if (!force && failedAt && Date.now() - failedAt < RETRY_AFTER_MS) return Promise.resolve(false);
+  // A retry keeps showing the error rather than flashing "starting".
+  if (state !== "denied" && state !== "error") setState("starting");
   starting = (async () => {
     try {
       const s = await navigator.mediaDevices.getUserMedia({
@@ -73,6 +85,7 @@ export function startCamera(): Promise<boolean> {
       video.srcObject = s;
       await video.play().catch(() => undefined);
       lastError = "";
+      failedAt = 0;
       setState("on");
       return true;
     } catch (e: any) {
@@ -81,6 +94,7 @@ export function startCamera(): Promise<boolean> {
         : name === "NotFoundError" ? "No camera found."
         : name === "NotReadableError" ? "The camera is busy in another app."
         : String(e?.message || e);
+      failedAt = Date.now();
       setState(name === "NotAllowedError" ? "denied" : "error");
       return false;
     } finally {
@@ -93,6 +107,7 @@ export function startCamera(): Promise<boolean> {
 export function stopCamera(): void {
   stream?.getTracks().forEach((t) => t.stop());
   stream = null;
+  capture = null;
   if (video) video.srcObject = null;
   if (state !== "denied") setState("off");
 }
@@ -109,6 +124,44 @@ export async function cameraReady(timeoutMs = 2500): Promise<boolean> {
   return false;
 }
 
+/** Scale a drawable to MAX_SIDE and encode it as base64 JPEG (no prefix). */
+function encode(src: CanvasImageSource, w: number, h: number): string | null {
+  const scale = Math.min(1, MAX_SIDE / Math.max(w, h));
+  if (!canvas) canvas = document.createElement("canvas");
+  canvas.width = Math.round(w * scale);
+  canvas.height = Math.round(h * scale);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
+  const url = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+  return url.slice(url.indexOf(",") + 1);
+}
+
+/**
+ * A frame taken straight from the camera track, for the presence loop. While
+ * the window is minimised the <video> element can stop painting, and drawing
+ * it would post the same stale picture over and over — ImageCapture reads the
+ * track itself. Falls back to the <video> where ImageCapture is missing.
+ */
+export async function grabFrameFresh(): Promise<string | null> {
+  const track = stream?.getVideoTracks()[0];
+  const IC = (window as any).ImageCapture;
+  if (track && IC && track.readyState === "live") {
+    try {
+      if (!capture || capture.track !== track) capture = new IC(track);
+      const bmp: ImageBitmap = await capture.grabFrame();
+      try {
+        return encode(bmp, bmp.width, bmp.height);
+      } finally {
+        bmp.close();
+      }
+    } catch {
+      /* a busy or just-restarted track — fall back below */
+    }
+  }
+  return grabFrame();
+}
+
 /**
  * The current frame as base64 JPEG (no data: prefix), or null if the camera
  * isn't running. Synchronous on purpose — a typed message grabs its frame in
@@ -116,15 +169,5 @@ export async function cameraReady(timeoutMs = 2500): Promise<boolean> {
  */
 export function grabFrame(): string | null {
   if (!stream || !video || video.readyState < 2 || !video.videoWidth) return null;
-  const w = video.videoWidth;
-  const h = video.videoHeight;
-  const scale = Math.min(1, MAX_SIDE / Math.max(w, h));
-  if (!canvas) canvas = document.createElement("canvas");
-  canvas.width = Math.round(w * scale);
-  canvas.height = Math.round(h * scale);
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return null;
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  const url = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
-  return url.slice(url.indexOf(",") + 1);
+  return encode(video, video.videoWidth, video.videoHeight);
 }

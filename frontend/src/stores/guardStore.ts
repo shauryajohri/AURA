@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { guardApi, type GuardStatus, type Seen } from "../guardApi";
 import {
-  cameraState, grabFrame, onCameraState, startCamera, stopCamera, type CameraState,
+  cameraState, grabFrameFresh, onCameraState, startCamera, stopCamera, type CameraState,
 } from "../guard/camera";
 
 /**
@@ -18,7 +18,14 @@ import {
 // two stranger frames), so ~5 s from someone else sitting down to the lock.
 const PRESENCE_MS_UNLOCKED = 2500;
 const PRESENCE_MS_LOCKED = 1500;
+// Minimised: nothing is on screen to unlock, and the browser throttles timers
+// anyway (down to about once a minute after a while — the brain allows for
+// that, see PROACTIVE_WINDOW_S in core/guard/__init__.py).
+const PRESENCE_MS_HIDDEN = 5000;
 const OFFLINE_RETRY_MS = 2000;
+// No camera → no frames → no status piggy-backing on them. Poll instead, so
+// an unlocked window still drops to the lock screen when the brain locks.
+const STATUS_POLL_MS = 5000;
 
 interface GuardStore {
   status: GuardStatus | null;
@@ -82,7 +89,10 @@ export function guardActive(): boolean {
 // ── camera on/off ──────────────────────────────────────────────────────────
 function wantCamera(): boolean {
   const { status, holds } = useGuardStore.getState();
-  return (!!status?.active || holds > 0) && document.visibilityState === "visible";
+  // Not tied to visibility: minimised is exactly when the owner is working
+  // elsewhere and AURA's proactive help matters — and it is muted the moment
+  // she can't tell they're still here (server.py broadcast / speak_fn).
+  return !!status?.active || (holds > 0 && document.visibilityState === "visible");
 }
 
 function syncCamera(): void {
@@ -99,10 +109,17 @@ let lastSent = 0;
 
 async function presenceTick(force = false): Promise<void> {
   const { status } = useGuardStore.getState();
-  if (!status?.active || inFlight || document.visibilityState !== "visible") return;
-  const every = status.role === "locked" ? PRESENCE_MS_LOCKED : PRESENCE_MS_UNLOCKED;
+  if (!status?.active || inFlight) return;
+  const every = document.visibilityState !== "visible" ? PRESENCE_MS_HIDDEN
+    : status.role === "locked" ? PRESENCE_MS_LOCKED : PRESENCE_MS_UNLOCKED;
   if (!force && Date.now() - lastSent < every) return;
-  const frame = grabFrame();
+  inFlight = true; // held across the async grab so ticks can't overlap
+  let frame: string | null = null;
+  try {
+    frame = await grabFrameFresh();
+  } finally {
+    inFlight = false;
+  }
   if (!frame) return;
   inFlight = true;
   lastSent = Date.now();
@@ -138,9 +155,18 @@ export function initGuard(): void {
   };
   void boot();
 
+  let lastPoll = 0;
   setInterval(() => {
     const st = useGuardStore.getState();
     if (st.offline && !st.status) return; // boot() is retrying
+    if (st.status?.active && cameraState() !== "on") {
+      if (Date.now() - lastPoll >= STATUS_POLL_MS) {
+        lastPoll = Date.now();
+        void st.refresh();
+        syncCamera(); // retries the camera (backed off inside startCamera)
+      }
+      return;
+    }
     void presenceTick();
   }, 500);
 }

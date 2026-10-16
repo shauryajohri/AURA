@@ -1,5 +1,6 @@
 // REST client for the AURA bridge (memory/store.py + model_lock).
 import { assertNotRefused } from "./guardApi";
+import { authFetch } from "./auth";
 const BASE = "http://127.0.0.1:8760";
 
 export interface Task {
@@ -257,7 +258,7 @@ export interface ErrorClassification {
 }
 
 async function j<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(BASE + path, {
+  const res = await authFetch(BASE + path, {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
@@ -475,7 +476,7 @@ export const api = {
   /** Render a sample of one voice. Returns an object URL the caller must
    *  revoke when done — the response is raw mp3, not JSON. */
   previewVoice: async (voice: string, text?: string): Promise<string> => {
-    const res = await fetch(BASE + "/api/voice/preview", {
+    const res = await authFetch(BASE + "/api/voice/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ voice, text }),

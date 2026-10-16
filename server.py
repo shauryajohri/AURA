@@ -13,6 +13,10 @@ Surfaces
 3. REST API over memory/store.py + core.model_lock for the sidebar views:
    /api/tasks, /api/models, /api/facts, /api/status.
 
+Auth: every /api/* call needs the header `X-Aura-Token`, and /ws needs the
+subprotocols ["aura", "aura-token.<token>"]. The token is new on every start
+(see local_auth.py); AURA's window gets it from Electron, never from the API.
+
 WebSocket protocol (JSON over /ws)
 ----------------------------------
 Client -> Server: {"type":"message","payload":{"text":"...","via":"text|voice",
@@ -78,6 +82,7 @@ async def _lifespan(app: FastAPI):
     """Modern replacement for the deprecated @app.on_event('startup')."""
     global MAIN_LOOP
     MAIN_LOOP = asyncio.get_running_loop()
+    local_auth.write_token_file()
     _init_director()
     _init_v3()
     _start_auto_chat()
@@ -92,9 +97,18 @@ app = FastAPI(title="AURA Bridge", lifespan=_lifespan)
 # still carries the headers the renderer needs to read it.
 from guard_api import GuardMiddleware, router as guard_router  # noqa: E402
 
+# Launch token: /api/* and /ws only obey AURA's own window, not every web page
+# open in a browser on this laptop (see local_auth.py). It sits outside Buddy
+# Lock so a request without the token never even reaches the camera check.
+import local_auth  # noqa: E402
+
 app.add_middleware(GuardMiddleware)
+app.add_middleware(local_auth.LaunchTokenMiddleware)
 app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+    CORSMiddleware,
+    allow_origins=local_auth.ALLOWED_ORIGINS,
+    allow_methods=["*"],
+    allow_headers=["Content-Type", "X-Aura-Token"],
 )
 app.include_router(guard_router)
 
@@ -1414,7 +1428,8 @@ async def _guarded_dispatch(ws: WebSocket, text: str, payload: dict[str, Any],
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
-    await ws.accept()
+    # The launch token was checked by LaunchTokenMiddleware before we got here.
+    await ws.accept(subprotocol=local_auth.accept_subprotocol(ws.scope))
     CLIENTS.add(ws)
     guard_session: dict[str, Any] = {}  # Buddy Lock evidence for THIS socket only
     await _send(ws, {"type": "state", "payload": {"state": "idle"}})

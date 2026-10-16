@@ -33,7 +33,7 @@ os.environ["AURA_GUARD_VAULT"] = os.path.join(_TMP, "buddy.json")
 from core.guard import commands  # noqa: E402
 from core.guard.face import Face  # noqa: E402
 from core.guard.policy import (  # noqa: E402
-    FRESH_S, GRACE_S, LOCK_AFTER_S, PIN_SESSION_S, Guard)
+    FRESH_S, GRACE_S, LOCK_AFTER_S, PIN_FREE_ATTEMPTS, PIN_SESSION_S, Guard)
 from core.guard.vault import Vault  # noqa: E402
 from core.guard.voice import VoiceSample  # noqa: E402
 
@@ -57,6 +57,7 @@ OWNER = [1.0, 0.0, 0.0]
 FRIEND = [0.0, 1.0, 0.0]
 STRANGER = [0.0, 0.0, 1.0]
 BLURRY_OWNER = [0.39, 0.92, 0.0]
+DIM_OWNER = [0.3, -0.954, 0.0]   # the owner in bad light: matches nobody enrolled
 
 
 class FakeFaces:
@@ -273,6 +274,27 @@ d = g.authorize("hi", frame=frame(STRANGER))
 check("PIN session: camera isn't consulted", d.allowed and d.reason == "pin")
 c.tick(PIN_SESSION_S + LOCK_AFTER_S)
 check("PIN session ends", g.role() == "locked")
+
+g, c = fresh_guard()
+g.observe(frame(DIM_OWNER))          # camera can't place the owner (bad light)…
+ok, _ = g.unlock_pin("2468")         # …so they use the PIN
+for _ in range(4):
+    c.tick(3)
+    g.observe(frame(DIM_OWNER))
+check("PIN session stays with the person who unlocked it", g.role() == "owner")
+c.tick(3)
+g.observe(frame(STRANGER))
+check("one frame of someone else doesn't end it", g.role() == "owner")
+c.tick(3)
+g.observe(frame(STRANGER))
+check("someone else taking the seat ends the PIN session", g.role() == "locked")
+
+g, c = fresh_guard()
+for _ in range(PIN_FREE_ATTEMPTS):
+    g.unlock_pin("0000")
+g2 = Guard(g.vault.__class__(g.vault.path), FakeFaces(), FakeVoices(), clock=c)
+ok, why = g2.unlock_pin("2468")
+check("PIN lockout survives a restart", not ok and "try again" in why)
 
 g, c = fresh_guard()
 check("verify_owner_now with the PIN → yes", g.verify_owner_now(pin="2468"))

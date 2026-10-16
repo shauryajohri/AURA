@@ -40,3 +40,7 @@ Thumbs.db
 # downloaded recognition models (~80 MB, fetched on first use)
 memory/guard/
 models/guard/
+
+# Launch token for the local API — new on every start, never share it
+memory/session.token
+memory/session.tmp

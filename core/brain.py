@@ -912,6 +912,28 @@ _FOREX_RE = re.compile(
     r"|\bgold\b.*\b(?:price|prices|chart|quote|rate|trading)\b"
     r"|\b(?:price|chart|quote|rate)\s+(?:of|for)\s+gold\b", re.I | re.S)
 
+# Live prices and clipboard saves need the full install (requirements.txt:
+# yfinance/ta/pandas, pyperclip). On a backend-only install they say so
+# instead of failing the whole turn with an import error.
+_FULL_INSTALL = ("For {what} I need the full install: run pip install -r requirements.txt "
+                 "in the AURA folder, then restart me.")
+
+
+def _forex_quote(text: str) -> str:
+    try:
+        from modules.forex_report import get_quick_price
+    except ImportError:
+        return _FULL_INSTALL.format(what="live forex and gold prices")
+    return get_quick_price(text.lower())
+
+
+def _save_clipboard() -> str:
+    try:
+        from modules.knowledge import save_from_clipboard
+    except ImportError:
+        return _FULL_INSTALL.format(what="saving from the clipboard")
+    return save_from_clipboard()
+
 
 def _command_text(user_text: str | None) -> str | None:
     """What the shortcuts may read: the message as the user typed it, or None
@@ -971,8 +993,7 @@ def process(query: str, user_text: str | None = None) -> str:
         return cmd_response
 
     if said and _FOREX_RE.search(said):
-        from modules.forex_report import get_quick_price
-        result = get_quick_price(said.lower())
+        result = _forex_quote(said)
         store.save_conversation("user", said)
         store.save_conversation("aura", result)
         return result
@@ -993,8 +1014,7 @@ def process(query: str, user_text: str | None = None) -> str:
         return result
 
     if intent == "SAVE":
-        from modules.knowledge import save_from_clipboard
-        result = save_from_clipboard()
+        result = _save_clipboard()
         store.save_conversation("user", query)
         store.save_conversation("aura", result)
         return result
@@ -1129,8 +1149,7 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
         return instant_response
 
     if said and _FOREX_RE.search(said):
-        from modules.forex_report import get_quick_price
-        result = get_quick_price(said.lower())
+        result = _forex_quote(said)
         store.save_conversation("user", said)
         store.save_conversation("aura", result)
         if on_chunk:

@@ -69,6 +69,7 @@ def _fake_provider(prompt, system=ai_router.DONNA_SYSTEM_PROMPT, intent="CASUAL"
 
 ai_router.call_groq_streaming = _fake_provider
 ai_router._resolve_candidates = lambda intent, model: [("Stub", "stub/model")]
+ai_router.has_key = lambda model_id=None: True   # no real keys here; the stub answers
 ai_router.call_planner = lambda *a, **k: "FETCH: none"
 ai_router.call_groq_raw = lambda *a, **k: ""   # side calls (fact extraction…)
 ai_router.call_groq = lambda *a, **k: "NONE"

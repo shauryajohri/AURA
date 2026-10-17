@@ -83,6 +83,7 @@ def _fake_raw(prompt, system, *a, **k):
 
 brain.route_streaming = _fake_stream
 ai_router.call_groq_raw = _fake_raw
+ai_router.has_key = lambda model_id=None: True   # no real keys here; the stub answers
 brain.call_classifier = lambda p: "CASUAL"
 brain.call_claude = lambda *a, **k: "NONE"
 ai_router.call_planner = lambda *a, **k: "FETCH: none"

@@ -305,6 +305,7 @@ export const api = {
   getModels: () => j<{ models: ModelInfo[]; last_model: string }>("/api/models"),
   toggleLock: (name: string) =>
     j<{ locked: boolean }>(`/api/models/${encodeURIComponent(name)}/toggle`, { method: "POST" }),
+  getStatus: () => j<{ keys_missing?: boolean }>("/api/status"),
 
   // Facts
   getFacts: () => j<{ facts: Fact[] }>("/api/facts").then((r) => r.facts),

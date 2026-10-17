@@ -90,7 +90,9 @@ Reasoning models leak their deliberation as ordinary content ("So answer: …", 
 
 Fenced code is lifted out before filtering and restored byte-for-byte — a filter that flattens a C++ answer into one line is worse than the leak.
 
-If nothing is left once the deliberation is gone, she says she lost her train of thought. "Connection trouble" is only for a provider or network failure.
+If nothing is left once the deliberation is gone, she says she lost her train of thought. "Connection trouble" is only for a provider or network failure. A model with no API key is never called; when none of the models for a message has one, she says so (*"I don't have an AI key yet. Add GROQ_API_KEY (or OPENROUTER_API_KEY) to the .env file…"*) instead of "Connection trouble".
+
+The model chip (and the planet that lights up) is the model that answered that message. A shortcut, an error, a fallback line or the no-key line shows no model.
 
 A coding answer is saved to the chat exactly as shown (the chat line plus the fenced code), so a follow-up like *"what's the complexity of that?"* and a reopened chat both still have the code. When the model's only prose is an intro like *"Here's the C program:"*, or there is none, the line is *"Here you go:"*.
 
@@ -185,7 +187,7 @@ GET  /api/links · /api/stats · /api/nature · /api/settings
 POST /api/voice/transcribe                  WAV → text fallback
 GET  /api/v3/snapshot · /session · /mistakes       developer state
 POST /api/v3/explain · /api/v3/build              error intelligence
-GET  /health · /api/status
+GET  /health · /api/status                 mode, OpenRouter keys, last model, keys_missing
 ```
 
 **Buddy Lock** (`guard_api.py`) — frames are base64 JPEG, audio base64 16 kHz WAV
@@ -301,7 +303,7 @@ GITHUB_CLIENT_ID=...            # only for Domain → GitHub import
 GITHUB_CLIENT_SECRET=...
 ```
 
-OAuth callbacks come back to `http://127.0.0.1:8760/api/connectors/callback/<provider>` — nothing public needed. Everything degrades: no OpenRouter key means Groq only; no keys at all still gives you the offline heuristic paths (planning, idea capture, error classification) and the whole filesystem/git/terminal side.
+OAuth callbacks come back to `http://127.0.0.1:8760/api/connectors/callback/<provider>` — nothing public needed. Everything degrades: no OpenRouter key means Groq only; no keys at all still gives you the offline heuristic paths (planning, idea capture, error classification) and the whole filesystem/git/terminal side. A model without a key is skipped, never called with an empty one; chat with no usable key answers with how to add one, and `/api/status` reports `keys_missing`.
 
 ---
 
@@ -317,6 +319,7 @@ python test_guard.py                  # Buddy Lock: policy, passes, gate (+ real
 python tests/test_local_auth.py       # launch token: /api/* and /ws refuse other pages
 python test_reasoning_leak.py         # chain-of-thought never reaches the user
 python tests/test_reply_recovery.py   # streamed + coding replies: answer recovered, code kept in history
+python tests/test_no_key.py           # no API key: setup line, no requests; model chip = this turn's model
 python test_memory.py                 # durable facts + context
 python test_engine.py                 # routing + intent
 python test_quests.py                 # quests, verification, pressure
@@ -350,7 +353,8 @@ cd frontend && npx tsc --noEmit       # frontend typecheck
 | `curl` / a script gets `401` from `/api/*` | It needs the launch token: `-H "X-Aura-Token: $(cat memory/session.token)"` |
 | Every call is `401` in the app | The window and the brain are from different launches. Close AURA and start it again |
 | `npm run dev` can't find electron | `npm install` inside `frontend/` |
-| Models all locked / no replies | No API key in `.env`, or every model rate-limited |
+| Models all locked / no replies | Every model locked or rate-limited |
+| *"I don't have an AI key yet…"* on every message | No `GROQ_API_KEY` / `OPENROUTER_API_KEY` in `.env` (a leftover `your-…` placeholder doesn't count). Add one and restart |
 | Lock screen won't recognise you | Light on your face, sit where you enrolled; Settings → Security → Re-enroll. PIN gets you in meanwhile |
 | Lock screen says the camera is blocked | Windows Settings → Privacy & security → Camera → turn on *Let desktop apps access your camera*; close other apps holding it |
 | "opencv isn't installed" in Buddy Lock | `pip install opencv-python-headless sherpa-onnx` (in AURA's venv) |

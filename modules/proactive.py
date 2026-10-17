@@ -430,9 +430,9 @@ def _decide(ctx: dict, ie_result: dict | None = None) -> tuple[str, str]:
             _error_count = 0
             _last_suggestion_time = now
             return "error", task
-        
-        else:
-            _error_count = max(0, _error_count - 1)
+    else:
+        # decay only on a clean cycle, so consecutive error cycles add up
+        _error_count = max(0, _error_count - 1)
 
     if _is_code_editor(ctx):              # ← correct, same level as if/else above
         result = ie_result if ie_result is not None else get_ie().score(ctx, idle_seconds=_idle_seconds())

@@ -7,6 +7,7 @@ import type {
   ConnStatus,
   Presence,
   QuestEvent,
+  RoomEvent,
   SendOptions,
   ServerMessage,
   V3Event,
@@ -24,6 +25,17 @@ const DEFAULT_URL = "ws://127.0.0.1:8760/ws";
 
 function newId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+// A saved chat's messages (as the chats API returns them) → transcript turns.
+function toTurns(msgs: { role: string; text: string; created_at?: string | null }[]): ChatTurn[] {
+  return msgs.map((m) => ({
+    id: newId(),
+    role: m.role === "user" ? "user" : "aura",
+    text: m.text,
+    ts: m.created_at ? new Date(m.created_at).toLocaleTimeString(
+      "en-US", { hour: "numeric", minute: "2-digit", hour12: true }) : undefined,
+  })) as ChatTurn[];
 }
 
 function nowTime(): string {
@@ -66,6 +78,9 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
   // Only the latest quest event is kept — the Quests tab re-fetches the board
   // when it changes, so a full history here would just be duplicate state.
   const [questEvent, setQuestEvent] = useState<QuestEvent | null>(null);
+  // Same for the last time AURA filed or moved the chat: the room picker and
+  // the Chats page re-read which room and chat are active when it changes.
+  const [roomEvent, setRoomEvent] = useState<RoomEvent | null>(null);
   // The live "what is AURA doing" line. Cleared automatically when the brain
   // goes back to idle after an answer completes.
   const [activity, setActivity] = useState<ActivityEvent | null>(null);
@@ -178,6 +193,28 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
           useGuardStore.getState().apply(msg.payload.status);
           if (!msg.payload.allowed && msg.payload.text) pushMessage(msg.payload.text, "locked");
           break;
+        case "room": {
+          // AURA put this conversation in a room. She says so: a context
+          // change you can't see looks like her losing the thread. A room
+          // entered from the picker (auto: false) was loaded by the picker.
+          const ev = msg.payload;
+          if (!ev.auto) break;
+          setRoomEvent(ev);
+          if (ev.note) useNotifyStore.getState().add("route", ev.note);
+          // The message that caused it, and a reply already streaming after
+          // it, stay put. Only if she moved to another chat does the history
+          // above them become that chat's.
+          setTurns((prev) => {
+            const at = prev.map((t) => t.role).lastIndexOf("user");
+            const cut = at >= 0 ? at : prev.length;
+            const above = ev.moved ? toTurns(ev.messages ?? []) : prev.slice(0, cut);
+            const note: ChatTurn[] = ev.note
+              ? [{ id: newId(), role: "aura", text: ev.note, streaming: false, source: "room", ts: nowTime() }]
+              : [];
+            return [...above, ...prev.slice(cut, cut + 1), ...note, ...prev.slice(cut + 1)];
+          });
+          break;
+        }
         case "error":
           pushMessage("[error] " + msg.payload.message, "error");
           finishStream();
@@ -230,20 +267,12 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
    *  just makes the window agree with it. */
   const loadTurns = useCallback(
     (msgs: { role: string; text: string; created_at?: string | null }[]) => {
-      setTurns(
-        msgs.map((m) => ({
-          id: newId(),
-          role: m.role === "user" ? "user" : "aura",
-          text: m.text,
-          ts: m.created_at ? new Date(m.created_at).toLocaleTimeString(
-            "en-US", { hour: "numeric", minute: "2-digit", hour12: true }) : undefined,
-        })) as ChatTurn[]
-      );
+      setTurns(toTurns(msgs));
     },
     []
   );
 
   const clearTurns = useCallback(() => setTurns([]), []);
 
-  return { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, activity, send, loadTurns, clearTurns };
+  return { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, roomEvent, activity, send, loadTurns, clearTurns };
 }

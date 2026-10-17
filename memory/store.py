@@ -847,11 +847,21 @@ def save_user_fact(fact: str, category: str = "general"):
 
 
 def get_user_facts(limit: int = 12) -> list:
+    """The facts that go into the prompt. Only `limit` fit, so they're ranked
+    rather than just the newest: who the user is (their name, their role) is
+    pinned first, then facts they typed into the Memory panel, then projects
+    and preferences, then the rest — newest first within each tier. Newest-only
+    let a dozen passing remarks push the user's own name out of the prompt."""
     conn = _connect()
     try:
         conn.execute(_USER_FACTS_DDL)
         cur = conn.cursor()
-        cur.execute('SELECT fact FROM user_facts ORDER BY id DESC LIMIT ?', (limit,))
+        cur.execute(
+            "SELECT fact FROM user_facts ORDER BY CASE"
+            " WHEN category = 'identity' OR fact LIKE 'their name is %' THEN 0"
+            " WHEN category = 'general' THEN 1"
+            " WHEN category IN ('project', 'preference') THEN 2"
+            " ELSE 3 END, id DESC LIMIT ?", (limit,))
         return [r[0] for r in cur.fetchall()]
     finally:
         conn.close()

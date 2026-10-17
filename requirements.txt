@@ -1,15 +1,14 @@
-# AURA — runtime dependencies
-PySide6
+# AURA — the full companion's dependencies (Python 3.10–3.14). The server
+# itself is requirements-web.txt; install both. Extras that no wired-in feature
+# needs live in requirements-optional.txt.
 requests
 python-dotenv
 
-# Voice
+# Voice. pygame-ce is the maintained pygame fork: same `import pygame`, and it
+# has wheels for current Pythons (pygame has none for 3.14 on Windows).
 edge-tts
-pygame
+pygame-ce
 SpeechRecognition
-PyAudio
-pvporcupine
-pvrecorder
 
 # Data / forex
 yfinance
@@ -18,7 +17,6 @@ pandas
 
 # Utilities
 pyperclip
-keyboard
 
 # Optional — local should_respond gate (falls back gracefully if absent)
 ollama

@@ -1,0 +1,16 @@
+# AURA — optional extras. Nothing here is needed to run AURA:
+#   pip install -r requirements-optional.txt
+# Kept apart because PyAudio has no Windows wheel for Python 3.14 (it needs a
+# C compiler and PortAudio there), and one failed build aborts a whole
+# `pip install -r`.
+
+# Wake word + live microphone capture (modules/wake_word.py,
+# modules/voice_input.py). Neither is wired into the app yet; the in-app mic
+# records in the browser and needs none of these.
+PyAudio
+pvporcupine
+pvrecorder
+
+# Only to carry model locks over from older versions, which kept them in Qt's
+# QSettings. They are copied into AURA's database once, on first start.
+PySide6

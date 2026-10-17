@@ -1,8 +1,12 @@
-# AURA web bridge — extra deps for the React/Electron face.
-# Install alongside requirements.txt:  pip install -r requirements-web.txt
+# AURA web bridge — everything `python server.py` needs to start and chat
+# (FastAPI server, model routing, memory, Domain, Buddy Lock). The
+# React/Electron face talks to it. Voice, forex prices and clipboard saves
+# need requirements.txt on top.
 fastapi
 uvicorn[standard]
 websockets
+requests
+python-dotenv
 
 # Office round-trip editing for the Domain's Documentation tab
 # (open a Word/Excel/PowerPoint file from OneDrive, edit it, write it back)

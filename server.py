@@ -1311,12 +1311,27 @@ async def _dispatch(ws: WebSocket, text: str) -> None:
         return
 
     if kind == "llm_once":
-        await _run_streaming(
-            ws,
-            lambda oc, occ: process_streaming(
-                directive.user, on_chunk=oc, on_code=occ, system_prompt=directive.system,
-                user_text=text),
-        )
+        # The /prompt_end build is one clean call (call_groq_raw: no persona,
+        # no 2-sentence limit, no reply cleaning, the long-form token budget),
+        # not a chat turn. Through process_streaming it was CASUAL chat: the
+        # leak filter cut every sentence about "the user" and the composer
+        # kept two sentences. The built prompt goes back to the Director, so
+        # "run" executes it and /prompt save stores it instead of the notes.
+        def build_prompt(oc: Callable[[str], None], occ: Callable[[str, str], None]) -> str:
+            from core.ai_router import call_groq_raw
+            from memory import store
+            built = call_groq_raw(directive.user, directive.system, max_tokens=2048)
+            if not built or built in ("RATE_LIMIT", "CONNECTION_ERROR"):
+                out = ("Hit my rate limit — give me a moment." if built == "RATE_LIMIT"
+                       else "Connection trouble — one sec.")
+                oc(out)
+                return out
+            DIRECTOR.note_prompt_result(built)
+            store.save_conversation("user", directive.user)
+            store.save_conversation("aura", built)
+            oc(built)
+            return built
+        await _run_streaming(ws, build_prompt)
         return
 
     if kind in ("execute_prompt", "generate"):

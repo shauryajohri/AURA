@@ -94,6 +94,8 @@ If nothing is left once the deliberation is gone, she says she lost her train of
 
 A coding answer is saved to the chat exactly as shown (the chat line plus the fenced code), so a follow-up like *"what's the complexity of that?"* and a reopened chat both still have the code. When the model's only prose is an intro like *"Here's the C program:"*, or there is none, the line is *"Here you go:"*.
 
+The Prompt Maker (`/prompt` … `/prompt_end`) is not a chat reply, so none of this applies to it: the build is one clean call with no persona, no length limit and no filtering, and the prompt is shown whole. After it, *"run"* (or *"2"*) runs that prompt as a coding task, and `/prompt save` / `/prompt export` use the built prompt, not your notes.
+
 ---
 
 ## Buddy Lock — AURA only answers her buddy

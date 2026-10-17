@@ -60,6 +60,14 @@ const DEFAULTS: Settings = {
   "experimental.cloud_sync": false,
 };
 
+/**
+ * Backend settings with every unset key filled from DEFAULTS. /api/settings
+ * only returns what the backend knows or has saved, and an editor that sees
+ * `undefined` can't tell a switch from a slider — the privacy switches showed
+ * up as sliders at 0 while actually being on.
+ */
+export const withDefaults = (s: Settings): Settings => ({ ...DEFAULTS, ...s });
+
 const num = (s: Settings, k: string, fallback: number): number => {
   const v = s[k];
   return typeof v === "number" && Number.isFinite(v) ? v : fallback;
@@ -140,7 +148,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   load: async () => {
     try {
       const s = await api.getSettings();
-      const merged = { ...DEFAULTS, ...s };
+      const merged = withDefaults(s);
       pushToVisualStores(merged);
       set({ settings: merged, loaded: true, offline: false, ...derive(merged) });
     } catch {

@@ -106,7 +106,7 @@ def answer(text: str, owner: str, on_chunk=None, on_code=None) -> str:
         sink = _ProseOnly(on_chunk) if on_code else None
     parts: list[str] = []
     for chunk in route_streaming(intent, prompt, system_prompt=_system(owner)):
-        if chunk in ("RATE_LIMIT", "CONNECTION_ERROR"):
+        if chunk in ("RATE_LIMIT", "CONNECTION_ERROR", "NO_KEY"):
             chunk = "I can't reach my models right now — try again in a moment."
         parts.append(chunk)
         if sink:

@@ -71,10 +71,10 @@ leak-sanitised                        notes, recaps, tasks, quests,
 **A single chat turn:**
 
 1. `classify_intent` → CASUAL / PERSONAL / CODING / SEARCH / RECALL / SAVE / COMMAND / REMINDER
-2. `build_context_prompt` assembles: recent turns (from the *store*, not RAM), durable facts, **project memory** (`work_recall`), screen context, identity, error-intelligence hints, relationship layer
+2. `build_context_prompt` assembles: recent turns (from the *store*, not RAM — RAM only while Store Conversations is off), durable facts, **project memory** (`work_recall`), screen context, identity, error-intelligence hints, relationship layer
 3. `ai_router` picks a model for that intent and streams the reply
 4. `sanitize_text` strips any leaked chain-of-thought, `guard_output` is the final gate
-5. Everything is written back to SQLite, so the next turn remembers it
+5. Everything is written back to SQLite, so the next turn remembers it (unless Settings → Privacy → Store Conversations is off)
 
 ### AURA knows what you're working on
 
@@ -90,14 +90,31 @@ If nothing is stored, the block is empty on purpose — she says it's fuzzy rath
 Reasoning models leak their deliberation as ordinary content ("So answer: …", "The user wants …", "That's one sentence?"). Three layers stop it:
 
 1. prompt-level instruction + `reasoning: {exclude: true}` on OpenRouter
-2. `sanitize_text` — two tiers of markers (STRONG stripped anywhere, WEAK only as leading preamble), a density rule, and a **seam cut**: when the model announces its answer, the text after the announcement *is* the answer, so it's recovered rather than discarded
+2. `sanitize_text` — two tiers of markers (STRONG stripped anywhere, WEAK only as leading preamble), a density rule, and a **seam cut**: when the model announces its answer, the text after the announcement *is* the answer, so it's recovered rather than discarded. The stream uses it too: deliberation at the head of a stream is held back, and once the reply starts the held-back head goes through `sanitize_text`, so *"The user wants a greeting. So answer: Hi there, good to see you."* streams as *"Hi there, good to see you."*. In the coding lane the prose around the code gets the same pass
 3. `guard_output` before anything is shown or spoken
 
 Fenced code is lifted out before filtering and restored byte-for-byte — a filter that flattens a C++ answer into one line is worse than the leak.
 
+If nothing is left once the deliberation is gone, she says she lost her train of thought. "Connection trouble" is only for a provider or network failure. A model with no API key is never called; when none of the models for a message has one, she says so (*"I don't have an AI key yet. Add GROQ_API_KEY (or OPENROUTER_API_KEY) to the .env file…"*) instead of "Connection trouble".
+
+The model chip (and the planet that lights up) is the model that answered that message. A shortcut, an error, a fallback line or the no-key line shows no model.
+
+A coding answer is saved to the chat exactly as shown (the chat line plus the fenced code), so a follow-up like *"what's the complexity of that?"* and a reopened chat both still have the code. When the model's only prose is an intro like *"Here's the C program:"*, or there is none, the line is *"Here you go:"*.
+
+The Prompt Maker (`/prompt` … `/prompt_end`) is not a chat reply, so none of this applies to it: the build is one clean call with no persona, no length limit and no filtering, and the prompt is shown whole. After it, *"run"* (or *"2"*) runs that prompt as a coding task, and `/prompt save` / `/prompt export` use the built prompt, not your notes.
+
 ### What she remembers about you
 
 Plain statements ("my name is …", "I'm learning …", "I prefer short replies", "the project is called …") become durable facts (`modules/fact_extractor.py`). The same words inside a question, a hypothetical, a quote or something someone else said, a joke or sarcasm, or a pasted line of code don't, and a negation is never a fact: "can you call me later?" doesn't make your name "later", and "my name is not important" saves nothing. Only a handful of facts fit in the prompt, so your name and role are pinned first, then facts you typed into the Memory panel, then projects and preferences, then the rest, newest first. You can edit or delete any of them in the Memory panel.
+
+### Privacy switches do what they say
+
+Settings → Privacy has two switches, both on by default. Each is read on every message and every screen look, so flipping one counts from the next message without a restart.
+
+- **Screen Reading off:** no screenshots, no OCR and no clipboard reads. That covers chat context, the proactive and attention loops, the error check, and quest verification, which says *"screen reading is off"*. She still sees window titles, which is how quests count time.
+- **Store Conversations off:** no new turn of any kind is written to the chat log. She keeps track of the current chat in memory until you switch chats or restart, and then it's gone. This switch doesn't cover personal facts she picks up from what you say, or her one-line working-memory note.
+
+Some settings aren't used by anything yet: General, Animations, Wallpaper, Behavior, Developer, Experimental, and voice sensitivity / wake word / noise suppression. They're marked *not active yet* and can't be changed.
 
 ---
 
@@ -188,7 +205,7 @@ GET  /api/links · /api/stats · /api/nature · /api/settings
 POST /api/voice/transcribe                  WAV → text fallback
 GET  /api/v3/snapshot · /session · /mistakes       developer state
 POST /api/v3/explain · /api/v3/build              error intelligence
-GET  /health · /api/status
+GET  /health · /api/status                 mode, OpenRouter keys, last model, keys_missing
 ```
 
 **Buddy Lock** (`guard_api.py`) — frames are base64 JPEG, audio base64 16 kHz WAV
@@ -304,7 +321,7 @@ GITHUB_CLIENT_ID=...            # only for Domain → GitHub import
 GITHUB_CLIENT_SECRET=...
 ```
 
-OAuth callbacks come back to `http://127.0.0.1:8760/api/connectors/callback/<provider>` — nothing public needed. Everything degrades: no OpenRouter key means Groq only; no keys at all still gives you the offline heuristic paths (planning, idea capture, error classification) and the whole filesystem/git/terminal side.
+OAuth callbacks come back to `http://127.0.0.1:8760/api/connectors/callback/<provider>` — nothing public needed. Everything degrades: no OpenRouter key means Groq only; no keys at all still gives you the offline heuristic paths (planning, idea capture, error classification) and the whole filesystem/git/terminal side. A model without a key is skipped, never called with an empty one; chat with no usable key answers with how to add one, and `/api/status` reports `keys_missing`.
 
 ---
 
@@ -320,6 +337,9 @@ python test_guard.py                  # Buddy Lock: policy, passes, gate (+ real
 python tests/test_local_auth.py       # launch token: /api/* and /ws refuse other pages
 python tests/test_model_lock.py       # model locks + routing work without PySide6
 python test_reasoning_leak.py         # chain-of-thought never reaches the user
+python tests/test_reply_recovery.py   # streamed + coding replies: answer recovered, code kept in history
+python tests/test_no_key.py           # no API key: setup line, no requests; model chip = this turn's model
+python tests/test_privacy_settings.py # Privacy switches: nothing logged, no screen reads; editor shows real switches
 python test_memory.py                 # durable facts + context
 python tests/test_user_facts.py       # only plain statements become facts; your name stays in the prompt
 python test_engine.py                 # routing + intent
@@ -355,7 +375,8 @@ cd frontend && npx tsc --noEmit       # frontend typecheck
 | `curl` / a script gets `401` from `/api/*` | It needs the launch token: `-H "X-Aura-Token: $(cat memory/session.token)"` |
 | Every call is `401` in the app | The window and the brain are from different launches. Close AURA and start it again |
 | `npm run dev` can't find electron | `npm install` inside `frontend/` |
-| Models all locked / no replies | No API key in `.env`, or every model rate-limited |
+| Models all locked / no replies | Every model locked or rate-limited |
+| *"I don't have an AI key yet…"* on every message | No `GROQ_API_KEY` / `OPENROUTER_API_KEY` in `.env` (a leftover `your-…` placeholder doesn't count). Add one and restart |
 | `pip install` stops building pygame or PyAudio | The old requirement list on Python 3.14. Pull: it uses pygame-ce now, and PyAudio moved to `requirements-optional.txt` |
 | Lock screen won't recognise you | Light on your face, sit where you enrolled; Settings → Security → Re-enroll. PIN gets you in meanwhile |
 | Lock screen says the camera is blocked | Windows Settings → Privacy & security → Camera → turn on *Let desktop apps access your camera*; close other apps holding it |

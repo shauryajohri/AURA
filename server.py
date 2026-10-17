@@ -1104,9 +1104,11 @@ async def api_v3_build(req: Request) -> dict[str, Any]:
 async def api_status() -> dict[str, Any]:
     out: dict[str, Any] = {"mode": getattr(DIRECTOR, "mode", "CHAT")}
     try:
-        from core.ai_router import last_model_used, openrouter_status
+        from core.ai_router import keys_missing, last_model_used, openrouter_status
         out["openrouter"] = openrouter_status()
         out["last_model"] = last_model_used()
+        # No provider key at all: every chat turn answers with the setup line.
+        out["keys_missing"] = keys_missing()
     except Exception:  # noqa: BLE001
         pass
     return out
@@ -1162,9 +1164,14 @@ async def _run_streaming(ws: WebSocket, brain_call: Callable[..., str]) -> None:
         code_blocks.append(block)
         on_chunk(block)
 
-    def run() -> str:
+    def run() -> tuple[str, str]:
         try:
-            return brain_call(on_chunk, on_code)
+            # The chip names the model that answered THIS turn ("" for a
+            # shortcut, an error or the no-key line). It's tracked per thread,
+            # so start clean: this worker may have run an earlier turn.
+            from core.ai_router import set_turn_model, turn_model
+            set_turn_model("")
+            return brain_call(on_chunk, on_code), turn_model()
         finally:
             loop.call_soon_threadsafe(queue.put_nowait, _DONE)
 
@@ -1182,19 +1189,12 @@ async def _run_streaming(ws: WebSocket, brain_call: Callable[..., str]) -> None:
         await _send(ws, {"type": "chunk", "payload": {"text": item}})
 
     try:
-        full = await worker
+        full, model = await worker
     except Exception as exc:  # noqa: BLE001
         traceback.print_exc()
         await _send(ws, {"type": "error", "payload": {"message": str(exc)}})
         await _send(ws, {"type": "state", "payload": {"state": "idle"}})
         return
-
-    model = ""
-    try:
-        from core.ai_router import last_model_used
-        model = last_model_used()
-    except Exception:  # noqa: BLE001
-        pass
 
     done_text = (full or "") + "".join(code_blocks)
     await _send(ws, {"type": "done", "payload": {"text": done_text, "model": model}})
@@ -1294,7 +1294,7 @@ async def _dispatch(ws: WebSocket, text: str) -> None:
 
     if DIRECTOR is None:
         # Fallback: raw brain if the Director failed to init.
-        await _run_streaming(ws, lambda oc, occ: process_streaming(text, on_chunk=oc, on_code=occ))
+        await _run_streaming(ws, lambda oc, occ: process_streaming(text, on_chunk=oc, on_code=occ, user_text=text))
         return
 
     try:
@@ -1314,18 +1314,39 @@ async def _dispatch(ws: WebSocket, text: str) -> None:
         return
 
     if kind == "llm_once":
-        await _run_streaming(
-            ws,
-            lambda oc, occ: process_streaming(
-                directive.user, on_chunk=oc, on_code=occ, system_prompt=directive.system),
-        )
+        # The /prompt_end build is one clean call (call_groq_raw: no persona,
+        # no 2-sentence limit, no reply cleaning, the long-form token budget),
+        # not a chat turn. Through process_streaming it was CASUAL chat: the
+        # leak filter cut every sentence about "the user" and the composer
+        # kept two sentences. The built prompt goes back to the Director, so
+        # "run" executes it and /prompt save stores it instead of the notes.
+        def build_prompt(oc: Callable[[str], None], occ: Callable[[str, str], None]) -> str:
+            from core.ai_router import GROQ_MODEL, NO_KEY_MSG, call_groq_raw, has_key, set_turn_model
+            from memory import store
+            if not has_key():
+                oc(NO_KEY_MSG)
+                return NO_KEY_MSG
+            built = call_groq_raw(directive.user, directive.system, max_tokens=2048)
+            if not built or built in ("RATE_LIMIT", "CONNECTION_ERROR"):
+                out = ("Hit my rate limit — give me a moment." if built == "RATE_LIMIT"
+                       else "Connection trouble — one sec.")
+                oc(out)
+                return out
+            DIRECTOR.note_prompt_result(built)
+            store.save_conversation("user", directive.user)
+            store.save_conversation("aura", built)
+            set_turn_model(GROQ_MODEL)   # call_groq_raw's default model built it
+            oc(built)
+            return built
+        await _run_streaming(ws, build_prompt)
         return
 
     if kind in ("execute_prompt", "generate"):
         await _run_streaming(
             ws,
             lambda oc, occ: process_streaming(
-                directive.text, on_chunk=oc, on_code=occ, intent_hint="CODING"),
+                directive.text, on_chunk=oc, on_code=occ, intent_hint="CODING",
+                user_text=text),
         )
         return
 
@@ -1353,15 +1374,16 @@ async def _dispatch(ws: WebSocket, text: str) -> None:
             return process_streaming(
                 res.prompt, on_chunk=oc, on_code=occ,
                 system_prompt=res.system_prompt, model=res.model_id,
-                intent_hint=intent,
+                intent_hint=intent, user_text=text,
             )
         await _run_streaming(ws, run_plan)
         return
 
-    # "chat" - normal streaming conversation
+    # "chat" - normal streaming conversation. `body` may be the Director's
+    # wrapped payload; chat shortcuts read only `text`, what the user typed.
     intent = getattr(directive, "intent", "") or None
     body = getattr(directive, "text", "") or text
-    await _run_streaming(ws, lambda oc, occ: process_streaming(body, on_chunk=oc, on_code=occ, intent_hint=intent))
+    await _run_streaming(ws, lambda oc, occ: process_streaming(body, on_chunk=oc, on_code=occ, intent_hint=intent, user_text=text))
 
 
 async def _say_locally(ws: WebSocket, text: str, source: str) -> None:

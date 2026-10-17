@@ -112,6 +112,15 @@ def _split_sentences(text: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
+def _recapitalize(text: str) -> str:
+    """Cutting an opener leaves the reply starting mid-sentence: "Sure, the
+    time complexity…" became "the time complexity…". Only a plain lowercase
+    word is raised, never an identifier like `print()` or `iOS`."""
+    if re.match(r"[a-z]+(?:['’][a-z]+)?(?:[\s,;:!?]|$)", text):
+        return text[0].upper() + text[1:]
+    return text
+
+
 class PersonaLayer:
     """Keep AURA's tone. Remove AI disclaimers. Improve flow.
     Every single model goes through this — Claude, GPT, Gemini, Llama, all."""
@@ -148,6 +157,8 @@ class PersonaLayer:
         text = re.sub(r"[ \t]{2,}", " ", text)
         text = re.sub(r"\n{3,}", "\n\n", text)
         text = re.sub(r"^[,.;:!?\s]+", "", text)
+        if "corporate opener removed" in notes:
+            text = _recapitalize(text)
         return text.strip(), notes
 
 
@@ -234,7 +245,9 @@ def _shape(text: str, style: str, intent: str) -> tuple[str, list[str]]:
             notes.append("preamble dropped (answer first)")
 
     if style == "coding":
-        text = re.sub(r"(?i)^(here(?:'s| is) (?:the|your|an?) [^.:\n]*[:.])\s*", "", text)
+        new = re.sub(r"(?i)^(here(?:'s| is) (?:the|your|an?) [^.:\n]*[:.])\s*", "", text)
+        if new != text:
+            text = _recapitalize(new)
 
     return text.strip(), notes
 
@@ -270,8 +283,11 @@ def _score(raw: str, final: str, notes: list[str]) -> tuple[float, int, str]:
 # The composer
 # ----------------------------------------------------------------------------
 def compose(raw: str, intent: str, query: str = "", model_name: str = "",
-            longform: bool = False) -> Composed:
-    """Everything AURA says out loud comes through here."""
+            longform: bool = False, with_code: bool = False) -> Composed:
+    """Everything AURA says out loud comes through here.
+
+    `with_code`: the reply's code block was lifted out before this point and
+    is sent alongside the line composed here."""
     style = "creative" if longform else STYLE_FOR_INTENT.get(intent, "casual")
 
     text, notes = PersonaLayer.scrub(raw)
@@ -285,6 +301,12 @@ def compose(raw: str, intent: str, query: str = "", model_name: str = "",
         text, shape_notes = _shape(text, style, intent)
         notes += shape_notes
 
+    if not text and with_code:
+        # "Here's the C program:" is stripped as fluff, and a code-only reply
+        # has no line at all. The code IS the answer, so introduce it plainly;
+        # the fallback below was being shown, stored and spoken over it.
+        text = "Here you go:"
+        notes.append("neutral intro for code")
     if not text:
         text = "Hmm — lost my train of thought. Say that again?"
         notes.append("fallback line used")
@@ -306,6 +328,6 @@ def compose(raw: str, intent: str, query: str = "", model_name: str = "",
 
 
 def compose_text(raw: str, intent: str, query: str = "", model_name: str = "",
-                 longform: bool = False) -> str:
+                 longform: bool = False, with_code: bool = False) -> str:
     """Convenience: composed text only."""
-    return compose(raw, intent, query, model_name, longform).text
+    return compose(raw, intent, query, model_name, longform, with_code).text

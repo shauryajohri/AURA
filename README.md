@@ -158,6 +158,14 @@ One rung at a time, and the capabilities above the current rung are genuinely di
 
 All on `http://127.0.0.1:8760`. WebSocket chat at `/ws`.
 
+**Only AURA's own window can use it.** Every web page open in your browser can reach `127.0.0.1` too, so every start of `server.py` picks a fresh random launch token (`local_auth.py`) and every `/api/*` call and `/ws` connection must carry it. Electron passes it to the window. With the Vite dev server in a plain browser, Vite serves it to its own page. Web pages never see it. Left open: `/health`, the OAuth callback, the public `/web/api` demo and the landing page.
+
+```bash
+# scripting it yourself: the token is in memory/session.token while the brain runs
+curl -H "X-Aura-Token: $(cat memory/session.token)" http://127.0.0.1:8760/api/tasks
+# WebSocket: subprotocols ["aura", "aura-token.<token>"]
+```
+
 **Companion**
 
 ```
@@ -245,6 +253,7 @@ core/
     commands.py        "you can help him" / "stop helping him"
     guest_lane.py      how guests are answered (no owner memory)
 guard_api.py           Buddy Lock REST + the gate in front of /api/*
+local_auth.py          launch token: /api/* and /ws only obey AURA's own window
   domain/              THE PROJECT BRAIN
     brain_store.py     SQLite knowledge graph (nodes + typed edges)
     project_brain.py   high-level API: record, import, why(), timeline()
@@ -299,6 +308,7 @@ set PYTHONPATH=.                      # Windows;  export PYTHONPATH=. on Unix
 
 python test_work_recall.py            # project memory in the chat
 python test_guard.py                  # Buddy Lock: policy, passes, gate (+ real face/voice samples)
+python tests/test_local_auth.py       # launch token: /api/* and /ws refuse other pages
 python test_reasoning_leak.py         # chain-of-thought never reaches the user
 python test_memory.py                 # durable facts + context
 python test_engine.py                 # routing + intent
@@ -330,6 +340,8 @@ cd frontend && npx tsc --noEmit       # frontend typecheck
 |---|---|
 | "Project Brain unreachable" in Domain | `server.py` isn't running |
 | Frontend loads, nothing responds | Backend on a different port — check `8760` |
+| `curl` / a script gets `401` from `/api/*` | It needs the launch token: `-H "X-Aura-Token: $(cat memory/session.token)"` |
+| Every call is `401` in the app | The window and the brain are from different launches. Close AURA and start it again |
 | `npm run dev` can't find electron | `npm install` inside `frontend/` |
 | Models all locked / no replies | No API key in `.env`, or every model rate-limited |
 | Lock screen won't recognise you | Light on your face, sit where you enrolled; Settings → Security → Re-enroll. PIN gets you in meanwhile |

@@ -1,6 +1,8 @@
 // REST client for Buddy Lock (guard_api.py). Every call resolves with the
 // server's JSON — including refusals (ok:false + error) — and only throws when
-// the brain is unreachable, so callers can show the real reason.
+// the brain is unreachable or refuses this window's launch token (auth.ts), so
+// callers can show the real reason.
+import { authFetch } from "./auth";
 const BASE = "http://127.0.0.1:8760";
 
 export type GuardRole = "open" | "owner" | "guest" | "locked";
@@ -67,7 +69,7 @@ export function assertNotRefused(res: Response): void {
 }
 
 async function call<T = GuardResult>(method: string, path: string, body?: unknown): Promise<T> {
-  const r = await fetch(BASE + path, {
+  const r = await authFetch(BASE + path, {
     method,
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),

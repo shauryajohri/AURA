@@ -12,4 +12,7 @@ contextBridge.exposeInMainWorld("aura", {
   // Links in chat. Without this an <a href> NAVIGATES THIS WINDOW — the whole
   // UI is replaced by the website and the socket to the brain dies with it.
   openExternal: (url) => ipcRenderer.send("shell:open-external", String(url)),
+  // The brain's launch token (local_auth.py). Asked for again whenever the
+  // brain refuses the current one — it changes every time the brain restarts.
+  getToken: () => ipcRenderer.invoke("aura:token"),
 });

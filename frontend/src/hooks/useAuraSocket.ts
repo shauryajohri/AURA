@@ -14,6 +14,7 @@ import type {
 import { useNotifyStore } from "../stores/notifyStore";
 import { guardActive, useGuardStore } from "../stores/guardStore";
 import { grabFrame } from "../guard/camera";
+import { socketProtocols } from "../auth";
 
 // How many live V3 events to keep in memory. The panel also fetches history
 // from /api/v3/snapshot on mount, so this is only the live tail.
@@ -107,11 +108,18 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
     setTurns((prev) => [...prev, { id: newId(), role: "aura", text, streaming: false, source, ts: nowTime() }]);
   }, []);
 
-  const connect = useCallback(() => {
+  const connect = useCallback(async () => {
     if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) return;
 
     setStatus("connecting");
-    const ws = new WebSocket(url);
+    // The launch token rides as a subprotocol (browsers can't set headers on
+    // a WebSocket). Fetched fresh each time: a reconnect usually means the
+    // brain restarted, and a restart means a new token.
+    const protocols = await socketProtocols();
+    // Re-check after the await: unmounted, or another connect() won the race.
+    if (!mountedRef.current) return;
+    if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) return;
+    const ws = new WebSocket(url, protocols);
     wsRef.current = ws;
 
     ws.onopen = () => mountedRef.current && setStatus("open");

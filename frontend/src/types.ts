@@ -115,6 +115,8 @@ declare global {
       bridgeUrl: string;
       minimize?: () => void;
       close?: () => void;
+      /** The brain's launch token (see auth.ts). */
+      getToken?: () => Promise<string>;
     };
   }
 }

@@ -1019,8 +1019,9 @@ def sanitize_text(text: str, query: str = "") -> str:
 
 
 def _peel_head(head: str, final: bool = False):
-    """Return (emit_text, new_head, start_streaming). Strips <think> blocks and
-    leading meta-reasoning sentences until real content begins."""
+    """Return (peeled, emit_text, new_head, start_streaming). Strips <think>
+    blocks and leading meta-reasoning sentences until real content begins;
+    `peeled` is the deliberation taken off the front, for _recover_head."""
     import re
     head = re.sub(r"(?is)<think>.*?</think>", "", head)
     ti = head.lower().find("<think>")
@@ -1028,7 +1029,7 @@ def _peel_head(head: str, final: bool = False):
         if final:
             head = head[:ti]
         else:
-            return "", head, False  # wait for the closing tag
+            return "", "", head, False  # wait for the closing tag
 
     parts = _SENT_SPLIT.split(head)
     sentences, cur = [], ""
@@ -1042,15 +1043,43 @@ def _peel_head(head: str, final: bool = False):
     idx = 0
     while idx < len(sentences) and _is_meta_sentence(sentences[idx]):
         idx += 1
+    peeled = "".join(sentences[:idx])
     if idx < len(sentences):
-        return ("".join(sentences[idx:]) + tail).lstrip(), "", True
+        return peeled, "".join(sentences[idx:]) + tail, "", True
     if final:
-        return tail.strip(), "", True
-    return "", tail, False
+        return peeled, tail, "", True
+    return peeled, "", tail, False
+
+
+def _recover_head(peeled: str, emit: str, final: bool = False) -> str | None:
+    """What to show once the reply starts, given the deliberation peeled
+    before it. None means sanitize_text found no answer yet: keep buffering.
+
+    Peeling alone threw away a seam sentence whole — "So answer: Hi there,
+    good to see you." is meta AND carries the answer — so the stream came
+    back empty and the turn was reported as a connection problem. When
+    anything was peeled, the head goes through sanitize_text instead, whose
+    seam cut recovers the answer the same way the non-stream path does. Only
+    complete sentences are judged; the unfinished one streams on as it is.
+    """
+    if not peeled:
+        return emit.lstrip()
+    cut = len(emit) if final else _sentences_end(emit)
+    done, rest = peeled + emit[:cut], emit[cut:]
+    clean = sanitize_text(done)
+    if not clean:
+        return "" if final else None
+    # sanitize_text trims; keep the break between the head and what follows
+    return clean + done[len(done.rstrip()):] + rest
+
+
+def _sentences_end(text: str) -> int:
+    """Index just past the last complete sentence in `text` (0 if none)."""
+    return max((m.end() for m in _SENT_SPLIT.finditer(text)), default=0)
 
 
 def _sanitize_reasoning_stream(chunks):
-    head, streaming = "", False
+    head, peeled, streaming = "", "", False
     for ch in chunks:
         if ch in ("RATE_LIMIT", "CONNECTION_ERROR"):
             yield ch
@@ -1059,17 +1088,26 @@ def _sanitize_reasoning_stream(chunks):
             yield ch
             continue
         head += ch
-        emit, head, streaming = _peel_head(head)
+        more, emit, head, streaming = _peel_head(head)
+        peeled += more
         if streaming:
-            if emit:
-                yield emit
+            shown = _recover_head(peeled, emit)
+            if shown is None:
+                # The peel saw content but sanitize_text still reads it all as
+                # deliberation (the density rule): keep buffering.
+                cut = _sentences_end(emit)
+                peeled, head, streaming = peeled + emit[:cut], emit[cut:], False
+            elif shown:
+                yield shown
         elif len(head) > 1200:  # safety: never buffer forever
-            emit, head, streaming = _peel_head(head, final=True)
+            more, emit, head, streaming = _peel_head(head, final=True)
+            emit = _recover_head(peeled + more, emit, final=True)
             if emit:
                 yield emit
             streaming = True
-    if head and not streaming:
-        emit, _, _ = _peel_head(head, final=True)
+    if (head or peeled) and not streaming:
+        more, emit, _, _ = _peel_head(head, final=True)
+        emit = _recover_head(peeled + more, emit, final=True)
         if emit:
             yield emit
 

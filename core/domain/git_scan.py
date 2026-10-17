@@ -85,8 +85,10 @@ def commits(root: str, limit: int = 50) -> list[dict[str, Any]]:
     """
     if not is_repo(root):
         return []
-    fmt = _UNIT.join(["%H", "%h", "%s", "%an", "%ae", "%aI"]) + _REC
-    # --name-only appends the changed paths after each record.
+    # The record separator leads each header: --name-only prints a commit's
+    # changed paths AFTER its header, so a trailing separator pushed them into
+    # the next record. %D (decorations) is only read for "grafted", see below.
+    fmt = _REC + _UNIT.join(["%H", "%h", "%s", "%an", "%ae", "%aI", "%D"])
     ok, out = _git(
         root, "log", f"-n{limit}", "--name-only", f"--pretty=format:{fmt}",
     )
@@ -99,10 +101,15 @@ def commits(root: str, limit: int = 50) -> list[dict[str, Any]]:
             continue
         head_line, _, files_blob = raw.partition("\n")
         parts = head_line.split(_UNIT)
-        if len(parts) < 6:
+        if len(parts) < 7:
             continue
-        full, short, subject, author, email, date = parts[:6]
+        full, short, subject, author, email, date, refs = parts[:7]
         files = [f.strip() for f in files_blob.splitlines() if f.strip()]
+        # A shallow clone (GitHub import clones --depth 50) cuts history at a
+        # "grafted" commit with no parent on disk, so git lists its whole tree
+        # as changed. That isn't what the commit touched — leave it empty.
+        if "grafted" in [r.strip() for r in refs.split(",")]:
+            files = []
         result.append({
             "sha": short.strip(),
             "full_sha": full.strip(),

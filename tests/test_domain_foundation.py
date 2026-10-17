@@ -53,10 +53,76 @@ print("\n[2] git_scan.scan (local git, no auth)")
 gs = git_scan.scan(REPO)
 check("is_repo" in gs, "scan returns a result")
 if gs.get("is_repo"):
-    check(len(gs["commits"]) > 0, f"read commits ({len(gs['commits'])})")
+    # every commit up to the limit, each with the paths it touched. A trailing
+    # record separator once shifted each file list into the next record, so
+    # only ~3 of 50 commits parsed and none of them had files.
+    ok, total = git_scan._git(REPO, "rev-list", "--count", "HEAD")
+    want = min(50, int(total.strip())) if ok else 0
+    check(len(gs["commits"]) == want, f"read every commit up to the limit ({len(gs['commits'])}/{want})")
+    wrong = []
+    for c in gs["commits"]:
+        _, parents = git_scan._git(REPO, "log", "-1", "--format=%P", c["full_sha"])
+        if len(parents.split()) != 1:
+            continue  # merges list no files; a shallow cut has no parent
+        _, names = git_scan._git(REPO, "log", "-1", "--name-only", "--format=", c["full_sha"])
+        if c["files"] != [f.strip() for f in names.splitlines() if f.strip()]:
+            wrong.append(c["sha"])
+    check(not wrong, f"each commit carries its own changed files (wrong: {wrong[:5]})")
+    check(any(c["files"] for c in gs["commits"]), "commits that changed files have them")
     print(f"      head={gs['head']}  branches={gs['branches'][:3]}")
 else:
     print("      (repo has no git history — skipping commit checks)")
+
+print("\n[2b] git_scan.commits — empty, merge and shallow-cut commits")
+_G = os.path.join(_TMP, "gitrepo")
+os.makedirs(_G)
+
+
+def _g(*args, cwd=_G):
+    ok, out = git_scan._git(cwd, "-c", "user.name=t", "-c", "user.email=t@t",
+                            "-c", "commit.gpgsign=false", *args)
+    assert ok, out
+    return out
+
+
+def _write(name, text):
+    with open(os.path.join(_G, name), "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+
+_g("init", "-q", "-b", "main")
+_write("a.py", "a = 1\n")
+_write("b c.md", "spaces\n")
+_g("add", "-A"); _g("commit", "-q", "-m", "first")
+_g("commit", "-q", "--allow-empty", "-m", "nothing changed")
+_g("checkout", "-q", "-b", "side")
+_write("side.py", "s = 1\n")
+_g("add", "-A"); _g("commit", "-q", "-m", "side work")
+_g("checkout", "-q", "main")
+_write("a.py", "a = 2\n")
+_g("add", "-A"); _g("commit", "-q", "-m", "main work")
+_g("merge", "-q", "--no-ff", "side", "-m", "merge side")
+_write("last.py", "z = 1\n")
+_g("add", "-A"); _g("commit", "-q", "-m", "last")
+cs = {c["subject"]: c["files"] for c in git_scan.commits(_G, 50)}
+check(len(cs) == 6, f"all 6 commits parsed (got {len(cs)}: {list(cs)})")
+check(cs.get("last") == ["last.py"], f"newest commit has its file ({cs.get('last')})")
+check(cs.get("merge side") == [], "merge commit parsed, no files")
+check(cs.get("main work") == ["a.py"], f"commit after a merge keeps its own file ({cs.get('main work')})")
+check(cs.get("side work") == ["side.py"], f"branch commit has its file ({cs.get('side work')})")
+check(cs.get("nothing changed") == [], "empty commit parsed, no files")
+check(sorted(cs.get("first") or []) == ["a.py", "b c.md"], f"root commit lists what it added ({cs.get('first')})")
+check(len(git_scan.commits(_G, 2)) == 2, "limit respected")
+
+# GitHub import clones --depth 50: the cut-off commit has no parent on disk
+# and git would list its whole tree, which isn't what that commit changed.
+_S = os.path.join(_TMP, "shallow")
+_g("clone", "-q", "--depth", "3", "file:///" + _G.replace(os.sep, "/").lstrip("/"), _S, cwd=_TMP)
+sh = {c["subject"]: c["files"] for c in git_scan.commits(_S, 50)}
+check(sorted(sh) == ["last", "main work", "merge side", "side work"], f"shallow clone parsed ({sorted(sh)})")
+check(sh.get("last") == ["last.py"], "shallow: newest commit keeps its file")
+check(sh.get("main work") == [] and sh.get("side work") == [],
+      f"shallow: cut-off commits don't claim their whole tree ({sh.get('main work')}, {sh.get('side work')})")
 
 print("\n[3] import_from_folder -> project graph")
 res = project_brain.import_from_folder("AURA-test", REPO)
@@ -64,6 +130,9 @@ pid = res["project"]["id"]
 check(bool(pid), "project created")
 counts = brain_store.counts(pid)
 print(f"      node counts after import: {counts}")
+if gs.get("is_repo"):
+    check(counts.get("commit", 0) == len(gs["commits"]), "a commit node per commit read")
+    check(counts.get("file", 0) > 0, "file nodes built from what the commits touched")
 
 print("\n[4] planning.plan_and_record (heuristic, offline)")
 note = (

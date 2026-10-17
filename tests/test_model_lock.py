@@ -107,6 +107,7 @@ def fake_stream(prompt, system="", intent="CASUAL", model=None):
 
 
 ar.call_groq_streaming = fake_stream
+ar.has_key = lambda model_id=None: True   # no real keys here; the stub answers
 
 try:
     cands = ar._resolve_candidates("CASUAL", None)

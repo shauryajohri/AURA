@@ -119,8 +119,10 @@ clear errors if a required key is missing or invalid.
 --------------------------------------------------------------------
 - "No Picovoice key set" message: expected if you skipped that key —
   voice wake word is just disabled, everything else still works.
-- Replies never come back / "CONNECTION_ERROR": almost always means
-  GROQ_API_KEY is missing, blank, or invalid in .env.
+- "I don't have an AI key yet..." on every message: GROQ_API_KEY
+  (or OPENROUTER_API_KEY) is missing or blank in .env. Add it and restart.
+- "Connection trouble — one sec." with a key set: the key is invalid,
+  or the provider can't be reached.
 - PyAudio install errors: see step 4 notes above for your OS.
 - Make sure your virtual environment is activated (see step 3)
   before running pip install or python main.py — otherwise packages

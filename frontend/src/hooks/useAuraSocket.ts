@@ -30,14 +30,19 @@ function nowTime(): string {
   return new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
 }
 
-// Map a model id string (e.g. "llama-3.3-70b-versatile") to a constellation
+// Map a model id string (e.g. "openai/gpt-oss-120b") to a constellation
 // node id in data/models.ts, so the node that answered lights up ACTIVE.
 function modelIdToNode(model: string): string | null {
   const m = model.toLowerCase();
+  if (!m) return null;   // "" = no model answered (error, shortcut, no key)
   // Real AURA roster first (core/model_router ids).
   if (m.includes("laguna")) return "laguna";
   if (m.includes("nemotron")) return "nemotron";
   if (m.includes("gemma")) return "gemma";
+  // Groq's GPT-OSS pair sits on the old llama planets (named GPT-OSS 120B /
+  // 20B in data/models.ts) — before the generic "gpt" rule, which is GPT-4o.
+  if (m.includes("gpt-oss-20b")) return "llama8b";
+  if (m.includes("gpt-oss-120b")) return "llama";
   if (m.includes("8b") || m.includes("instant")) return "llama8b";
   if (m.includes("llama")) return "llama";
   if (m.includes("gpt")) return "gpt4o";

@@ -2,7 +2,8 @@ import datetime
 import re
 import time
 from modules.proactive import set_app_lock, clear_app_lock, get_app_lock
-from core.ai_router import call_claude, route, route_streaming, extract_code_block, call_classifier, last_model_used
+from core.ai_router import (call_claude, route, route_streaming, extract_code_block, call_classifier,
+                             last_model_used, set_turn_model, NO_KEY_MSG)
 from core.response_composer import compose_text
 from core.thinking import think, post_think
 from memory import store
@@ -874,6 +875,8 @@ def handle_observation_followup(query: str) -> str | None:
         "Do not write a full code file. Ask before making changes."
     )
     answer = route("CASUAL", prompt)
+    if answer == "NO_KEY":
+        return NO_KEY_MSG
     if answer in {"CONNECTION_ERROR", "RATE_LIMIT", "THINKING_LEAK"} or answer.startswith("ERROR"):
         return "I saw the error, but the model connection stumbled. Paste the terminal text and I’ll reason from it."
     return guard_output(answer)
@@ -904,6 +907,13 @@ def _command_text(user_text: str | None) -> str | None:
     if not user_text or "```" in user_text or "[attached file:" in user_text:
         return None
     return user_text.strip()
+
+
+def _canned(line: str) -> str:
+    """A fixed line in place of the model's answer. The turn then reports no
+    model, so the chip doesn't credit one that failed or was never called."""
+    set_turn_model("")
+    return line
 
 
 def process(query: str, user_text: str | None = None) -> str:
@@ -983,16 +993,19 @@ def process(query: str, user_text: str | None = None) -> str:
     print("[AURA] Routing to AI...")
     answer = route(intent, full_prompt)
 
+    if answer == "NO_KEY":
+        return _canned(NO_KEY_MSG)
+
     if answer.startswith("ERROR") or answer == "CONNECTION_ERROR":
-        return "Connection trouble — one sec."
+        return _canned("Connection trouble — one sec.")
 
     if answer == "RATE_LIMIT":
-        return "Hit my rate limit — give me a moment."
+        return _canned("Hit my rate limit — give me a moment.")
 
     # The model produced nothing but chain-of-thought (ai_router filtered it
     # all out). Better to ask again than to print the deliberation.
     if answer == "THINKING_LEAK":
-        return "Lost my train of thought there — say that again?"
+        return _canned("Lost my train of thought there — say that again?")
 
     final_answer = compose_text(answer, intent, query, last_model_used())
     post_think(query, final_answer, intent)
@@ -1202,12 +1215,13 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
             raw_chunks.append(chunk)
         raw = "".join(raw_chunks).strip()
 
-        if raw in {"CONNECTION_ERROR", "RATE_LIMIT"}:
-            msg = "Connection trouble — one sec." if raw == "CONNECTION_ERROR" \
-                  else "Hit my rate limit — give me a moment."
+        if raw in {"CONNECTION_ERROR", "RATE_LIMIT", "NO_KEY"}:
+            msg = {"CONNECTION_ERROR": "Connection trouble — one sec.",
+                   "RATE_LIMIT": "Hit my rate limit — give me a moment.",
+                   "NO_KEY": NO_KEY_MSG}[raw]
             if on_chunk:
                 on_chunk(msg)
-            return msg
+            return _canned(msg)
 
         chat_part, lang, code = extract_code_block(raw)
         if chat_part:
@@ -1244,7 +1258,7 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
     for chunk in route_streaming(intent, full_prompt, system_prompt=system_prompt, model=model):
         # Sentinels can arrive mid-stream (provider died after content began).
         # They are status codes, not text — never show or store them.
-        if chunk in {"CONNECTION_ERROR", "RATE_LIMIT"}:
+        if chunk in {"CONNECTION_ERROR", "RATE_LIMIT", "NO_KEY"}:
             saw_sentinel = chunk
             continue
         chunks.append(chunk)
@@ -1252,17 +1266,21 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
             on_chunk(chunk)
 
     answer = "".join(chunks).strip()
+    if not answer and saw_sentinel == "NO_KEY":
+        # No model has a key: nothing was called, and "one sec" would promise
+        # a retry that never comes. Say what to do instead.
+        return _canned(NO_KEY_MSG)
     if not answer and saw_sentinel == "RATE_LIMIT":
-        return "Hit my rate limit — give me a moment."
+        return _canned("Hit my rate limit — give me a moment.")
     if answer.startswith("ERROR") or (not answer and saw_sentinel):
-        return "Connection trouble — one sec."
+        return _canned("Connection trouble — one sec.")
     if not answer:
         # The model answered, but the stream filter found nothing in it except
         # deliberation. Every provider or network failure arrives as a
         # sentinel, so calling this one "Connection trouble" was a lie.
         from core.ai_router import note_leak
         note_leak("streamed")
-        return "Lost my train of thought there — say that again?"
+        return _canned("Lost my train of thought there — say that again?")
 
     # Final reasoning-leak pass over the ASSEMBLED answer.
     #
@@ -1282,7 +1300,7 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
             # The model spent its whole budget deliberating and never wrote an
             # answer. Showing the monologue is strictly worse than admitting it.
             note_leak("streamed")
-            return "Lost my train of thought there — say that again?"
+            return _canned("Lost my train of thought there — say that again?")
         if deleaked != answer:
             # Repaired, not lost: usually the seam cut recovering the reply the
             # model settled on. Still counted — five leaks in five days means

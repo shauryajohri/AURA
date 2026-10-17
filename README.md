@@ -90,6 +90,10 @@ Reasoning models leak their deliberation as ordinary content ("So answer: …", 
 
 Fenced code is lifted out before filtering and restored byte-for-byte — a filter that flattens a C++ answer into one line is worse than the leak.
 
+### What she remembers about you
+
+Plain statements ("my name is …", "I'm learning …", "I prefer short replies", "the project is called …") become durable facts (`modules/fact_extractor.py`). The same words inside a question, a hypothetical, a quote or something someone else said, a joke or sarcasm, or a pasted line of code don't, and a negation is never a fact: "can you call me later?" doesn't make your name "later", and "my name is not important" saves nothing. Only a handful of facts fit in the prompt, so your name and role are pinned first, then facts you typed into the Memory panel, then projects and preferences, then the rest, newest first. You can edit or delete any of them in the Memory panel.
+
 ---
 
 ## Buddy Lock — AURA only answers her buddy
@@ -311,6 +315,7 @@ python test_guard.py                  # Buddy Lock: policy, passes, gate (+ real
 python tests/test_local_auth.py       # launch token: /api/* and /ws refuse other pages
 python test_reasoning_leak.py         # chain-of-thought never reaches the user
 python test_memory.py                 # durable facts + context
+python tests/test_user_facts.py       # only plain statements become facts; your name stays in the prompt
 python test_engine.py                 # routing + intent
 python test_quests.py                 # quests, verification, pressure
 python test_engagement.py             # when she speaks

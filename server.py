@@ -435,8 +435,11 @@ async def api_models() -> dict[str, Any]:
 @app.post("/api/models/{name}/toggle")
 async def api_toggle_lock(name: str) -> dict[str, Any]:
     from core import model_lock
-    # accept either node id or display name
-    disp = next((m["name"] for m in _MODELS if m["id"] == name or m["name"] == name), name)
+    # accept either node id or display name — and nothing else, or any typo
+    # would be stored as a lock on a model that doesn't exist
+    disp = next((m["name"] for m in _MODELS if m["id"] == name or m["name"] == name), None)
+    if disp is None:
+        return {"ok": False, "error": "no such model"}
     locked = model_lock.toggle(disp)
     return {"ok": True, "name": disp, "locked": bool(locked)}
 

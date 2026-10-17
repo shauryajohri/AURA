@@ -12,9 +12,10 @@ Two halves, one brain:
 ## Quick start
 
 ```bash
-# 1. Python deps (once)
-pip install -r requirements.txt          # full companion (voice, screen, TTS)
-pip install -r requirements-web.txt      # backend/API only
+# 1. Python deps (once) — Python 3.10 to 3.14
+pip install -r requirements-web.txt      # the backend: enough for `python server.py` and chat
+pip install -r requirements.txt          # + the full companion (voice/TTS, forex prices, clipboard saves)
+pip install -r requirements-optional.txt # optional: wake-word/mic libraries, old model-lock carry-over
 
 # 2. Frontend deps (once)
 cd frontend && npm install && cd ..
@@ -25,6 +26,10 @@ cd frontend && npm install && cd ..
 python server.py                         # backend on 127.0.0.1:8760
 cd frontend && npm run dev               # Vite + Electron, hot reload
 ```
+
+Python 3.15 isn't supported yet: some dependencies (sherpa-onnx, for one) have no 3.15 wheels. `requirements-optional.txt` is extras: the wake-word/microphone libraries, which nothing wired into the app uses yet (PyAudio has no Windows wheel for 3.14, and one failed build stops a whole `pip install -r`), and PySide6, read only once to carry old model locks over.
+
+**Updating an older install:** voice now uses `pygame-ce`, the maintained pygame fork (same `import pygame`, and it has Windows wheels for 3.14). Run `pip uninstall -y pygame` before `pip install -r requirements.txt`: both write the same folder, so removing pygame later breaks pygame-ce. Model locks used to live in Qt's QSettings and now live in AURA's database; if PySide6 is still installed, your old locks are copied over on first start.
 
 **Or just double-click `AURA.bat`** (or `AURA.vbs` for no console window). It builds the frontend on first run, then launches Electron, which boots `server.py` itself. `CREATE_DESKTOP_SHORTCUT.bat` puts it on your desktop with the generated black-hole icon.
 
@@ -309,6 +314,7 @@ set PYTHONPATH=.                      # Windows;  export PYTHONPATH=. on Unix
 python test_work_recall.py            # project memory in the chat
 python test_guard.py                  # Buddy Lock: policy, passes, gate (+ real face/voice samples)
 python tests/test_local_auth.py       # launch token: /api/* and /ws refuse other pages
+python tests/test_model_lock.py       # model locks + routing work without PySide6
 python test_reasoning_leak.py         # chain-of-thought never reaches the user
 python test_memory.py                 # durable facts + context
 python test_engine.py                 # routing + intent
@@ -344,6 +350,7 @@ cd frontend && npx tsc --noEmit       # frontend typecheck
 | Every call is `401` in the app | The window and the brain are from different launches. Close AURA and start it again |
 | `npm run dev` can't find electron | `npm install` inside `frontend/` |
 | Models all locked / no replies | No API key in `.env`, or every model rate-limited |
+| `pip install` stops building pygame or PyAudio | The old requirement list on Python 3.14. Pull: it uses pygame-ce now, and PyAudio moved to `requirements-optional.txt` |
 | Lock screen won't recognise you | Light on your face, sit where you enrolled; Settings → Security → Re-enroll. PIN gets you in meanwhile |
 | Lock screen says the camera is blocked | Windows Settings → Privacy & security → Camera → turn on *Let desktop apps access your camera*; close other apps holding it |
 | "opencv isn't installed" in Buddy Lock | `pip install opencv-python-headless sherpa-onnx` (in AURA's venv) |

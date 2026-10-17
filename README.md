@@ -344,6 +344,7 @@ python test_work_recall.py            # project memory in the chat
 python test_guard.py                  # Buddy Lock: policy, passes, gate (+ real face/voice samples)
 python tests/test_local_auth.py       # launch token: /api/* and /ws refuse other pages
 python tests/test_model_lock.py       # model locks + routing work without PySide6
+python tests/test_backend_only.py     # backend-only install: forex / clipboard say what's missing
 python tests/test_room_routing.py     # rooms: a message stays in the chat it was typed into
 python test_reasoning_leak.py         # chain-of-thought never reaches the user
 python tests/test_reply_recovery.py   # streamed + coding replies: answer recovered, code kept in history

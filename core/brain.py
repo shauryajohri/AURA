@@ -33,9 +33,10 @@ def reset_history() -> None:
     """Drop the in-RAM turn mirror.
 
     Called when the user switches chats. `_history` is only a fallback for
-    when the store read fails, but it is NOT session-aware — left alone it
-    would carry the previous chat's turns into the one just opened, which is
-    the exact cross-talk sessions exist to prevent.
+    when the store read fails or Store Conversations is off, but it is NOT
+    session-aware — left alone it would carry the previous chat's turns into
+    the one just opened, which is the exact cross-talk sessions exist to
+    prevent.
     """
     _history.clear()
 
@@ -362,6 +363,10 @@ def _recent_turns(max_turns: int = 8) -> str:
          session is long-dormant AND has fresh turns, never to a chat the
          user has just deliberately opened.
     """
+    # Store Conversations off (Settings → Privacy): the turns since never
+    # reached the store, so the in-RAM mirror is the only transcript there is.
+    if not store.privacy_allows("store_conversations"):
+        return "\n".join(_ram_turns(max_turns))
     lines = []
     try:
         import time as _time
@@ -391,12 +396,19 @@ def _recent_turns(max_turns: int = 8) -> str:
             lines.append(f"{label}: {text}")
     except Exception:
         # Fall back to in-RAM history if the store read fails.
-        for h in _history[-max_turns:]:
-            text = (h.get("text") or "").strip()
-            if text and not _is_context_junk(text):
-                label = "User" if h.get("role") == "user" else "AURA"
-                lines.append(f"{label}: {_clip_turn(label, text)}")
+        lines.extend(_ram_turns(max_turns))
     return "\n".join(lines[-max_turns:])
+
+
+def _ram_turns(max_turns: int) -> list[str]:
+    """The last turns of `_history` as transcript lines."""
+    lines = []
+    for h in _history[-max_turns:]:
+        text = (h.get("text") or "").strip()
+        if text and not _is_context_junk(text):
+            label = "User" if h.get("role") == "user" else "AURA"
+            lines.append(f"{label}: {_clip_turn(label, text)}")
+    return lines
 
 
 # A turn in the transcript is cut to 400 chars. AURA's code replies get more

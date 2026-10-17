@@ -66,10 +66,10 @@ leak-sanitised                        notes, recaps, tasks, quests,
 **A single chat turn:**
 
 1. `classify_intent` → CASUAL / PERSONAL / CODING / SEARCH / RECALL / SAVE / COMMAND / REMINDER
-2. `build_context_prompt` assembles: recent turns (from the *store*, not RAM), durable facts, **project memory** (`work_recall`), screen context, identity, error-intelligence hints, relationship layer
+2. `build_context_prompt` assembles: recent turns (from the *store*, not RAM — RAM only while Store Conversations is off), durable facts, **project memory** (`work_recall`), screen context, identity, error-intelligence hints, relationship layer
 3. `ai_router` picks a model for that intent and streams the reply
 4. `sanitize_text` strips any leaked chain-of-thought, `guard_output` is the final gate
-5. Everything is written back to SQLite, so the next turn remembers it
+5. Everything is written back to SQLite, so the next turn remembers it (unless Settings → Privacy → Store Conversations is off)
 
 ### AURA knows what you're working on
 
@@ -97,6 +97,15 @@ The model chip (and the planet that lights up) is the model that answered that m
 A coding answer is saved to the chat exactly as shown (the chat line plus the fenced code), so a follow-up like *"what's the complexity of that?"* and a reopened chat both still have the code. When the model's only prose is an intro like *"Here's the C program:"*, or there is none, the line is *"Here you go:"*.
 
 The Prompt Maker (`/prompt` … `/prompt_end`) is not a chat reply, so none of this applies to it: the build is one clean call with no persona, no length limit and no filtering, and the prompt is shown whole. After it, *"run"* (or *"2"*) runs that prompt as a coding task, and `/prompt save` / `/prompt export` use the built prompt, not your notes.
+
+### Privacy switches do what they say
+
+Settings → Privacy has two switches, both on by default. Each is read on every message and every screen look, so flipping one counts from the next message without a restart.
+
+- **Screen Reading off:** no screenshots, no OCR and no clipboard reads. That covers chat context, the proactive and attention loops, the error check, and quest verification, which says *"screen reading is off"*. She still sees window titles, which is how quests count time.
+- **Store Conversations off:** no new turn of any kind is written to the chat log. She keeps track of the current chat in memory until you switch chats or restart, and then it's gone. This switch doesn't cover personal facts she picks up from what you say, or her one-line working-memory note.
+
+Some settings aren't used by anything yet: General, Animations, Wallpaper, Behavior, Developer, Experimental, and voice sensitivity / wake word / noise suppression. They're marked *not active yet* and can't be changed.
 
 ---
 
@@ -320,6 +329,7 @@ python tests/test_local_auth.py       # launch token: /api/* and /ws refuse othe
 python test_reasoning_leak.py         # chain-of-thought never reaches the user
 python tests/test_reply_recovery.py   # streamed + coding replies: answer recovered, code kept in history
 python tests/test_no_key.py           # no API key: setup line, no requests; model chip = this turn's model
+python tests/test_privacy_settings.py # Privacy switches: nothing logged, no screen reads; editor shows real switches
 python test_memory.py                 # durable facts + context
 python test_engine.py                 # routing + intent
 python test_quests.py                 # quests, verification, pressure

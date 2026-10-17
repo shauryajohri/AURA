@@ -218,7 +218,10 @@ def detect_error_state(visible_text: str = "", terminal_text: str = "") -> Error
 
 def handle_error_check(query: str) -> str:
     try:
-        from modules.screen_reader import get_screen_context
+        from modules.screen_reader import get_screen_context, reading_allowed
+        if not reading_allowed():
+            # "Open the Problems panel and I'll check again" would be a lie.
+            return "Screen reading is off (Settings → Privacy), so I can't look for errors."
         context = get_screen_context()
         visible_text = context.get("visible_text", "")
     except Exception:

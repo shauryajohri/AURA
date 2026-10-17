@@ -203,7 +203,8 @@ def think(query: str, intent: str, context: dict, history: list) -> str:
         # lightweight memory update
         if context.get("app") and context["app"] != "unknown":
             memory["current_focus"] = context["app"]
-        memory["last_action"] = f"responded to: {query[:60]}"
+        memory["last_action"] = (f"responded to: {query[:60]}"
+                                 if store.privacy_allows("store_conversations") else "responded")
         save_working_memory(memory)
 
         return ctx_string
@@ -235,7 +236,10 @@ def post_think(query: str, response: str, intent: str):
     else:
         memory["user_mood"] = "neutral"
 
-    memory["last_action"] = response[:80]
+    # A snippet of the reply is conversation text: not on disk when
+    # Settings → Privacy → Store Conversations is off.
+    memory["last_action"] = (response[:80]
+                             if store.privacy_allows("store_conversations") else "responded")
     save_working_memory(memory)
 
     _extract_user_facts(query)

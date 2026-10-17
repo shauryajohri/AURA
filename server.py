@@ -629,6 +629,18 @@ async def api_save_settings(req: Request) -> dict[str, Any]:
 # A chat is a boundary; a room is a subject. Rooms hold chats, and every chat
 # in a room inherits the room's brief — which is the part a title taken from
 # the first message can never carry.
+
+# The chat the user opened themselves: "+ New chat", a chat picked from the
+# list, a room entered. Room routing may file it into a room, but never moves
+# them out of it (see _route_room).
+_PICKED_CHAT: int | None = None
+
+
+def _user_picked_chat(sid: int) -> None:
+    global _PICKED_CHAT
+    _PICKED_CHAT = sid
+
+
 @app.get("/api/rooms")
 async def api_rooms() -> dict[str, Any]:
     from memory import store
@@ -685,6 +697,7 @@ async def api_room_enter(room_id: int) -> dict[str, Any]:
     if not store.get_room(room_id):
         return {"ok": False, "error": "no such room"}
     sid = store.enter_room(room_id)
+    _user_picked_chat(sid)
     try:
         from core import brain
         brain.reset_history()
@@ -724,6 +737,13 @@ async def api_chat_new(req: Request) -> dict[str, Any]:
     except Exception:  # noqa: BLE001 — an empty body is a perfectly good "new chat"
         body = {}
     sid = store.create_chat_session(str(body.get("title") or "") or None)
+    _user_picked_chat(sid)
+    # Same as switching chats: the in-RAM mirror is the old chat's.
+    try:
+        from core import brain
+        brain.reset_history()
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True, "id": sid, "chats": store.list_chat_sessions()}
 
 
@@ -759,6 +779,7 @@ async def api_chat_activate(chat_id: int) -> dict[str, Any]:
     from memory import store
     if not store.set_active_chat_session(chat_id):
         return {"ok": False, "error": "no such chat"}
+    _user_picked_chat(chat_id)
     # The in-RAM mirror belongs to the chat we just left; clearing it stops it
     # bleeding into the reopened one.
     try:
@@ -1265,7 +1286,18 @@ def _route_room(text: str) -> None:
     switch applied afterwards would answer in the new room using the old
     room's instructions. Failure here is never fatal — a router that cannot
     decide leaves you exactly where you were.
+
+    The message stays in the chat it was typed into. An unfiled chat (a fresh
+    "+ New chat" above all) is filed into the room rather than swapped for
+    that room's last chat and its history. A chat the user opened themselves
+    is never left. Only one they didn't (the chat still open from the last
+    run, or one AURA moved them into) can move to the room's chat, and then
+    the UI is sent that chat's transcript so the move is visible.
     """
+    # Slash commands and /prompt buffer lines are instructions, not what the
+    # conversation is about: "/code" must not move anyone.
+    if text.strip().startswith("/") or getattr(DIRECTOR, "mode", "") == "PROMPT":
+        return
     try:
         from core import room_router
         from memory import store
@@ -1273,17 +1305,30 @@ def _route_room(text: str) -> None:
         d = room_router.route(text)
         if not d.get("switch"):
             return
-        sid = store.enter_room(d["room_id"])
-        try:
-            from core import brain
-            brain.reset_history()
-        except Exception:  # noqa: BLE001
-            pass
-        broadcast({"type": "room", "payload": {
+        here = store.active_session_id()
+        if d.get("from_room_id") is None:
+            store.set_session_room(here, d["room_id"])
+            sid, note = here, room_router.file_note(d["room"])
+        elif here == _PICKED_CHAT:
+            return
+        else:
+            sid, note = store.enter_room(d["room_id"]), d.get("note", "")
+        payload = {
             "room_id": d["room_id"], "chat_id": sid,
             "from_room_id": d.get("from_room_id"),
-            "auto": True, "note": d.get("note", ""),
-        }})
+            "auto": True, "moved": sid != here, "note": note,
+        }
+        if sid != here:
+            try:
+                from core import brain
+                brain.reset_history()
+            except Exception:  # noqa: BLE001
+                pass
+            # Taken before this turn is saved, so the UI can swap the
+            # transcript without the message it just showed appearing twice.
+            payload["messages"] = [{"role": r, "text": m, "created_at": t}
+                                   for r, m, t in store.get_session_messages(sid)]
+        broadcast({"type": "room", "payload": payload})
     except Exception as e:  # noqa: BLE001
         print(f"[AURA bridge] room routing skipped: {e}")
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AuraState, ChatTurn, ConnStatus, SendOptions } from "../types";
+import type { AuraState, ChatTurn, ConnStatus, RoomEvent, SendOptions } from "../types";
 import { useVoiceInput } from "../hooks/useVoiceInput";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useSettingsStore } from "../stores/settingsStore";
@@ -27,6 +27,8 @@ interface Props {
   onLoadTurns?: (msgs: { role: string; text: string; created_at: string | null }[]) => void;
   /** Empty the transcript when a new chat is started. */
   onClearTurns?: () => void;
+  /** The last time AURA filed or moved the chat (for the room pill). */
+  roomEvent?: RoomEvent | null;
 }
 
 const MAX_ATTACH = 200 * 1024; // read text attachments up to 200 KB inline
@@ -38,7 +40,7 @@ const MIN_DOCK_VH = 24;
 const MAX_DOCK_VH = 92;
 const DEFAULT_DOCK_VH = 46;
 
-export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns, onClearTurns }: Props) {
+export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns, onClearTurns, roomEvent }: Props) {
   const [historyOpen, setHistoryOpen] = useState(false);
   // Buddy Lock guest: the owner said AURA can help them. They chat; the
   // owner's saved chats and rooms stay out of sight.
@@ -274,6 +276,7 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
         <RoomPicker
           onLoad={(msgs) => onLoadTurns?.(msgs)}
           onClear={() => onClearTurns?.()}
+          roomEvent={roomEvent}
         />
         </>)}
 

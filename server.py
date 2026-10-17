@@ -1291,7 +1291,7 @@ async def _dispatch(ws: WebSocket, text: str) -> None:
 
     if DIRECTOR is None:
         # Fallback: raw brain if the Director failed to init.
-        await _run_streaming(ws, lambda oc, occ: process_streaming(text, on_chunk=oc, on_code=occ))
+        await _run_streaming(ws, lambda oc, occ: process_streaming(text, on_chunk=oc, on_code=occ, user_text=text))
         return
 
     try:
@@ -1314,7 +1314,8 @@ async def _dispatch(ws: WebSocket, text: str) -> None:
         await _run_streaming(
             ws,
             lambda oc, occ: process_streaming(
-                directive.user, on_chunk=oc, on_code=occ, system_prompt=directive.system),
+                directive.user, on_chunk=oc, on_code=occ, system_prompt=directive.system,
+                user_text=text),
         )
         return
 
@@ -1322,7 +1323,8 @@ async def _dispatch(ws: WebSocket, text: str) -> None:
         await _run_streaming(
             ws,
             lambda oc, occ: process_streaming(
-                directive.text, on_chunk=oc, on_code=occ, intent_hint="CODING"),
+                directive.text, on_chunk=oc, on_code=occ, intent_hint="CODING",
+                user_text=text),
         )
         return
 
@@ -1350,15 +1352,16 @@ async def _dispatch(ws: WebSocket, text: str) -> None:
             return process_streaming(
                 res.prompt, on_chunk=oc, on_code=occ,
                 system_prompt=res.system_prompt, model=res.model_id,
-                intent_hint=intent,
+                intent_hint=intent, user_text=text,
             )
         await _run_streaming(ws, run_plan)
         return
 
-    # "chat" - normal streaming conversation
+    # "chat" - normal streaming conversation. `body` may be the Director's
+    # wrapped payload; chat shortcuts read only `text`, what the user typed.
     intent = getattr(directive, "intent", "") or None
     body = getattr(directive, "text", "") or text
-    await _run_streaming(ws, lambda oc, occ: process_streaming(body, on_chunk=oc, on_code=occ, intent_hint=intent))
+    await _run_streaming(ws, lambda oc, occ: process_streaming(body, on_chunk=oc, on_code=occ, intent_hint=intent, user_text=text))
 
 
 async def _say_locally(ws: WebSocket, text: str, source: str) -> None:

@@ -860,42 +860,56 @@ def handle_observation_followup(query: str) -> str | None:
     return guard_output(answer)
 
 
-def process(query: str) -> str:
+# ── Chat shortcuts ───────────────────────────────────────────────────────────
+# Instant commands typed in chat ("add task ...", "afk?", "gold price"). They
+# read only the user's own words: never a payload the Director wrapped around
+# them (mode instruction, compiled plan, /prompt notes), never an attached
+# file or fenced code, and the command has to BE the message, not a word
+# somewhere inside it. As bare substrings, "kafka" read as "afk", "the golden
+# ratio" as a gold quote and a pasted file's "# TODO" as a new task.
+_AFK_RE = re.compile(r"\bafk\b", re.I)
+_ERROR_CHECK_RE = re.compile(
+    r"^(?:(?:hey\s+)?aura[\s,:]+)?(?:please\s+|can\s+you\s+|could\s+you\s+)?"
+    r"(?:check\s+for\s+errors?|any\s+errors?|(?:is|are)\s+there\s+(?:an?\s+|any\s+)?errors?|errors?)"
+    r"(?:\s+(?:on\s+(?:my\s+|the\s+)?screen|in\s+(?:my\s+|the\s+)?(?:code|terminal|editor)|now))?"
+    r"[\s?!.]*$", re.I)
+_FOREX_RE = re.compile(
+    r"\b(?:eur/?usd|gbp/?usd|usd/?jpy|xau(?:/?usd)?)\b"
+    r"|\bgold\b.*\b(?:price|prices|chart|quote|rate|trading)\b"
+    r"|\b(?:price|chart|quote|rate)\s+(?:of|for)\s+gold\b", re.I | re.S)
+
+
+def _command_text(user_text: str | None) -> str | None:
+    """What the shortcuts may read: the message as the user typed it, or None
+    when there is none or it carries a file or code to talk about."""
+    if not user_text or "```" in user_text or "[attached file:" in user_text:
+        return None
+    return user_text.strip()
+
+
+def process(query: str, user_text: str | None = None) -> str:
     print(f"\n[AURA] Processing: '{query}'")
-    query_lower = query.lower()
+    said = _command_text(user_text)
     focus_response = handle_focus_command(query)
     if focus_response:
         store.save_conversation("user", query)
         store.save_conversation("aura", focus_response)
         return focus_response
 
-    if any(w in query_lower for w in ["add task", "new task", "i need to", "todo", "add a task", "remind me to"]):
-        from modules.tasks import handle_add_task
-        result = handle_add_task(query)
-        store.save_conversation("user", query)
-        store.save_conversation("aura", result)
-        speak_response(result, "COMMAND")
-        return result
+    task_reply = None
+    if said:
+        from modules.tasks import handle_task_command
+        task_reply = handle_task_command(said)
+    if task_reply:
+        store.save_conversation("user", said)
+        store.save_conversation("aura", task_reply)
+        speak_response(task_reply, "COMMAND")
+        return task_reply
 
-    if any(w in query_lower for w in ["done with", "completed", "finished", "mark done"]):
-        from modules.tasks import handle_complete_task
-        result = handle_complete_task(query)
-        store.save_conversation("user", query)
-        store.save_conversation("aura", result)
-        speak_response(result, "COMMAND")
-        return result
-
-    if any(w in query_lower for w in ["remove task", "delete task", "cancel task"]):
-        from modules.tasks import handle_remove_task
-        result = handle_remove_task(query)
-        store.save_conversation("user", query)
-        store.save_conversation("aura", result)
-        speak_response(result, "COMMAND")
-        return result
-    if any(w in query_lower for w in ["check for error", "any error", "is there an error", "errors?", "any errors"]):
+    if said and _ERROR_CHECK_RE.match(said):
         from modules.error_detector import handle_error_check
-        result = handle_error_check(query)
-        store.save_conversation("user", query)
+        result = handle_error_check(said)
+        store.save_conversation("user", said)
         store.save_conversation("aura", result)
         speak_response(result, "COMMAND")
         return result
@@ -915,10 +929,10 @@ def process(query: str) -> str:
         store.save_conversation("aura", cmd_response)
         return cmd_response
 
-    if any(p in query.lower() for p in ["eurusd", "gbpusd", "usdjpy", "eur/usd", "gbp/usd", "gold"]):
+    if said and _FOREX_RE.search(said):
         from modules.forex_report import get_quick_price
-        result = get_quick_price(query.lower())
-        store.save_conversation("user", query)
+        result = get_quick_price(said.lower())
+        store.save_conversation("user", said)
         store.save_conversation("aura", result)
         return result
 
@@ -981,7 +995,10 @@ def process(query: str) -> str:
     return final_answer
 
 
-def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: str | None = None, model: str | None = None, intent_hint: str | None = None) -> str:
+def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: str | None = None, model: str | None = None, intent_hint: str | None = None, user_text: str | None = None) -> str:
+    # `query` is what the model answers — possibly the Director's wrapped
+    # payload. `user_text` is the message as typed; chat shortcuts read only
+    # that (see _command_text), and none run when the caller doesn't pass it.
     mark_user_active(query)
     # Did the user just return after a nudge / being away? If so, the reply
     # should resume the thread ("since you're back...") instead of a separate
@@ -993,7 +1010,7 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
     except Exception:
         pass
     print(f"\n[AURA] Streaming: '{query}'")
-    query_lower = query.lower()
+    said = _command_text(user_text)
     focus_response = handle_focus_command(query)
     if focus_response:
         store.save_conversation("user", query)
@@ -1009,55 +1026,39 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
         if on_chunk:
             on_chunk(observation_followup)
         return observation_followup
-    if "afk" in query_lower:
+    if said and _AFK_RE.search(said):
           from modules.command_handler import describe_afk_status
           result = describe_afk_status()
-          store.save_conversation("user", query)
+          store.save_conversation("user", said)
           store.save_conversation("aura", result)
           if on_chunk:
               on_chunk(result)
           return result
-    if any(w in query_lower for w in ["add task", "new task", "i need to", "todo", "add a task", "remind me to"]):
-        from modules.tasks import handle_add_task
-        result = handle_add_task(query)
-        store.save_conversation("user", query)
-        store.save_conversation("aura", result)
+    task_reply = None
+    if said:
+        from modules.tasks import handle_task_command
+        task_reply = handle_task_command(said)
+    if task_reply:
+        store.save_conversation("user", said)
+        store.save_conversation("aura", task_reply)
         if on_chunk:
-            on_chunk(result)
-        return result
-
-    if any(w in query_lower for w in ["done with", "completed", "finished", "mark done"]):
-        from modules.tasks import handle_complete_task
-        result = handle_complete_task(query)
-        store.save_conversation("user", query)
-        store.save_conversation("aura", result)
-        if on_chunk:
-            on_chunk(result)
-        return result
-
-    if any(w in query_lower for w in ["remove task", "delete task", "cancel task"]):
-        from modules.tasks import handle_remove_task
-        result = handle_remove_task(query)
-        store.save_conversation("user", query)
-        store.save_conversation("aura", result)
-        if on_chunk:
-            on_chunk(result)
-        return result
+            on_chunk(task_reply)
+        return task_reply
     # Quests: status and creation, both in plain language. Placed above the
     # generic task handlers because "add quest japanese 2 hrs" contains "add",
     # which the task matcher would otherwise claim.
-    quest_reply = handle_quest_command(query)
+    quest_reply = handle_quest_command(said) if said else None
     if quest_reply:
-        store.save_conversation("user", query)
+        store.save_conversation("user", said)
         store.save_conversation("aura", quest_reply)
         if on_chunk:
             on_chunk(quest_reply)
         return quest_reply
 
-    if any(w in query_lower for w in ["check for error", "any error", "is there an error", "errors?", "any errors"]):
+    if said and _ERROR_CHECK_RE.match(said):
         from modules.error_detector import handle_error_check
-        result = handle_error_check(query)
-        store.save_conversation("user", query)
+        result = handle_error_check(said)
+        store.save_conversation("user", said)
         store.save_conversation("aura", result)
         if on_chunk:
             on_chunk(result)
@@ -1083,10 +1084,10 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
             on_chunk(instant_response)
         return instant_response
 
-    if any(p in query_lower for p in ["eurusd", "gbpusd", "usdjpy", "eur/usd", "gbp/usd", "gold"]):
+    if said and _FOREX_RE.search(said):
         from modules.forex_report import get_quick_price
-        result = get_quick_price(query_lower)
-        store.save_conversation("user", query)
+        result = get_quick_price(said.lower())
+        store.save_conversation("user", said)
         store.save_conversation("aura", result)
         if on_chunk:
             on_chunk(result)

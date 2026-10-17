@@ -230,6 +230,9 @@ mstore.save_conversation("user", "a direct save")
 rows = logged()
 check(len(rows) == n0, f"no message was stored ({len(rows) - n0} new rows)")
 check(not any("4471" in r for r in rows), "the secret is not in the log")
+wm = json.dumps(mstore.get_working_memory() or {})
+check("4471" not in wm and "Noted." not in wm,
+      "...nor in working memory (no message or reply snippet on disk)")
 p0 = len(PROMPTS)
 turn("what's my locker code?")
 check(any("4471" in p for p in PROMPTS[p0:]),

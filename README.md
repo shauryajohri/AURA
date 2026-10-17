@@ -112,7 +112,7 @@ Plain statements ("my name is …", "I'm learning …", "I prefer short replies"
 Settings → Privacy has two switches, both on by default. Each is read on every message and every screen look, so flipping one counts from the next message without a restart.
 
 - **Screen Reading off:** no screenshots, no OCR and no clipboard reads. That covers chat context, the proactive and attention loops, the error check, and quest verification, which says *"screen reading is off"*. She still sees window titles, which is how quests count time.
-- **Store Conversations off:** no new turn of any kind is written to the chat log. She keeps track of the current chat in memory until you switch chats or restart, and then it's gone. This switch doesn't cover personal facts she picks up from what you say, or her one-line working-memory note.
+- **Store Conversations off:** no new turn of any kind is written to the chat log. She keeps track of the current chat in memory until you switch chats or restart, and then it's gone. Her working-memory note keeps no message text either. This switch doesn't cover personal facts she picks up from what you say ("my name is …"); those live in the Memory panel, where you can delete them.
 
 Some settings aren't used by anything yet: General, Animations, Wallpaper, Behavior, Developer, Experimental, and voice sensitivity / wake word / noise suppression. They're marked *not active yet* and can't be changed.
 

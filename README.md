@@ -85,10 +85,14 @@ If nothing is stored, the block is empty on purpose — she says it's fuzzy rath
 Reasoning models leak their deliberation as ordinary content ("So answer: …", "The user wants …", "That's one sentence?"). Three layers stop it:
 
 1. prompt-level instruction + `reasoning: {exclude: true}` on OpenRouter
-2. `sanitize_text` — two tiers of markers (STRONG stripped anywhere, WEAK only as leading preamble), a density rule, and a **seam cut**: when the model announces its answer, the text after the announcement *is* the answer, so it's recovered rather than discarded
+2. `sanitize_text` — two tiers of markers (STRONG stripped anywhere, WEAK only as leading preamble), a density rule, and a **seam cut**: when the model announces its answer, the text after the announcement *is* the answer, so it's recovered rather than discarded. The stream uses it too: deliberation at the head of a stream is held back, and once the reply starts the held-back head goes through `sanitize_text`, so *"The user wants a greeting. So answer: Hi there, good to see you."* streams as *"Hi there, good to see you."*. In the coding lane the prose around the code gets the same pass
 3. `guard_output` before anything is shown or spoken
 
 Fenced code is lifted out before filtering and restored byte-for-byte — a filter that flattens a C++ answer into one line is worse than the leak.
+
+If nothing is left once the deliberation is gone, she says she lost her train of thought. "Connection trouble" is only for a provider or network failure.
+
+A coding answer is saved to the chat exactly as shown (the chat line plus the fenced code), so a follow-up like *"what's the complexity of that?"* and a reopened chat both still have the code. When the model's only prose is an intro like *"Here's the C program:"*, or there is none, the line is *"Here you go:"*.
 
 ---
 
@@ -310,6 +314,7 @@ python test_work_recall.py            # project memory in the chat
 python test_guard.py                  # Buddy Lock: policy, passes, gate (+ real face/voice samples)
 python tests/test_local_auth.py       # launch token: /api/* and /ws refuse other pages
 python test_reasoning_leak.py         # chain-of-thought never reaches the user
+python tests/test_reply_recovery.py   # streamed + coding replies: answer recovered, code kept in history
 python test_memory.py                 # durable facts + context
 python test_engine.py                 # routing + intent
 python test_quests.py                 # quests, verification, pressure

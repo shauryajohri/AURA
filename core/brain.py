@@ -384,7 +384,8 @@ def _recent_turns(max_turns: int = 8) -> str:
             text = (message or "").strip()
             if not text or _is_context_junk(text):
                 continue
-            kept.append(("User" if role == "user" else "AURA", text[:400]))
+            label = "User" if role == "user" else "AURA"
+            kept.append((label, _clip_turn(label, text)))
         for label, text in reversed(kept):
             lines.append(f"{label}: {text}")
     except Exception:
@@ -393,8 +394,26 @@ def _recent_turns(max_turns: int = 8) -> str:
             text = (h.get("text") or "").strip()
             if text and not _is_context_junk(text):
                 label = "User" if h.get("role") == "user" else "AURA"
-                lines.append(f"{label}: {text[:400]}")
+                lines.append(f"{label}: {_clip_turn(label, text)}")
     return "\n".join(lines[-max_turns:])
+
+
+# A turn in the transcript is cut to 400 chars. AURA's code replies get more
+# room: the follow-up ("what's the complexity of that?") is about the code,
+# and the first 400 chars of a reply are mostly its chat line and imports.
+_CODE_TURN_CHARS = 1500
+
+
+def _clip_turn(label: str, text: str) -> str:
+    if label != "AURA" or "```" not in text:
+        return text[:400]
+    if len(text) <= _CODE_TURN_CHARS:
+        return text
+    cut = text[:_CODE_TURN_CHARS]
+    cut = cut[:cut.rfind("\n")] if "\n" in cut else cut   # whole lines only
+    if cut.count("```") % 2:
+        cut += "\n…\n```"   # close the fence the cut left open
+    return cut
 
 
 def part_of_day(hour: int) -> str:
@@ -1191,19 +1210,32 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
             return msg
 
         chat_part, lang, code = extract_code_block(raw)
-        chat_msg = chat_part if chat_part else "Here's the code:"
-        # Persona layer: even the coding chat line sounds like AURA.
-        chat_msg = compose_text(chat_msg, "CODING", query, last_model_used())
+        if chat_part:
+            # The prose around the code gets the same leak filter as every
+            # other lane ("The user wants it short so we need to…" after the
+            # block was shown and spoken). The code is already lifted out.
+            from core.ai_router import sanitize_text
+            chat_part = sanitize_text(chat_part, query=query)
+        # Persona layer: even the coding chat line sounds like AURA. With code
+        # attached, an empty line becomes a neutral intro, not a "say that
+        # again" over working code.
+        chat_msg = compose_text(chat_part, "CODING", query, last_model_used(),
+                                with_code=bool(code))
 
         if on_chunk:
             on_chunk(chat_msg)
         if code and on_code:
             on_code(lang, code)
 
+        # History gets what the UI shows: the chat line AND the code (the
+        # server appends the same fenced block to the "done" text). Saving
+        # the line alone left follow-ups ("what's the complexity of that?")
+        # and reopened chats with no code to refer to.
+        shown = f"{chat_msg}\n\n```{lang or 'text'}\n{code}\n```" if code else chat_msg
         store.save_conversation("user", query)
-        store.save_conversation("aura", chat_msg)
+        store.save_conversation("aura", shown)
         _history.append({"role": "user", "text": query})
-        _history.append({"role": "aura", "text": chat_msg})
+        _history.append({"role": "aura", "text": shown})
         post_think(query, chat_msg, intent)
         return chat_msg
 
@@ -1222,8 +1254,15 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
     answer = "".join(chunks).strip()
     if not answer and saw_sentinel == "RATE_LIMIT":
         return "Hit my rate limit — give me a moment."
-    if answer.startswith("ERROR") or not answer:
+    if answer.startswith("ERROR") or (not answer and saw_sentinel):
         return "Connection trouble — one sec."
+    if not answer:
+        # The model answered, but the stream filter found nothing in it except
+        # deliberation. Every provider or network failure arrives as a
+        # sentinel, so calling this one "Connection trouble" was a lie.
+        from core.ai_router import note_leak
+        note_leak("streamed")
+        return "Lost my train of thought there — say that again?"
 
     # Final reasoning-leak pass over the ASSEMBLED answer.
     #

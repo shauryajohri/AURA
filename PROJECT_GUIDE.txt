@@ -107,14 +107,22 @@ normally until you exit the mode):
     "use it" / "do it" (or pick a menu number) to execute the built
     prompt immediately without a second approval step.
 
-TASKS (no slash needed — just say it naturally):
-    "add task ..." / "add a task ..." / "new task ..." /
-    "i need to ..." / "remind me to ..." / "todo: ..."
+TASKS (no slash needed — but the command has to START the message):
+    "add task ..." / "add a task ..." / "new task ..." / "remind me to ..."
         → adds a task
-    "done with ..." / "completed ..." / "finished ..." / "mark done"
-        → marks a task complete
+    "mark <task> done" / "mark done <task>" / "complete task <task>" /
+    "done with <task>" / "i'm done with <task>"
+        → marks that task complete
     "remove task ..." / "delete task ..." / "cancel task ..."
         → deletes a task
+    The task is found by its words, so "done with the dentist" finds
+    "Call the dentist". If more than one task fits, or the name is too
+    vague to be sure, AURA asks "Which task?" instead of guessing — and a
+    delete needs a close match. A sentence that only mentions these words
+    ("I need to...", "my todo app", "I finished the movie") is just chat.
+    So is a "/code ...", "/plan ..." or "/research ..." request, anything
+    typed while /prompt is collecting notes, and a message with an
+    attached file or a code block.
 
 APP / WINDOW CONTROL:
     "open <app name>" / "launch <app name>" / "start <app name>" /
@@ -125,15 +133,16 @@ APP / WINDOW CONTROL:
         → AURA looks at what's on your screen there
     "what site/page is open in <app>"
         → describes what's showing in that window
-    anything containing "afk"
+    "afk" as a word ("was I afk?")
         → reports how long you've been away
 
-ERRORS:
-    "check for error" / "any error" / "is there an error" / "errors?"
+ERRORS (the whole message, e.g. "any errors?", "check for errors"):
+    "check for errors" / "any errors" / "is there an error" / "errors?"
         → runs AURA's error detector on your current screen/output
 
 MARKETS (instant, no LLM call):
-    mentions of "eurusd" / "gbpusd" / "usdjpy" / "gold"
+    "eurusd" / "gbpusd" / "usdjpy" / "xau", or gold with a price word
+    ("gold price", "price of gold")
         → instant quote lookup
 
 MEMORY (natural language, not fixed phrases):

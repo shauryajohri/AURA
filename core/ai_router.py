@@ -1,5 +1,6 @@
 import os
 import re
+import threading
 import requests
 from dotenv import load_dotenv
 from core.personality import DONNA_SYSTEM_PROMPT, INTENT_PERSONALITY_ADJUSTMENTS
@@ -54,8 +55,15 @@ RATE_LIMIT_COOLDOWN_SECONDS = 20
 _provider_cooldown = {}   # provider name -> unix ts until which it's paused
 
 # The model actually used for the last user-facing generation — the UI model
-# chip reads this so it shows the real model, not a guess.
-_last_model_used = GROQ_MODEL
+# chip reads this so it shows the real model, not a guess. Empty until one has
+# answered: starting at GROQ_MODEL claimed a Groq answer even with no key.
+_last_model_used = ""
+
+# The model that answered the turn running on THIS thread ("" until one does).
+# The done frame reads this, not _last_model_used: that one is process-wide and
+# never cleared, so a turn that failed or never reached a model still showed
+# the previous answer's model on the chip.
+_turn = threading.local()
 
 
 def _provider_for(model_id: str) -> str:
@@ -126,6 +134,18 @@ def _key_is_real(key) -> bool:
     return bool(key) and "your-" not in key and "your_" not in key
 
 
+def has_key(model_id: str | None = None) -> bool:
+    """A real key for the provider behind `model_id` (default: the Groq chat
+    model). Without one a call can only fail ("Bearer None"), so it's skipped."""
+    return _key_is_real(_endpoint_for(model_id or GROQ_MODEL)[2])
+
+
+def keys_missing() -> bool:
+    """No provider key at all: no model can answer anything."""
+    return not (_key_is_real(GROQ_API_KEY) or _key_is_real(OPENROUTER_API_KEY)
+                or any(_key_is_real(k) for k in _OPENROUTER_MODEL_KEYS.values()))
+
+
 def openrouter_status() -> str:
     """One-line summary of which OpenRouter model keys are configured, so it's
     obvious at startup that dropping a key in .env 'just works'. Any model
@@ -134,10 +154,17 @@ def openrouter_status() -> str:
     from core import model_router
     ready = [model_router.name_for_id(mid) or mid
              for mid, key in _OPENROUTER_MODEL_KEYS.items() if _key_is_real(key)]
+    groq = _key_is_real(GROQ_API_KEY)
+    if not ready and not groq:
+        return ("No API key detected — nothing can answer. Add GROQ_API_KEY "
+                "(or OPENROUTER_API_KEY) to .env, then restart.")
     if not ready:
         return ("OpenRouter: no key detected — running on Groq for everything. "
                 "Add OPENROUTER_KEY_CODING / _RESEARCH / _CHAT (or a single "
                 "OPENROUTER_API_KEY) to .env to switch models on.")
+    if not groq:
+        return ("OpenRouter live for: " + ", ".join(ready)
+                + " (no GROQ_API_KEY, so nothing falls back to Groq).")
     return "OpenRouter live for: " + ", ".join(ready) + " (others fall back to Groq)."
 
 
@@ -182,6 +209,18 @@ def leak_stats() -> dict[str, dict[str, int]]:
 def _set_last_model(model_id: str):
     global _last_model_used
     _last_model_used = model_id
+    _turn.model = model_id
+
+
+def set_turn_model(model_id: str) -> None:
+    """Reset at the start of a turn, or cleared when the reply is a canned
+    line rather than the model's answer."""
+    _turn.model = model_id
+
+
+def turn_model() -> str:
+    """The model that answered this thread's current turn, or ""."""
+    return getattr(_turn, "model", "")
 
 
 def _announce_model(name: str, model_id: str, intent: str):
@@ -223,6 +262,11 @@ def _resolve_candidates(intent: str, explicit_model: str | None) -> list:
 
 _ALL_LOCKED_MSG = ("Every model I'd use for that is locked — unlock one in the "
                    "cosmos and I'll answer.")
+
+# What AURA says when route()/route_streaming() return the NO_KEY sentinel:
+# none of the models for the turn has a key, so nothing was called.
+NO_KEY_MSG = ("I don't have an AI key yet. Add GROQ_API_KEY (or OPENROUTER_API_KEY) "
+              "to the .env file in the AURA folder, then restart me.")
 
 
 _CODING_SYSTEM_ADDON = """
@@ -464,6 +508,8 @@ def call_classifier(prompt: str) -> str:
     """Lightweight call for classification tasks (intent, anticipate, should_respond) — no personality prompt."""
     if _in_rate_limit_cooldown():
         return ""
+    if not _key_is_real(GROQ_API_KEY):
+        return "CONNECTION_ERROR"   # no key: the call could only fail
     try:
         response = requests.post(
             GROQ_URL,
@@ -507,6 +553,10 @@ def route(intent: str, prompt: str) -> str:
     candidates = _resolve_candidates(intent, None)
     if not candidates:
         return _ALL_LOCKED_MSG
+    # Same as route_streaming: a model without a key is never called.
+    candidates = [(name, mid) for name, mid in candidates if has_key(mid)]
+    if not candidates:
+        return "NO_KEY"
     last = "CONNECTION_ERROR"
     for name, mid in candidates:
         try:
@@ -1019,8 +1069,9 @@ def sanitize_text(text: str, query: str = "") -> str:
 
 
 def _peel_head(head: str, final: bool = False):
-    """Return (emit_text, new_head, start_streaming). Strips <think> blocks and
-    leading meta-reasoning sentences until real content begins."""
+    """Return (peeled, emit_text, new_head, start_streaming). Strips <think>
+    blocks and leading meta-reasoning sentences until real content begins;
+    `peeled` is the deliberation taken off the front, for _recover_head."""
     import re
     head = re.sub(r"(?is)<think>.*?</think>", "", head)
     ti = head.lower().find("<think>")
@@ -1028,7 +1079,7 @@ def _peel_head(head: str, final: bool = False):
         if final:
             head = head[:ti]
         else:
-            return "", head, False  # wait for the closing tag
+            return "", "", head, False  # wait for the closing tag
 
     parts = _SENT_SPLIT.split(head)
     sentences, cur = [], ""
@@ -1042,15 +1093,43 @@ def _peel_head(head: str, final: bool = False):
     idx = 0
     while idx < len(sentences) and _is_meta_sentence(sentences[idx]):
         idx += 1
+    peeled = "".join(sentences[:idx])
     if idx < len(sentences):
-        return ("".join(sentences[idx:]) + tail).lstrip(), "", True
+        return peeled, "".join(sentences[idx:]) + tail, "", True
     if final:
-        return tail.strip(), "", True
-    return "", tail, False
+        return peeled, tail, "", True
+    return peeled, "", tail, False
+
+
+def _recover_head(peeled: str, emit: str, final: bool = False) -> str | None:
+    """What to show once the reply starts, given the deliberation peeled
+    before it. None means sanitize_text found no answer yet: keep buffering.
+
+    Peeling alone threw away a seam sentence whole — "So answer: Hi there,
+    good to see you." is meta AND carries the answer — so the stream came
+    back empty and the turn was reported as a connection problem. When
+    anything was peeled, the head goes through sanitize_text instead, whose
+    seam cut recovers the answer the same way the non-stream path does. Only
+    complete sentences are judged; the unfinished one streams on as it is.
+    """
+    if not peeled:
+        return emit.lstrip()
+    cut = len(emit) if final else _sentences_end(emit)
+    done, rest = peeled + emit[:cut], emit[cut:]
+    clean = sanitize_text(done)
+    if not clean:
+        return "" if final else None
+    # sanitize_text trims; keep the break between the head and what follows
+    return clean + done[len(done.rstrip()):] + rest
+
+
+def _sentences_end(text: str) -> int:
+    """Index just past the last complete sentence in `text` (0 if none)."""
+    return max((m.end() for m in _SENT_SPLIT.finditer(text)), default=0)
 
 
 def _sanitize_reasoning_stream(chunks):
-    head, streaming = "", False
+    head, peeled, streaming = "", "", False
     for ch in chunks:
         if ch in ("RATE_LIMIT", "CONNECTION_ERROR"):
             yield ch
@@ -1059,17 +1138,26 @@ def _sanitize_reasoning_stream(chunks):
             yield ch
             continue
         head += ch
-        emit, head, streaming = _peel_head(head)
+        more, emit, head, streaming = _peel_head(head)
+        peeled += more
         if streaming:
-            if emit:
-                yield emit
+            shown = _recover_head(peeled, emit)
+            if shown is None:
+                # The peel saw content but sanitize_text still reads it all as
+                # deliberation (the density rule): keep buffering.
+                cut = _sentences_end(emit)
+                peeled, head, streaming = peeled + emit[:cut], emit[cut:], False
+            elif shown:
+                yield shown
         elif len(head) > 1200:  # safety: never buffer forever
-            emit, head, streaming = _peel_head(head, final=True)
+            more, emit, head, streaming = _peel_head(head, final=True)
+            emit = _recover_head(peeled + more, emit, final=True)
             if emit:
                 yield emit
             streaming = True
-    if head and not streaming:
-        emit, _, _ = _peel_head(head, final=True)
+    if (head or peeled) and not streaming:
+        more, emit, _, _ = _peel_head(head, final=True)
+        emit = _recover_head(peeled + more, emit, final=True)
         if emit:
             yield emit
 
@@ -1297,6 +1385,14 @@ def route_streaming(intent: str, prompt: str, system_prompt: str | None = None, 
     if not candidates:
         yield _ALL_LOCKED_MSG
         return
+    # A model without a real key can only fail, so it isn't called (no
+    # "Bearer None" request, no "unavailable — falling back" line). With none
+    # left the caller gets NO_KEY and says how to add one, instead of
+    # "Connection trouble" on every message.
+    candidates = [(name, mid) for name, mid in candidates if has_key(mid)]
+    if not candidates:
+        yield "NO_KEY"
+        return
 
     last_sentinel = "CONNECTION_ERROR"
     for name, mid in candidates:
@@ -1339,6 +1435,8 @@ def call_groq_raw(prompt: str, system: str, max_tokens: int = 1024,
     cd_key = _cooldown_key(provider, model_id)
     if _in_rate_limit_cooldown(cd_key):
         return "RATE_LIMIT"
+    if not _key_is_real(api_key):
+        return "CONNECTION_ERROR"   # no key: the call could only fail
     try:
         response = requests.post(
             url,
@@ -1385,6 +1483,8 @@ def call_planner(prompt: str, system: str, model: str = None) -> str:
     cd_key = _cooldown_key(provider, model_id)
     if _in_rate_limit_cooldown(cd_key):
         return "RATE_LIMIT"
+    if not _key_is_real(api_key):
+        return "CONNECTION_ERROR"   # no key: the call could only fail
     try:
         response = requests.post(
             url,
@@ -1440,6 +1540,8 @@ def call_groq(prompt: str, system: str = DONNA_SYSTEM_PROMPT, intent: str = "CAS
     cd_key = _cooldown_key(provider, model_id)
     if _in_rate_limit_cooldown(cd_key):
         return "RATE_LIMIT"
+    if not _key_is_real(api_key):
+        return "CONNECTION_ERROR"   # no key: the call could only fail
 
     is_coding = (intent == "CODING")
     is_personal = (intent == "PERSONAL")

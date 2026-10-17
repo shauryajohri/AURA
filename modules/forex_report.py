@@ -102,6 +102,7 @@ def get_quick_price(pair: str) -> str:
     # check whether the PAIR token appears in the QUERY — the old test was
     # reversed (query-in-pair) and never matched.
     query = pair.lower().replace("/", "").replace(" ", "").replace("-", "")
+    query = query.replace("xau", "gold")   # XAU/USD is gold's ticker name
     for name, ticker in MAJOR_PAIRS.items():
         token = name.lower().replace("/", "")
         if token in query:

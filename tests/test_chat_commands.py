@@ -59,6 +59,7 @@ import local_auth  # noqa: E402
 import server  # noqa: E402
 from core import brain  # noqa: E402
 from modules import command_handler, error_detector, tasks  # noqa: E402
+from modules.prompt_maker import PROMPT_ENGINEER_SYSTEM  # noqa: E402
 
 # No model: every turn that reaches it gets this answer, and is counted.
 MODEL_CALLS: list[str] = []
@@ -69,7 +70,19 @@ def _fake_stream(intent, prompt, system_prompt=None, model=None):
     yield "MODEL-ANSWER."
 
 
+_real_raw = ai_router.call_groq_raw
+
+
+def _fake_raw(prompt, system, *a, **k):
+    """The /prompt_end build is its own one-shot call, not a chat stream."""
+    if system != PROMPT_ENGINEER_SYSTEM:
+        return _real_raw(prompt, system, *a, **k)
+    MODEL_CALLS.append(prompt)
+    return "MODEL-ANSWER."
+
+
 brain.route_streaming = _fake_stream
+ai_router.call_groq_raw = _fake_raw
 brain.call_classifier = lambda p: "CASUAL"
 brain.call_claude = lambda *a, **k: "NONE"
 ai_router.call_planner = lambda *a, **k: "FETCH: none"

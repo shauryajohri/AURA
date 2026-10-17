@@ -22,3 +22,10 @@ keyboard
 
 # Optional — local should_respond gate (falls back gracefully if absent)
 ollama
+
+# Buddy Lock — face + voice ID. Optional: without them AURA runs as before,
+# the lock just can't be set up. Headless OpenCV on purpose: the full build
+# ships its own Qt, which clashes with PySide6.
+opencv-python-headless>=4.8
+sherpa-onnx
+numpy

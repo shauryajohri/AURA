@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AuraState, ChatTurn, ConnStatus } from "../types";
+import type { AuraState, ChatTurn, ConnStatus, SendOptions } from "../types";
 import { useVoiceInput } from "../hooks/useVoiceInput";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import MicCheck from "./MicCheck";
@@ -8,7 +8,7 @@ import { renderMarkdown } from "./Markdown";
 interface Props {
   status: ConnStatus;
   turns: ChatTurn[];
-  onSend: (text: string) => void;
+  onSend: (text: string, opts?: SendOptions) => void;
   onCollapse?: () => void;
   /** Used to mute the mic while AURA is talking so she can't hear herself. */
   auraState?: AuraState;
@@ -29,7 +29,9 @@ export default function ChatPanel({ status, turns, onSend, onCollapse, auraState
   // Voice heard while AURA is mid-sentence is almost always AURA's own output
   // coming back through the speakers — freeze capture until she's done.
   const voice = useVoiceInput({
-    onFinal: useCallback((text: string) => onSend(text), [onSend]),
+    // Voice carries its audio so Buddy Lock can check it's the owner talking.
+    onFinal: useCallback(
+      (text: string, audio?: string) => onSend(text, { via: "voice", audio }), [onSend]),
     muted: auraState === "speaking",
   });
   const { toggle: toggleVoice, stop: stopVoice, listening } = voice;

@@ -36,3 +36,7 @@ dist/
 # OS files
 .DS_Store
 Thumbs.db
+# Buddy Lock — the owner's face/voice embeddings + PIN hash, and the
+# downloaded recognition models (~80 MB, fetched on first use)
+memory/guard/
+models/guard/

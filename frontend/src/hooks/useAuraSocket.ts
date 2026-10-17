@@ -7,10 +7,13 @@ import type {
   ConnStatus,
   Presence,
   QuestEvent,
+  SendOptions,
   ServerMessage,
   V3Event,
 } from "../types";
 import { useNotifyStore } from "../stores/notifyStore";
+import { guardActive, useGuardStore } from "../stores/guardStore";
+import { grabFrame } from "../guard/camera";
 
 // How many live V3 events to keep in memory. The panel also fetches history
 // from /api/v3/snapshot on mount, so this is only the live tail.
@@ -161,6 +164,12 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
             useNotifyStore.getState().add("quest", `Quest complete: ${msg.payload.title ?? ""}`.trim());
           }
           break;
+        case "guard":
+          // Buddy Lock's verdict. A refusal is the whole reply: no model was
+          // called, nothing is spoken — just say why in the log.
+          useGuardStore.getState().apply(msg.payload.status);
+          if (!msg.payload.allowed && msg.payload.text) pushMessage(msg.payload.text, "locked");
+          break;
         case "error":
           pushMessage("[error] " + msg.payload.message, "error");
           finishStream();
@@ -188,7 +197,7 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
     };
   }, [connect]);
 
-  const send = useCallback((text: string) => {
+  const send = useCallback((text: string, opts?: SendOptions) => {
     const trimmed = text.trim();
     if (!trimmed) return;
     const ws = wsRef.current;
@@ -196,6 +205,15 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
 
     setTurns((prev) => [...prev, { id: newId(), role: "user", text: trimmed, ts: nowTime() }]);
     const msg: ClientMessage = { type: "message", payload: { text: trimmed } };
+    if (opts?.via === "voice") msg.payload.via = "voice";
+    // Buddy Lock: the frame is grabbed in the same tick as Enter, so it shows
+    // whoever actually sent this. Voice also carries its audio; the frame is
+    // its fallback when the sentence is too short to judge by voice alone.
+    if (guardActive()) {
+      const frame = grabFrame();
+      if (frame) msg.payload.frame = frame;
+      if (opts?.audio) msg.payload.audio = opts.audio;
+    }
     ws.send(JSON.stringify(msg));
   }, []);
 

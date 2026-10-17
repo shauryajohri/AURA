@@ -4,6 +4,7 @@ import SettingsOverlay, { SettingsCategory, CATEGORY_META } from "../components/
 import { Layout, DEFAULT_LAYOUT } from "../components/Home/layoutTypes";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useSettingsStore } from "../stores/settingsStore";
+import BuddyLockPanel from "../components/Guard/BuddyLockPanel";
 
 // Settings — a menu → focused editor flow. Pick a category, edit it with a
 // live preview, save, and you're back here. Grouped into sections so fourteen
@@ -34,6 +35,13 @@ export default function SettingsView() {
         <h2>Settings</h2>
         <p>Tune AURA's world. Each area opens with a live preview.</p>
       </div>
+
+      {/* Buddy Lock lives inline rather than behind a category: it's a flow
+          (camera, mic, PIN), not a set of sliders with a preview. */}
+      <section className="setview__section">
+        <h3 className="memtl__title">Security</h3>
+        <BuddyLockPanel />
+      </section>
 
       {SECTIONS.map((sec) => (
         <section key={sec.title} className="setview__section">

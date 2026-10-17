@@ -17,6 +17,12 @@ import { api } from "../api";
  * The mic stream is opened ONCE and shared: the recognizer listens to it and
  * an AnalyserNode reads RMS off the same stream, so the level meter is real
  * regardless of which engine is transcribing.
+ *
+ * Every finished sentence also comes with the audio it was spoken in (16 kHz
+ * WAV, base64) so Buddy Lock can check the voice is the owner's. Web Speech
+ * never exposes its audio, so a short rolling buffer of the same mic stream
+ * is kept for that — cleared after each sentence and while AURA is speaking,
+ * so it only ever holds the words that were just recognised.
  */
 
 // ── tuning ──────────────────────────────────────────────────────────────────
@@ -25,6 +31,7 @@ const SILENCE_RMS = 0.012;   // below this counts as "not talking"
 const SILENCE_MS = 900;      // hold that long to end an utterance
 const MIN_UTTER_MS = 350;    // ignore blips shorter than this
 const MAX_UTTER_MS = 15000;  // hard cut so one long ramble still gets sent
+const VOICE_ID_MS = 10000;   // rolling buffer kept for speaker ID (Web Speech mode)
 
 export type VoiceEngine = "webspeech" | "backend" | "none";
 
@@ -49,8 +56,9 @@ export interface VoiceInput {
 }
 
 interface Options {
-  /** Called with each finished sentence. This is what gets sent to AURA. */
-  onFinal: (text: string) => void;
+  /** Called with each finished sentence (and the WAV it was spoken in, for
+   *  Buddy Lock's voice check). This is what gets sent to AURA. */
+  onFinal: (text: string, audio?: string) => void;
   /**
    * Freeze capture without dropping the mic — used while AURA is speaking so
    * she never transcribes her own voice back into the chat.
@@ -61,7 +69,7 @@ interface Options {
 // ── WAV encoding (fallback path) ────────────────────────────────────────────
 
 /** Naive but adequate linear resample down to TARGET_RATE. */
-function downsample(input: Float32Array, from: number, to: number): Float32Array {
+export function downsample(input: Float32Array, from: number, to: number): Float32Array {
   if (to >= from) return input;
   const ratio = from / to;
   const out = new Float32Array(Math.floor(input.length / ratio));
@@ -76,7 +84,7 @@ function downsample(input: Float32Array, from: number, to: number): Float32Array
 }
 
 /** Float32 mono → 16-bit PCM WAV → base64 (no data: prefix). */
-function encodeWavBase64(samples: Float32Array, rate: number): string {
+export function encodeWavBase64(samples: Float32Array, rate: number): string {
   const buffer = new ArrayBuffer(44 + samples.length * 2);
   const view = new DataView(buffer);
   const str = (off: number, s: string) => {
@@ -137,6 +145,9 @@ export function useVoiceInput({ onFinal, muted = false }: Options): VoiceInput {
 
   // Fallback capture state
   const chunksRef = useRef<Float32Array[]>([]);
+  // Rolling audio for speaker ID while Web Speech owns transcription.
+  const ringRef = useRef<Float32Array[]>([]);
+  const ringLenRef = useRef(0);
   const speakingRef = useRef(false);
   const silenceSinceRef = useRef(0);
   const utterStartRef = useRef(0);
@@ -148,7 +159,20 @@ export function useVoiceInput({ onFinal, muted = false }: Options): VoiceInput {
   useEffect(() => { onFinalRef.current = onFinal; }, [onFinal]);
   useEffect(() => { mutedRef.current = muted; }, [muted]);
 
-  const emit = useCallback((text: string) => {
+  /** The audio heard since the last sentence, as WAV — or undefined. */
+  const takeRing = useCallback((): string | undefined => {
+    const chunks = ringRef.current;
+    ringRef.current = [];
+    ringLenRef.current = 0;
+    const rate = ctxRef.current?.sampleRate;
+    if (!chunks.length || !rate) return undefined;
+    const merged = new Float32Array(chunks.reduce((n, c) => n + c.length, 0));
+    let off = 0;
+    for (const c of chunks) { merged.set(c, off); off += c.length; }
+    return encodeWavBase64(downsample(merged, rate, TARGET_RATE), TARGET_RATE);
+  }, []);
+
+  const emit = useCallback((text: string, audio?: string) => {
     const t = text.trim();
     if (!t) return;
     const now = Date.now();
@@ -156,7 +180,7 @@ export function useVoiceInput({ onFinal, muted = false }: Options): VoiceInput {
     lastSentRef.current = t;
     lastSentAtRef.current = now;
     setInterim("");
-    onFinalRef.current(t);
+    onFinalRef.current(t, audio);
   }, []);
 
   // ── fallback: ship one utterance to the backend ───────────────────────────
@@ -178,7 +202,7 @@ export function useVoiceInput({ onFinal, muted = false }: Options): VoiceInput {
     try {
       const b64 = encodeWavBase64(downsample(merged, rate, TARGET_RATE), TARGET_RATE);
       const res = await api.transcribe(b64);
-      if (res.text) emit(res.text);
+      if (res.text) emit(res.text, b64);
       else if (res.error) setError(res.error);
       else setError("");
     } catch {
@@ -207,6 +231,8 @@ export function useVoiceInput({ onFinal, muted = false }: Options): VoiceInput {
     streamRef.current = null;
 
     chunksRef.current = [];
+    ringRef.current = [];
+    ringLenRef.current = 0;
     speakingRef.current = false;
     setLevel(0);
     setInterim("");
@@ -266,7 +292,7 @@ export function useVoiceInput({ onFinal, muted = false }: Options): VoiceInput {
         let live = "";
         for (let i = ev.resultIndex; i < ev.results.length; i++) {
           const r = ev.results[i];
-          if (r.isFinal) emit(r[0].transcript);
+          if (r.isFinal) emit(r[0].transcript, takeRing());
           else live += r[0].transcript;
         }
         setInterim(live);
@@ -307,9 +333,25 @@ export function useVoiceInput({ onFinal, muted = false }: Options): VoiceInput {
     const proc = ctx.createScriptProcessor(4096, 1, 1);
     proc.onaudioprocess = (ev) => {
       if (!activeRef.current) return;
-      if (recogRef.current || mutedRef.current) return; // Web Speech owns it
-
+      if (mutedRef.current) {
+        // AURA is talking — whatever the mic hears now is her, not the owner.
+        ringRef.current = [];
+        ringLenRef.current = 0;
+        return;
+      }
       const input = ev.inputBuffer.getChannelData(0);
+      if (recogRef.current) {
+        // Web Speech owns transcription; just keep the recent audio around
+        // so the sentence it recognises can be voice-checked.
+        ringRef.current.push(new Float32Array(input));
+        ringLenRef.current += input.length;
+        const cap = (ctx.sampleRate * VOICE_ID_MS) / 1000;
+        while (ringLenRef.current > cap && ringRef.current.length > 1) {
+          ringLenRef.current -= ringRef.current.shift()!.length;
+        }
+        return;
+      }
+
       let sum = 0;
       for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
       const rms = Math.sqrt(sum / input.length);
@@ -357,7 +399,7 @@ export function useVoiceInput({ onFinal, muted = false }: Options): VoiceInput {
       setLevel(Math.min(1, Math.sqrt(sum / bins.length) * 3.2));
     };
     rafRef.current = requestAnimationFrame(tick);
-  }, [emit, flushUtterance, teardown]);
+  }, [emit, flushUtterance, takeRing, teardown]);
 
   const stop = useCallback(() => { teardown(); }, [teardown]);
   const toggle = useCallback(() => {

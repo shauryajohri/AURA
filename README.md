@@ -314,10 +314,11 @@ python test_memory.py                 # durable facts + context
 python test_engine.py                 # routing + intent
 python test_quests.py                 # quests, verification, pressure
 python test_engagement.py             # when she speaks
+python tests/test_proactive_error.py  # an error left on screen gets an offer of help
 python test_error_intelligence.py     # error KB (35 asserts)
 python test_developer_state.py        # session awareness (26 asserts)
 python test_screen_reading.py         # OCR, language detection
-python tests/test_domain_foundation.py    # brain e2e on this repo
+python tests/test_domain_foundation.py    # brain e2e on this repo, every commit + its files
 python tests/test_domain_api_contract.py  # every endpoint shape the UI reads
 python tests/test_idea_capture.py          # conversation → knowledge
 
@@ -351,6 +352,7 @@ cd frontend && npx tsc --noEmit       # frontend typecheck
 | GitHub import says not connected | Set `GITHUB_CLIENT_ID`/`SECRET`, then authorise in Domain → Settings → Connectors |
 | Blank Domain background | `frontend/public/domain.mp4` missing — it falls back to a gradient |
 | She talks about the wrong project | The brain has no project yet: Domain → Projects → import your folder |
+| A project shows only a few commits and no files in its Knowledge Graph | It was imported while git history was mis-read. Dashboard → **⎇ Sync git** adds the missing commits and their files; the few commits it already had keep no file links |
 
 ---
 

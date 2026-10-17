@@ -50,6 +50,20 @@ export interface ActivityEvent {
   ts: number;
 }
 
+// AURA put the conversation in a room (server.py _route_room), or a room was
+// entered from the picker (`auto: false`). Filing the open chat keeps it open;
+// `moved` means the active chat changed, and `messages` is that chat's
+// transcript from before the message that caused it.
+export interface RoomEvent {
+  room_id: number;
+  chat_id: number;
+  from_room_id?: number | null;
+  auto: boolean;
+  moved?: boolean;
+  note: string;
+  messages?: { role: string; text: string; created_at: string | null }[];
+}
+
 // Server -> Client
 export type ServerMessage =
   | { type: "state"; payload: { state: AuraState } }
@@ -63,6 +77,7 @@ export type ServerMessage =
   | { type: "activity"; payload: ActivityEvent }
   | { type: "error"; payload: { message: string } }
   | { type: "guard"; payload: GuardDecision }
+  | { type: "room"; payload: RoomEvent }
   | { type: "pong" };
 
 // Buddy Lock's verdict on one message (server.py _guarded_dispatch).

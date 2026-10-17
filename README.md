@@ -90,6 +90,14 @@ Reasoning models leak their deliberation as ordinary content ("So answer: …", 
 
 Fenced code is lifted out before filtering and restored byte-for-byte — a filter that flattens a C++ answer into one line is worse than the leak.
 
+### Rooms: what a chat is about
+
+A chat is a boundary; a **room** (Coding, Japanese Study, Personal, or one you make) says what it's about, and every chat in a room answers with that room's brief. Before each message, `core/room_router.py` scores it against every room's keywords, name and topic:
+
+- **A message stays in the chat you typed it into.** If that chat isn't in a room yet (a fresh **+ New chat**, say) and the message clearly belongs to one, the chat is filed there and she says so.
+- **A chat you opened yourself** (+ New chat, one picked from the list, a room you entered) is never swapped for another. Only a chat you didn't pick this run (the one left open from last time, or one she moved you into) can move to another room's latest chat; the dock then shows that chat's history and a note.
+- Slash commands and `/prompt` lines never file or move anything.
+
 ---
 
 ## Buddy Lock — AURA only answers her buddy
@@ -309,6 +317,7 @@ set PYTHONPATH=.                      # Windows;  export PYTHONPATH=. on Unix
 python test_work_recall.py            # project memory in the chat
 python test_guard.py                  # Buddy Lock: policy, passes, gate (+ real face/voice samples)
 python tests/test_local_auth.py       # launch token: /api/* and /ws refuse other pages
+python tests/test_room_routing.py     # rooms: a message stays in the chat it was typed into
 python test_reasoning_leak.py         # chain-of-thought never reaches the user
 python test_memory.py                 # durable facts + context
 python test_engine.py                 # routing + intent

@@ -9,3 +9,8 @@ websockets
 python-docx
 openpyxl
 python-pptx
+
+# Buddy Lock (face + voice ID) — see requirements.txt
+opencv-python-headless>=4.8
+sherpa-onnx
+numpy

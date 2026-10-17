@@ -92,6 +92,35 @@ Fenced code is lifted out before filtering and restored byte-for-byte — a filt
 
 ---
 
+## Buddy Lock — AURA only answers her buddy
+
+Siri knows your voice. AURA knows your face *and* your voice — and once Buddy Lock is on, she doesn't talk to anyone else unless you say so.
+
+| Situation | What AURA does |
+|---|---|
+| She opens | Lock screen until she sees you. The app isn't even mounted behind it. |
+| You **type** | The camera frame taken the instant you hit Enter goes with the message. You in frame → answered. |
+| You **speak** | Your voice is the check (speaker ID). A clip too short to judge (*"yes"*) falls back to the camera. |
+| You're not in frame | No answer — no model call, nothing spoken, just a note in the log saying why. |
+| A friend uses it **while you're there** | Answered (as a guest if their voice clearly isn't yours). |
+| You say *"AURA, you can help him"* | A guest pass (30 min default, *"for an hour"* works) bound to **that person's face**. Nobody in frame yet? It binds to the next new face — and only that one. *"Stop helping him"* ends it. |
+| You walk away | Locks after 90 s — or within ~5 s if the camera sees someone else take your seat. |
+| Camera can't see you | Backup **PIN** or *"Use my voice"* on the lock screen: a 10-minute session, tied to whoever is at the camera — it ends if someone else sits down. |
+
+**Guests get real help, not your life.** They're answered by an isolated lane (`core/guard/guest_lane.py`): no durable facts, no past chats, no project memory, no screen reading, no app/task/quest commands, and nothing they say is written to your memory. Memory, Chats, Tasks, Settings and the Domain show *"That's Shaurya's"*; the REST API returns 403 for anything but the chat. AURA's proactive lines are muted too — they're built from your day, and only speak up while you're around.
+
+**Set it up:** Settings → Security → *Set up Buddy Lock* (name → face, five poses → voice, three lines, optional → PIN → on). The first run downloads the three models (~80 MB) into `models/guard/`. Turning it off, re-enrolling, changing the PIN or granting a guest needs your face in the camera *at that moment*, or the PIN.
+
+**The camera stays on while Buddy Lock is on** — including while AURA is minimised, because that's when her proactive help matters and she mutes it the moment she can't tell you're there. Turn the lock off and the camera turns off.
+
+**What's stored:** `memory/guard/buddy.json` (gitignored) — face/voice *embeddings* and a salted PBKDF2 PIN hash. Frames and audio are processed in memory and dropped.
+
+**How it decides** (`core/guard/policy.py`): face = OpenCV YuNet + SFace (owner ≥ 0.42 cosine to a cold start; 0.363 right after a clear sighting, so glancing at the keyboard doesn't lock you out). Voice = NeMo TitaNet-small via sherpa-onnx, picked over five other speaker models on real recordings: the owner scored 0.69–0.88, impostors ≤ 0.40; threshold 0.55, and anything under 1 s of actual speech abstains. Tunable in the vault's `tuning` block.
+
+**Limits, honestly:** there's no liveness check — a good photo or a recording of you could fool it. It protects AURA (her answers, her UI and API), not your disk: anyone with your Windows account can delete the vault file. Lock your OS too.
+
+---
+
 ## AURA Domain — the development OS
 
 Enter it from Sanctuary's **Enter Workspace** button (portal transition), or hit any section in the left nav.
@@ -145,6 +174,20 @@ POST /api/v3/explain · /api/v3/build              error intelligence
 GET  /health · /api/status
 ```
 
+**Buddy Lock** (`guard_api.py`) — frames are base64 JPEG, audio base64 16 kHz WAV
+
+```
+GET    /api/guard/status                    who AURA is serving: owner | guest | locked | open
+POST   /api/guard/prepare                   load (first time: download) the models
+POST   /api/guard/frame                     camera frame → presence
+POST   /api/guard/unlock/pin · unlock/voice 10-minute session
+POST   /api/guard/enroll/face · enroll/voice · pin · enable · disable · reset
+POST   /api/guard/guest · DELETE            guest pass on / off
+POST   /api/guard/lock
+```
+
+With the lock on, every other `/api/*` route answers 423 when locked and 403 to guests (except the few the chat needs), and every `/ws` message is checked before the brain sees it.
+
 **Domain — machine**
 
 ```
@@ -195,6 +238,13 @@ core/
   domain_fs.py         sandboxed filesystem
   domain_shell.py      persistent shell sessions
   identity.py          who AURA is
+  guard/               BUDDY LOCK — who AURA is talking to
+    policy.py          the decision: owner / guest / not answered
+    face.py · voice.py recognition engines (OpenCV, sherpa-onnx)
+    vault.py           enrolled embeddings + PIN hash (memory/guard/)
+    commands.py        "you can help him" / "stop helping him"
+    guest_lane.py      how guests are answered (no owner memory)
+guard_api.py           Buddy Lock REST + the gate in front of /api/*
   domain/              THE PROJECT BRAIN
     brain_store.py     SQLite knowledge graph (nodes + typed edges)
     project_brain.py   high-level API: record, import, why(), timeline()
@@ -248,6 +298,7 @@ All standalone — no pytest, no fixtures, just run them.
 set PYTHONPATH=.                      # Windows;  export PYTHONPATH=. on Unix
 
 python test_work_recall.py            # project memory in the chat
+python test_guard.py                  # Buddy Lock: policy, passes, gate (+ real face/voice samples)
 python test_reasoning_leak.py         # chain-of-thought never reaches the user
 python test_memory.py                 # durable facts + context
 python test_engine.py                 # routing + intent
@@ -281,6 +332,10 @@ cd frontend && npx tsc --noEmit       # frontend typecheck
 | Frontend loads, nothing responds | Backend on a different port — check `8760` |
 | `npm run dev` can't find electron | `npm install` inside `frontend/` |
 | Models all locked / no replies | No API key in `.env`, or every model rate-limited |
+| Lock screen won't recognise you | Light on your face, sit where you enrolled; Settings → Security → Re-enroll. PIN gets you in meanwhile |
+| Lock screen says the camera is blocked | Windows Settings → Privacy & security → Camera → turn on *Let desktop apps access your camera*; close other apps holding it |
+| "opencv isn't installed" in Buddy Lock | `pip install opencv-python-headless sherpa-onnx` (in AURA's venv) |
+| Locked out, PIN forgotten | Delete `memory/guard/buddy.json` — Buddy Lock switches off and you can set it up again |
 | GitHub import says not connected | Set `GITHUB_CLIENT_ID`/`SECRET`, then authorise in Domain → Settings → Connectors |
 | Blank Domain background | `frontend/public/domain.mp4` missing — it falls back to a gradient |
 | She talks about the wrong project | The brain has no project yet: Domain → Projects → import your folder |

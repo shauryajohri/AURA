@@ -3,6 +3,7 @@ import { useAuraSocket } from "./hooks/useAuraSocket";
 import { useBuddyRelay } from "./hooks/useBuddyRelay";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 import { useSettingsStore } from "./stores/settingsStore";
+import { useGuardStore } from "./stores/guardStore";
 import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
 import Stage from "./components/Stage";
@@ -24,6 +25,18 @@ const ModelsPage = lazy(() => import("./views/ModelsPage"));
 const SettingsView = lazy(() => import("./views/SettingsView"));
 const LabsPage = lazy(() => import("./views/LabsPage"));
 const ChatsPage = lazy(() => import("./views/ChatsPage"));
+
+/** A guest (Buddy Lock) gets AURA's conversation, not the owner's life. */
+function GuestOnly({ owner, onGoHome }: { owner: string; onGoHome: () => void }) {
+  return (
+    <div className="guestonly">
+      <span className="guestonly__icon">{"🔒"}</span>
+      <h2>That's {owner || "my buddy"}'s</h2>
+      <p>You're here as a guest — I can help you in the chat, but this page belongs to {owner || "them"}.</p>
+      <button onClick={onGoHome}>Back to the chat</button>
+    </div>
+  );
+}
 
 /** Shown for the instant a lazy page is fetched — a calm pulse, never a jolt. */
 function PageLoading() {
@@ -60,6 +73,8 @@ export default function App() {
   const [collapsed, setCollapsed] = useLocalStorage<boolean>("aura.sidebarMin", false);
   const [rawView, setView] = useLocalStorage<string>("aura.view", "home");
   const view = PAGES.includes(rawView) ? rawView : LEGACY[rawView] ?? "home";
+  const guest = useGuardStore((s) => s.status?.role === "guest");
+  const ownerName = useGuardStore((s) => s.status?.owner_name ?? "");
 
   // Background video health. A failure swaps in the CSS starfield, but a
   // transient decoder hiccup shouldn't cost the universe until restart —
@@ -91,13 +106,17 @@ export default function App() {
   // ---- AURA Domain: the workspace beyond the portal -----------------------
   const [domainOpen, setDomainOpen] = useState(false);
   const [portal, setPortal] = useState<null | "in" | "out">(null);
-  const enterDomain = useCallback(() => setPortal("in"), []);
+  // Guests chat on Home; the Domain (the owner's code, terminal, projects)
+  // stays shut — and an open one closes if the role drops to guest.
+  const enterDomain = useCallback(() => { if (!guest) setPortal("in"); }, [guest]);
+  useEffect(() => { if (guest && domainOpen) setDomainOpen(false); }, [guest, domainOpen]);
   const exitDomain = useCallback(() => setPortal("out"), []);
   const portalDone = useCallback(() => setPortal(null), []);
 
   const goHome = useCallback(() => setView("home"), [setView]);
 
   const renderPage = () => {
+    if (guest) return <GuestOnly owner={ownerName} onGoHome={goHome} />;
     switch (view) {
       case "chats":
         // Same socket as the dock — one conversation, two places to see it.

@@ -13,9 +13,16 @@ Surfaces
 3. REST API over memory/store.py + core.model_lock for the sidebar views:
    /api/tasks, /api/models, /api/facts, /api/status.
 
+Auth: every /api/* call needs the header `X-Aura-Token`, and /ws needs the
+subprotocols ["aura", "aura-token.<token>"]. The token is new on every start
+(see local_auth.py); AURA's window gets it from Electron, never from the API.
+
 WebSocket protocol (JSON over /ws)
 ----------------------------------
-Client -> Server: {"type":"message","payload":{"text":"..."}} | {"type":"ping"}
+Client -> Server: {"type":"message","payload":{"text":"...","via":"text|voice",
+                    "frame":"<b64 jpeg>","audio":"<b64 wav>"}} | {"type":"ping"}
+    (frame/audio are Buddy Lock evidence — see core/guard; both optional
+     until an owner is enrolled)
 Server -> Client:
     {"type":"state","payload":{"state":"idle|thinking|speaking"}}
     {"type":"chunk","payload":{"text":"..."}}
@@ -24,6 +31,8 @@ Server -> Client:
     {"type":"mode","payload":{"mode":"CHAT|CODE|RESEARCH|DISCUSSION|PLAN"}}
     {"type":"presence","payload":{"state":"working|idle|afk"}}
     {"type":"error","payload":{"message":"..."}}
+    {"type":"guard","payload":{"event":"decision","allowed":bool,"role":"owner|guest|null",
+                               "reason":"...","text":"why not answered","status":{...}}}
 
 Run:  python server.py    (uvicorn on 127.0.0.1:8760)
 """
@@ -85,6 +94,7 @@ async def _lifespan(app: FastAPI):
     """Modern replacement for the deprecated @app.on_event('startup')."""
     global MAIN_LOOP
     MAIN_LOOP = asyncio.get_running_loop()
+    local_auth.write_token_file()
     _init_director()
     _init_v3()
     _start_auto_chat()
@@ -93,9 +103,27 @@ async def _lifespan(app: FastAPI):
 
 
 app = FastAPI(title="AURA Bridge", lifespan=_lifespan)
+
+# Buddy Lock: the REST API only serves the owner (or, for a few chat-only
+# routes, a guest they vouched for). Registered BEFORE CORS on purpose — the
+# middleware added last is outermost, and CORS has to wrap the gate so a 423
+# still carries the headers the renderer needs to read it.
+from guard_api import GuardMiddleware, router as guard_router  # noqa: E402
+
+# Launch token: /api/* and /ws only obey AURA's own window, not every web page
+# open in a browser on this laptop (see local_auth.py). It sits outside Buddy
+# Lock so a request without the token never even reaches the camera check.
+import local_auth  # noqa: E402
+
+app.add_middleware(GuardMiddleware)
+app.add_middleware(local_auth.LaunchTokenMiddleware)
 app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+    CORSMiddleware,
+    allow_origins=local_auth.ALLOWED_ORIGINS,
+    allow_methods=["*"],
+    allow_headers=["Content-Type", "X-Aura-Token"],
 )
+app.include_router(guard_router)
 
 # Domain routes (filesystem, terminal, GitHub, OAuth connectors) live in their
 # own module — if one of them fails to import, the brain still comes up.
@@ -145,6 +173,13 @@ async def _safe_send(ws: WebSocket, data: str) -> None:
 def broadcast(msg: dict[str, Any]) -> None:
     if MAIN_LOOP is None:
         return
+    # Buddy Lock: everything broadcast here — quest progress, V3 error
+    # explanations, activity lines, presence, proactive pushes — is built from
+    # the owner's day. While the lock says the owner isn't around, nobody else
+    # at the keyboard (or on a socket) gets it, same as the 423 on REST.
+    from core.guard import owner_present
+    if not owner_present():
+        return
     data = json.dumps(msg)
     for ws in list(CLIENTS):
         asyncio.run_coroutine_threadsafe(_safe_send(ws, data), MAIN_LOOP)
@@ -176,7 +211,14 @@ def _start_auto_chat() -> None:
     except Exception as e:  # noqa: BLE001
         print(f"[AURA bridge] audio prewarm skipped: {e}")
 
+    # Buddy Lock: AURA only speaks up on her own when her buddy is around. A
+    # proactive line is built from the owner's day — their quests, their
+    # errors, their screen — and is nobody else's business.
+    from core.guard import owner_present
+
     def speak_fn(text: str) -> None:
+        if not owner_present():
+            return
         try:
             speak_response(text, mode="CHAT")
         except Exception as e:  # noqa: BLE001
@@ -1375,10 +1417,77 @@ async def _dispatch(ws: WebSocket, text: str) -> None:
     await _run_streaming(ws, lambda oc, occ: process_streaming(body, on_chunk=oc, on_code=occ, intent_hint=intent))
 
 
+async def _say_locally(ws: WebSocket, text: str, source: str) -> None:
+    """A reply that never touched a model (guard commands): show it, say it."""
+    await _send(ws, {"type": "push", "payload": {"text": text, "source": source}})
+    if _voice_is_on():
+        await _send(ws, {"type": "state", "payload": {"state": "speaking"}})
+        try:
+            await asyncio.get_running_loop().run_in_executor(None, lambda: _speak_reply(text))
+        except Exception:  # noqa: BLE001
+            traceback.print_exc()
+    await _send(ws, {"type": "state", "payload": {"state": "idle"}})
+
+
+async def _guarded_dispatch(ws: WebSocket, text: str, payload: dict[str, Any],
+                            session: dict[str, Any] | None = None) -> None:
+    """Buddy Lock in front of every chat message.
+
+    Typed messages carry a camera frame, voice messages carry the utterance
+    audio (see core/guard/policy.py for how each is judged). `session` is this
+    connection's own evidence record: a message is never judged on what
+    another connection (or the presence loop) showed the camera. The owner goes
+    on to the full brain; a guest the owner vouched for gets the isolated
+    guest lane; anyone else gets no answer at all — just a notice in the UI,
+    never a model call and never a spoken word.
+    """
+    from core.guard import Decision, get_guard
+    from guard_api import b64bytes
+
+    try:
+        g = get_guard()
+        active = g.active
+    except Exception:  # noqa: BLE001 - a broken guard fails closed
+        traceback.print_exc()
+        g, active = None, True
+
+    if active:
+        via = "voice" if payload.get("via") == "voice" else "text"
+        try:
+            d = await asyncio.to_thread(
+                g.authorize, text, via, b64bytes(payload.get("frame")),
+                b64bytes(payload.get("audio")), session)
+        except Exception:  # noqa: BLE001
+            traceback.print_exc()
+            d = Decision(False, None, "error", "Buddy Lock hit an error, so I'm not answering.")
+        print(f"[Guard] {via} message → {d.role or 'NOT ANSWERED'} ({d.reason}) {d.detail}")
+        await _send(ws, {"type": "guard", "payload": {
+            "event": "decision", "allowed": d.allowed, "role": d.role, "reason": d.reason,
+            "text": "" if d.allowed else d.message,
+            "status": g.status() if g else None,
+        }})
+        if not d.allowed:
+            await _send(ws, {"type": "state", "payload": {"state": "idle"}})
+            return
+        if d.handled:
+            await _say_locally(ws, d.message, "guard")
+            return
+        if d.role == "guest":
+            from core.guard import guest_lane
+            owner = g.owner_name()
+            await _run_streaming(
+                ws, lambda oc, occ: guest_lane.answer(text, owner, on_chunk=oc, on_code=occ))
+            return
+
+    await _dispatch(ws, text)
+
+
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
-    await ws.accept()
+    # The launch token was checked by LaunchTokenMiddleware before we got here.
+    await ws.accept(subprotocol=local_auth.accept_subprotocol(ws.scope))
     CLIENTS.add(ws)
+    guard_session: dict[str, Any] = {}  # Buddy Lock evidence for THIS socket only
     await _send(ws, {"type": "state", "payload": {"state": "idle"}})
     await _send(ws, {"type": "mode", "payload": {"mode": getattr(DIRECTOR, "mode", "CHAT")}})
 
@@ -1398,11 +1507,12 @@ async def ws_endpoint(ws: WebSocket) -> None:
             if mtype == "ping":
                 await _send(ws, {"type": "pong"})
             elif mtype == "message":
-                text = (data.get("payload") or {}).get("text", "").strip()
+                payload = data.get("payload") or {}
+                text = (payload.get("text") or "").strip()
                 if not text:
                     await _send(ws, {"type": "error", "payload": {"message": "empty message"}})
                 else:
-                    await _dispatch(ws, text)
+                    await _guarded_dispatch(ws, text, payload, guard_session)
             else:
                 await _send(ws, {"type": "error", "payload": {"message": f"unknown type: {mtype}"}})
     except WebSocketDisconnect:

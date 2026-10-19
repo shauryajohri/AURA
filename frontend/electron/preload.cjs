@@ -42,4 +42,7 @@ contextBridge.exposeInMainWorld("aura", {
     openMain: () => ipcRenderer.send("buddy:open-main"),
     menu: (opts) => ipcRenderer.send("buddy:menu", opts),
   },
+  // The brain's launch token (local_auth.py). Asked for again whenever the
+  // brain refuses the current one — it changes every time the brain restarts.
+  getToken: () => ipcRenderer.invoke("aura:token"),
 });

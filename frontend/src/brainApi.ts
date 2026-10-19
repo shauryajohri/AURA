@@ -8,6 +8,8 @@
 // Every shape here mirrors what core/domain returns verbatim — nodes carry a
 // free-form `meta`, so views read meta fields defensively rather than assuming.
 // ============================================================================
+import { assertNotRefused } from "./guardApi";
+import { authFetch } from "./auth";
 const BASE = "http://127.0.0.1:8760";
 
 export type NodeType =
@@ -174,10 +176,11 @@ export interface GhRepo {
 }
 
 async function j<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(BASE + path, {
+  const res = await authFetch(BASE + path, {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
+  assertNotRefused(res);
   return (await res.json()) as T;
 }
 

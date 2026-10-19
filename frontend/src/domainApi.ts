@@ -1,5 +1,7 @@
 // REST client for the Domain's backend: real filesystem, real terminal,
 // GitHub project vitals, and the OAuth connectors.
+import { assertNotRefused } from "./guardApi";
+import { authFetch } from "./auth";
 const BASE = "http://127.0.0.1:8760";
 
 export interface FsEntry {
@@ -212,10 +214,11 @@ export type OfficeEdits =
   | { slides: Record<string, Record<string, string>> };
 
 async function j<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(BASE + path, {
+  const res = await authFetch(BASE + path, {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
+  assertNotRefused(res);
   return res.json() as Promise<T>;
 }
 

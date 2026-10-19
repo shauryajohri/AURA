@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AuraState, ChatTurn, ConnStatus } from "../types";
+import type { AuraState, ChatTurn, ConnStatus, SendOptions } from "../types";
 import { useVoiceInput } from "../hooks/useVoiceInput";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useSettingsStore } from "../stores/settingsStore";
+import { useGuardStore } from "../stores/guardStore";
 import ChatHistory from "./ChatHistory";
 import RoomPicker from "./RoomPicker";
 import MicCheck from "./MicCheck";
@@ -19,7 +20,7 @@ import { renderMarkdown } from "./Markdown";
 interface Props {
   status: ConnStatus;
   turns: ChatTurn[];
-  onSend: (text: string) => void;
+  onSend: (text: string, opts?: SendOptions) => void;
   /** Mute the mic while AURA is talking so she can't hear herself. */
   auraState?: AuraState;
   /** Replace the transcript when a saved chat is reopened. */
@@ -39,6 +40,11 @@ const DEFAULT_DOCK_VH = 46;
 
 export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns, onClearTurns }: Props) {
   const [historyOpen, setHistoryOpen] = useState(false);
+  // Buddy Lock guest: the owner said AURA can help them. They chat; the
+  // owner's saved chats and rooms stay out of sight.
+  const guest = useGuardStore((s) => s.status?.role === "guest");
+  const guestPass = useGuardStore((s) => s.status?.guest ?? null);
+  const ownerName = useGuardStore((s) => s.status?.owner_name ?? "");
   const [input, setInput] = useState("");
   const [logOpen, setLogOpen] = useLocalStorage<boolean>("aura.dockLog", true);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -90,7 +96,9 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
   const [showCheck, setShowCheck] = useState(false);
 
   const voice = useVoiceInput({
-    onFinal: useCallback((text: string) => onSend(text), [onSend]),
+    // Voice carries its audio so Buddy Lock can check it's the owner talking.
+    onFinal: useCallback(
+      (text: string, audio?: string) => onSend(text, { via: "voice", audio }), [onSend]),
     muted: auraState === "speaking",
   });
   const { toggle: toggleVoice, stop: stopVoice, listening } = voice;
@@ -150,8 +158,18 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
         <span className="dock__gripbar" />
       </div>
 
+      {guest && (
+        <div className="guestbar" role="status">
+          <span className="guestbar__dot" />
+          Guest mode — {ownerName || "my buddy"} said I can help you
+          {guestPass && guestPass.expires_in > 0 && (
+            <span className="guestbar__time"> · ends in {Math.ceil(guestPass.expires_in / 60)} min</span>
+          )}
+        </div>
+      )}
+
       <ChatHistory
-        open={historyOpen}
+        open={historyOpen && !guest}
         onClose={() => setHistoryOpen(false)}
         onOpenChat={(msgs) => onLoadTurns?.(msgs)}
         onNewChat={() => onClearTurns?.()}
@@ -240,6 +258,7 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
           {logOpen ? "▾" : "▴"}
         </button>
 
+        {!guest && (<>
         <button
           type="button"
           className={"composer__hist" + (historyOpen ? " composer__hist--on" : "")}
@@ -256,6 +275,7 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
           onLoad={(msgs) => onLoadTurns?.(msgs)}
           onClear={() => onClearTurns?.()}
         />
+        </>)}
 
         <button
           type="button"

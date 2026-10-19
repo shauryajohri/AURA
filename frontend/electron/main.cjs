@@ -5,6 +5,7 @@
 // puts her back to sleep (the brain is killed with the app).
 const { app, BrowserWindow, ipcMain, Menu, screen, shell } = require("electron");
 const { spawn } = require("child_process");
+const crypto = require("crypto");
 const path = require("path");
 const net = require("net");
 const fs = require("fs");
@@ -16,6 +17,26 @@ app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 
 const REPO_ROOT = path.join(__dirname, "..", "..");
 const BRAIN_PORT = 8760;
+
+// ---------------------------------------------------------------------------
+// Launch token. The brain only obeys requests that carry it (local_auth.py),
+// so web pages open in a browser can't drive AURA through 127.0.0.1:8760.
+// If we start the brain we choose the token and pass it in; if a brain is
+// already running (dev, or you started server.py yourself) it wrote its own
+// token to this file.
+// ---------------------------------------------------------------------------
+const TOKEN_FILE = path.join(REPO_ROOT, "memory", "session.token");
+let spawnedToken = null;
+let brainDecided = Promise.resolve();
+
+function launchToken() {
+  if (spawnedToken) return spawnedToken;
+  try {
+    return fs.readFileSync(TOKEN_FILE, "utf8").trim();
+  } catch {
+    return ""; // brain not up yet — the renderer asks again when it retries
+  }
+}
 
 // ---------------------------------------------------------------------------
 // The brain: spawn python server.py unless one is already listening.
@@ -31,22 +52,28 @@ function pythonExe() {
 }
 
 function startBrainIfNeeded() {
+  let decided;
+  brainDecided = new Promise((resolve) => { decided = resolve; });
   const probe = net.connect({ port: BRAIN_PORT, host: "127.0.0.1" });
-  probe.once("connect", () => probe.destroy()); // already awake (dev server running)
+  probe.once("connect", () => { probe.destroy(); decided(); }); // already awake (dev server running)
   probe.once("error", () => {
     try {
       const logDir = path.join(REPO_ROOT, "logs");
       fs.mkdirSync(logDir, { recursive: true });
       const log = fs.openSync(path.join(logDir, "brain.log"), "a");
+      const token = crypto.randomBytes(32).toString("base64url");
       brainProc = spawn(pythonExe(), ["server.py"], {
         cwd: REPO_ROOT,
         stdio: ["ignore", log, log],
         windowsHide: true,
+        env: { ...process.env, AURA_TOKEN: token },
       });
-      brainProc.on("exit", () => { brainProc = null; });
+      spawnedToken = token;
+      brainProc.on("exit", () => { brainProc = null; spawnedToken = null; });
     } catch (err) {
       console.error("[AURA] could not start the brain:", err);
     }
+    decided();
   });
 }
 
@@ -311,6 +338,18 @@ function openExternal(raw) {
 ipcMain.on("win:minimize", (e) => BrowserWindow.fromWebContents(e.sender)?.minimize());
 ipcMain.on("win:close", (e) => BrowserWindow.fromWebContents(e.sender)?.close());
 ipcMain.on("shell:open-external", (_e, url) => openExternal(url));
+// Only AURA's own pages may ask for the token — never a page that somehow
+// ended up in a window (will-navigate already keeps the app on its own UI).
+ipcMain.handle("aura:token", async (e) => {
+  let from = "";
+  try {
+    from = new URL(e.senderFrame?.url || "").href;
+  } catch { /* no frame */ }
+  const ours = isDev ? from.startsWith("http://localhost:5173/") : from.startsWith("file:///");
+  if (!ours) return "";
+  await brainDecided;
+  return launchToken();
+});
 
 app.whenReady().then(() => {
   if (!isDev) startBrainIfNeeded(); // in dev you run server.py yourself

@@ -3,6 +3,7 @@ import { useClock } from "../hooks/useClock";
 import { useCoreStore } from "../stores/coreStore";
 import { usePlanetStore } from "../stores/planetStore";
 import { useNotifyStore } from "../stores/notifyStore";
+import { useGuardStore } from "../stores/guardStore";
 import { MODELS } from "../data/models";
 
 const KIND_ICON: Record<string, string> = {
@@ -27,6 +28,8 @@ interface Props {
 
 export default function TopBar({ mode = "CHAT" }: Props) {
   const { time, date, greeting } = useClock();
+  // A Buddy Lock guest isn't the owner — don't greet them by his name.
+  const guest = useGuardStore((s) => s.status?.role === "guest");
   const [focus, setFocus] = useState(true);
 
   const menuOpen = useCoreStore((s) => s.menuOpen);
@@ -65,7 +68,7 @@ export default function TopBar({ mode = "CHAT" }: Props) {
     <header className="topbar">
       <div className="topbar__greet">
         <h2>
-          {greeting}, {USER} <span className="topbar__spark">{"✦"}</span>
+          {greeting}, {guest ? "there" : USER} <span className="topbar__spark">{"✦"}</span>
           {mode && mode !== "CHAT" && <span className="modechip">{mode} mode</span>}
         </h2>
         <p>I'm here, ready to help you achieve more today.</p>

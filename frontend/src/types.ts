@@ -62,12 +62,40 @@ export type ServerMessage =
   | { type: "quest"; payload: QuestEvent }
   | { type: "activity"; payload: ActivityEvent }
   | { type: "error"; payload: { message: string } }
+  | { type: "guard"; payload: GuardDecision }
   | { type: "pong" };
+
+// Buddy Lock's verdict on one message (server.py _guarded_dispatch).
+export interface GuardDecision {
+  event: "decision";
+  allowed: boolean;
+  role: "owner" | "guest" | null;
+  reason: string;
+  /** Why it wasn't answered — empty when allowed. */
+  text: string;
+  status: import("./guardApi").GuardStatus | null;
+}
 
 // Client -> Server
 export type ClientMessage =
-  | { type: "message"; payload: { text: string } }
+  | {
+      type: "message";
+      payload: {
+        text: string;
+        /** Buddy Lock evidence: how it was said, a camera frame (b64 JPEG)
+         *  and, for voice, the utterance (b64 16 kHz WAV). */
+        via?: "text" | "voice";
+        frame?: string;
+        audio?: string;
+      };
+    }
   | { type: "ping" };
+
+export interface SendOptions {
+  via?: "text" | "voice";
+  /** The WAV the sentence was spoken in (voice only). */
+  audio?: string;
+}
 
 export type ConnStatus = "connecting" | "open" | "closed";
 
@@ -117,6 +145,8 @@ declare global {
       minimize?: () => void;
       close?: () => void;
       buddy?: BuddyBridge;
+      /** The brain's launch token (see auth.ts). */
+      getToken?: () => Promise<string>;
     };
   }
 }

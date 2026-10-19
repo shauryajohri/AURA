@@ -791,6 +791,8 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
 .bubble__src--curiosity { background: rgba(56, 225, 255, 0.16); color: var(--cyan); }
 .bubble__src--reply { background: rgba(139, 92, 255, 0.16); color: var(--violet-bright); }
 .bubble__src--error { background: rgba(232, 90, 90, 0.18); color: #e85a5a; }
+.bubble__src--locked { background: rgba(232, 90, 90, 0.14); color: #ff8f8f; }
+.bubble__src--guard { background: rgba(56, 225, 255, 0.14); color: var(--cyan); }
 /* `normal`, not `pre-wrap`: the markdown renderer emits real block elements
    now, and pre-wrap on the container turned the newlines BETWEEN those blocks
    into visible blank gaps. Wrapping is preserved per-paragraph below. */

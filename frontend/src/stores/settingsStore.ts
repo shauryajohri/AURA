@@ -40,9 +40,20 @@ const DEFAULTS: Settings = {
   "voice.noise_suppression": true,
   "autochat.enabled": true,
   "autochat.frequency": 40,
+  // Phone report — AURA rings you with a spoken progress report
+  "phone.enabled": false,
+  "phone.number": "",
+  "phone.daily": true,
+  "phone.daily_time": "09:00",
+  "phone.milestones": true,
+  "phone.meeting_alert": false,
+  "phone.meeting_lead": 15,
+  "phone.quiet_start": "22:00",
+  "phone.quiet_end": "08:00",
   // General / Appearance
   "general.start_minimized": false,
   "general.launch_on_boot": false,
+  "buddy.enabled": true,
   "anim.enabled": true,
   "anim.intensity": 70,
   "anim.reduced_motion": false,
@@ -59,6 +70,11 @@ const DEFAULTS: Settings = {
   "experimental.plugins": false,
   "experimental.cloud_sync": false,
 };
+
+/** A raw /api/settings response with any key the backend doesn't know yet
+ *  filled from DEFAULTS. SettingsOverlay picks each row's control by the
+ *  value's type, so a missing boolean would otherwise draw as a slider. */
+export const withDefaults = (s: Settings): Settings => ({ ...DEFAULTS, ...s });
 
 const num = (s: Settings, k: string, fallback: number): number => {
   const v = s[k];
@@ -131,6 +147,14 @@ function pushToVisualStores(s: Settings) {
   usePlanetStore.setState({ rings: bool(s, "planets.rings", true) ? 100 : 0 });
 }
 
+/** Tell Electron whether the desktop buddy may appear (a no-op in a browser).
+ *  Only sent for a value the user really holds — a successful load or an
+ *  edit — never the defaults an offline boot falls back to, so main.cjs's own
+ *  copy of the last choice stands until the brain answers. */
+function pushToBuddy(s: Settings) {
+  window.aura?.buddy?.setEnabled(bool(s, "buddy.enabled", true));
+}
+
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
   settings: { ...DEFAULTS },
   loaded: false,
@@ -140,8 +164,9 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   load: async () => {
     try {
       const s = await api.getSettings();
-      const merged = { ...DEFAULTS, ...s };
+      const merged = withDefaults(s);
       pushToVisualStores(merged);
+      pushToBuddy(merged);
       set({ settings: merged, loaded: true, offline: false, ...derive(merged) });
     } catch {
       // Brain offline — keep the defaults so the visuals still render.
@@ -153,6 +178,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     const merged = { ...get().settings, ...patch };
     // Apply first so the UI responds instantly, then persist.
     pushToVisualStores(merged);
+    if ("buddy.enabled" in patch) pushToBuddy(merged);
     set({ settings: merged, ...derive(merged) });
     try {
       await api.saveSettings(patch);

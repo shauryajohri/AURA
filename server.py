@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 import traceback
 import warnings
 from contextlib import asynccontextmanager
@@ -40,6 +41,17 @@ from typing import Any, Callable
 # pygame (pulled in by voice output) still imports pkg_resources — not our
 # code, not actionable here. Hide the warning before anything imports pygame.
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
+
+# Electron launches the brain with stdout redirected to logs/brain.log, and on
+# Windows a redirected stream is cp1252: the first "⚠" in a log line raised
+# UnicodeEncodeError and killed the chat turn that printed it — the model
+# fallback warning did exactly that, so a rate-limited model ended the reply
+# instead of falling back. A log line must never be able to break an answer.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001 — not a TextIOWrapper (e.g. under a test runner)
+        pass
 
 # ----------------------------------------------------------------------------
 # Windows asyncio noise: when a browser tab closes, the proactor transport
@@ -76,6 +88,7 @@ async def _lifespan(app: FastAPI):
     _init_director()
     _init_v3()
     _start_auto_chat()
+    _start_phone_reports()
     yield
 
 
@@ -187,6 +200,17 @@ def _start_auto_chat() -> None:
         traceback.print_exc()
 
     print("[AURA bridge] auto-chat loops started")
+
+
+def _start_phone_reports() -> None:
+    """Daily / milestone progress calls to the user's phone. Does nothing
+    until a number is saved and Twilio is configured."""
+    try:
+        from core import phone_report
+        phone_report.start_loop()
+        print("[AURA bridge] phone report scheduler started")
+    except Exception:  # noqa: BLE001
+        traceback.print_exc()
 
 
 def _init_v3() -> None:
@@ -577,6 +601,24 @@ async def api_save_settings(req: Request) -> dict[str, Any]:
         return {"ok": False, "error": "settings object required"}
     store.set_settings(patch)
     return {"ok": True, "settings": store.get_settings()}
+
+
+# ── Phone report: AURA rings you with a spoken progress report ──────────────
+# Schedule and number are ordinary settings (phone.*) saved through
+# /api/settings; these two routes are the preview and the "call me now".
+@app.get("/api/phone-report")
+async def api_phone_report() -> dict[str, Any]:
+    """What a call placed right now would say. Rings nothing."""
+    from core import phone_report
+    report = await asyncio.to_thread(phone_report.gather)
+    return {"status": phone_report.status(), "report": report,
+            "script": phone_report.script(report)}
+
+
+@app.post("/api/phone-report/call")
+async def api_phone_report_call() -> dict[str, Any]:
+    from core import phone_report
+    return await asyncio.to_thread(phone_report.place_call)
 
 
 
@@ -1246,6 +1288,20 @@ def _route_room(text: str) -> None:
 async def _dispatch(ws: WebSocket, text: str) -> None:
     """Route one user message through the Director, then act on the directive."""
     _route_room(text)
+
+    # "call me with my progress report" — an action, not something to discuss.
+    try:
+        from core import phone_report
+        wants_call = phone_report.is_call_request(text)
+    except Exception:  # noqa: BLE001
+        wants_call = False
+    if wants_call:
+        res = await asyncio.to_thread(phone_report.place_call)
+        reply = (f"Calling {res['to']} now with your report." if res.get("ok")
+                 else f"I couldn't place the call — {res.get('error')}.")
+        await _send(ws, {"type": "push", "payload": {"text": reply, "source": "reply"}})
+        await _send(ws, {"type": "state", "payload": {"state": "idle"}})
+        return
 
     if DIRECTOR is None:
         # Fallback: raw brain if the Director failed to init.

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { api } from "../../../api";
 import { NODE_META, whenLabel } from "../../../brainApi";
 import { useBrainStore } from "../../../stores/brainStore";
 import { useDomainStore } from "../../../stores/domainStore";
@@ -42,6 +43,17 @@ export default function BrainDashboard() {
     setTimeout(() => setNote(""), 6000);
   };
 
+  const callMe = async () => {
+    setNote("Placing the call…");
+    try {
+      const r = await api.callPhoneReport();
+      setNote(r.ok ? `Calling ${r.to} with your progress report.` : r.error ?? "The call couldn't be placed.");
+    } catch {
+      setNote("Couldn't reach the brain to place the call.");
+    }
+    setTimeout(() => setNote(""), 8000);
+  };
+
   return (
     <div className="brdash">
       <header className="brdash__head">
@@ -53,6 +65,7 @@ export default function BrainDashboard() {
           <button className="brbtn" onClick={() => setSection("research")}>✧ Research</button>
           <button className="brbtn" onClick={() => setSection("graph")}>◉ Knowledge graph</button>
           <button className="brbtn" onClick={doRescan} disabled={!!busy}>⎇ Sync git</button>
+          <button className="brbtn" onClick={callMe} title="Ring my phone with the progress report">☏ Call me</button>
           <button className="brbtn" onClick={() => refresh()} disabled={loading}>↻</button>
         </div>
       </header>

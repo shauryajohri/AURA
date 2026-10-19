@@ -3,7 +3,7 @@ import { api, Settings } from "../api";
 import SettingsOverlay, { SettingsCategory, CATEGORY_META } from "../components/Home/SettingsOverlay";
 import { Layout, DEFAULT_LAYOUT } from "../components/Home/layoutTypes";
 import { useLocalStorage } from "../hooks/useLocalStorage";
-import { useSettingsStore } from "../stores/settingsStore";
+import { useSettingsStore, withDefaults } from "../stores/settingsStore";
 
 // Settings — a menu → focused editor flow. Pick a category, edit it with a
 // live preview, save, and you're back here. Grouped into sections so fourteen
@@ -12,7 +12,7 @@ import { useSettingsStore } from "../stores/settingsStore";
 const SECTIONS: Array<{ title: string; cats: SettingsCategory[] }> = [
   { title: "System", cats: ["general", "keys", "privacy", "behavior"] },
   { title: "Appearance", cats: ["blackhole", "planets", "orbits", "animations", "wallpaper", "layout"] },
-  { title: "Voice & Personality", cats: ["voice", "autochat"] },
+  { title: "Voice & Personality", cats: ["voice", "autochat", "phone"] },
   { title: "Advanced", cats: ["developer", "experimental"] },
 ];
 
@@ -25,7 +25,7 @@ export default function SettingsView() {
   const [layout, setLayout] = useLocalStorage<Layout>("aura.sanctuary", DEFAULT_LAYOUT);
 
   useEffect(() => {
-    api.getSettings().then(setSettings).catch(() => setOffline(true));
+    api.getSettings().then((s) => setSettings(withDefaults(s))).catch(() => setOffline(true));
   }, []);
 
   return (

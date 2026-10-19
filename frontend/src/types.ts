@@ -80,6 +80,35 @@ export interface ChatTurn {
   ts?: string;     // wall-clock time when the turn was created
 }
 
+// Main window -> desktop buddy, relayed by the Electron main process.
+export type BuddyUpdate =
+  | { kind: "state"; state: AuraState }
+  | { kind: "presence"; presence: Presence }
+  | { kind: "status"; status: ConnStatus }
+  | { kind: "say"; id: string; text: string; source?: string };
+
+export interface BuddyWork { x: number; y: number; width: number; height: number }
+
+/** window.aura.buddy — see electron/preload.cjs. */
+export interface BuddyBridge {
+  // main window side
+  relay: (msg: BuddyUpdate) => void;
+  onChat: (cb: (text: string) => void) => () => void;
+  /** Settings → General → desktop buddy. Off hides it until switched back on. */
+  setEnabled: (on: boolean) => void;
+  // buddy window side
+  onUpdate: (cb: (msg: BuddyUpdate) => void) => () => void;
+  onCommand: (cb: (cmd: string) => void) => () => void;
+  chat: (text: string) => void;
+  move: (x: number, y: number) => void;
+  place: (x?: number, y?: number) => Promise<{ x: number; y: number; work: BuddyWork } | null>;
+  geom: () => Promise<BuddyWork | null>;
+  setIgnoreMouse: (ignore: boolean) => void;
+  focus: () => void;
+  openMain: () => void;
+  menu: (opts: { wander: boolean; napping: boolean }) => void;
+}
+
 declare global {
   interface Window {
     aura?: {
@@ -87,6 +116,7 @@ declare global {
       bridgeUrl: string;
       minimize?: () => void;
       close?: () => void;
+      buddy?: BuddyBridge;
     };
   }
 }

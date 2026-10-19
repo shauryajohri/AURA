@@ -1,5 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { useAuraSocket } from "./hooks/useAuraSocket";
+import { useBuddyRelay } from "./hooks/useBuddyRelay";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 import { useSettingsStore } from "./stores/settingsStore";
 import Sidebar from "./components/Sidebar";
@@ -55,6 +56,7 @@ const PAGES = ["home", "chats", "memory", "tasks", "models", "settings", "labs"]
 export default function App() {
   const { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, activity, send,
           loadTurns, clearTurns } = useAuraSocket();
+  useBuddyRelay(status, auraState, presence, turns, send);
   const [collapsed, setCollapsed] = useLocalStorage<boolean>("aura.sidebarMin", false);
   const [rawView, setView] = useLocalStorage<string>("aura.view", "home");
   const view = PAGES.includes(rawView) ? rawView : LEGACY[rawView] ?? "home";
@@ -76,6 +78,15 @@ export default function App() {
   // push them into the visual stores (core, planets, background).
   const loadSettings = useSettingsStore((s) => s.load);
   useEffect(() => { loadSettings(); }, [loadSettings]);
+  // In prod Electron spawns the brain alongside this window, so that first
+  // load usually fails and leaves the store offline on defaults. Try again
+  // when the socket opens. `loaded` is a dep so a load that fails after the
+  // socket is already open still gets its retry; `offline` is read, not
+  // watched, so a failed save doesn't trigger a reload over the user's edit.
+  const settingsLoaded = useSettingsStore((s) => s.loaded);
+  useEffect(() => {
+    if (status === "open" && settingsLoaded && useSettingsStore.getState().offline) loadSettings();
+  }, [status, settingsLoaded, loadSettings]);
 
   // ---- AURA Domain: the workspace beyond the portal -----------------------
   const [domainOpen, setDomainOpen] = useState(false);

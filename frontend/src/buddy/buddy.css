@@ -1,0 +1,184 @@
+/* AURA desktop buddy. The window (electron/main.cjs) is transparent and
+   always on top; anything not marked .hit lets clicks through to the desktop. */
+
+html,
+body {
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+body {
+  font-family: "Pixelify Sans", "Exo 2", system-ui, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#buddy-root {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 280px;  /* WIN_W in src/buddy/win.ts */
+  height: 270px; /* WIN_H */
+}
+
+/* dev bridge only: shows the window's bounds inside a browser tab */
+.buddy-root--dev {
+  outline: 1px dashed rgba(125, 60, 255, 0.45);
+}
+
+.buddy {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.buddy__body {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+}
+
+.buddy__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+/* The grab area is the 16×14 sprite inside the 20×20 grid (see sprite.ts). */
+.buddy__hit {
+  position: absolute;
+  left: 10%;
+  top: 30%;
+  width: 80%;
+  height: 70%;
+  cursor: grab;
+}
+
+.buddy--dragging .buddy__hit {
+  cursor: grabbing;
+}
+
+/* ---- speech bubble: a pixel border drawn with four hard shadows, so the
+   corners come out stepped, plus a two-step tail ---------------------------- */
+.bubble {
+  position: absolute;
+  left: 50%;
+  bottom: 88px;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: 250px;
+  padding: 7px 10px;
+  background: #120a26;
+  color: #f3d9ff;
+  font-size: 13px;
+  line-height: 1.35;
+  box-shadow: 0 -3px 0 #7d3cff, 0 3px 0 #7d3cff, -3px 0 0 #7d3cff, 3px 0 0 #7d3cff;
+  transform: translateX(-50%);
+  animation: bubble-in 160ms steps(3) both;
+}
+
+.bubble::before,
+.bubble::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  height: 3px;
+  background: #7d3cff;
+  transform: translateX(-50%);
+}
+
+.bubble::before {
+  bottom: -6px;
+  width: 9px;
+}
+
+.bubble::after {
+  bottom: -9px;
+  width: 3px;
+}
+
+.bubble--say {
+  cursor: pointer;
+}
+
+.bubble--chat {
+  width: 250px;
+}
+
+.bubble__text {
+  max-height: 104px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.bubble__text--muted {
+  color: #a78bdf;
+}
+
+.bubble__text::-webkit-scrollbar {
+  width: 4px;
+}
+
+.bubble__text::-webkit-scrollbar-thumb {
+  background: #4a2aa0;
+}
+
+.bubble__text + .chat {
+  margin-top: 7px;
+}
+
+.chat {
+  display: flex;
+  gap: 6px;
+}
+
+.chat__input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 7px;
+  border: 2px solid #4a2aa0;
+  border-radius: 0;
+  outline: none;
+  background: #0b0618;
+  color: #f3d9ff;
+  font: inherit;
+}
+
+.chat__input::placeholder {
+  color: #7a62b3;
+}
+
+.chat__input:focus {
+  border-color: #a76dff;
+}
+
+.chat__btn {
+  width: 30px;
+  padding: 0;
+  border: 2px solid #4a2aa0;
+  border-radius: 0;
+  background: #1b1038;
+  color: #f3d9ff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.chat__btn:hover {
+  border-color: #a76dff;
+}
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 4px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}

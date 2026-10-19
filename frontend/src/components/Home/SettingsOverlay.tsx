@@ -3,6 +3,7 @@ import { api, Settings } from "../../api";
 import { Layout, ColId, Size, CARD_TITLES, DEFAULT_LAYOUT } from "./layoutTypes";
 import MicCheck from "../MicCheck";
 import VoicePicker from "./VoicePicker";
+import { PhoneReportControls, PhoneReportActions } from "./PhoneReport";
 
 // ============================================================================
 // Focused settings editors. Clicking "Blackhole" in the settings card doesn't
@@ -15,11 +16,11 @@ import VoicePicker from "./VoicePicker";
 
 export type SettingsCategory =
   | "general" | "blackhole" | "planets" | "orbits" | "animations" | "wallpaper"
-  | "voice" | "autochat" | "privacy" | "behavior" | "keys" | "developer"
+  | "voice" | "autochat" | "phone" | "privacy" | "behavior" | "keys" | "developer"
   | "experimental" | "layout";
 
 export const CATEGORY_META: Record<SettingsCategory, { icon: string; title: string; desc: string }> = {
-  general: { icon: "▣", title: "General", desc: "Startup and window behaviour" },
+  general: { icon: "▣", title: "General", desc: "Startup, window behaviour and the desktop buddy" },
   blackhole: { icon: "◉", title: "Blackhole", desc: "The core — glow, particles, rotation" },
   planets: { icon: "◍", title: "Planets", desc: "The constellation — orbits, rings, labels" },
   orbits: { icon: "◌", title: "Orbit Lines", desc: "The rings around the core — style, brightness, width" },
@@ -27,6 +28,7 @@ export const CATEGORY_META: Record<SettingsCategory, { icon: string; title: stri
   wallpaper: { icon: "❖", title: "Wallpaper", desc: "The living cosmos behind everything" },
   voice: { icon: "♪", title: "Voice", desc: "Which voice she speaks with, plus mic and wake word" },
   autochat: { icon: "✦", title: "Auto-chat", desc: "How chatty AURA is on her own" },
+  phone: { icon: "☏", title: "Phone Report", desc: "AURA calls you with progress, meetings and what needs your approval" },
   privacy: { icon: "⛨", title: "Privacy", desc: "What AURA may see and store" },
   behavior: { icon: "◎", title: "Behavior", desc: "When she speaks up, when she stays quiet" },
   keys: { icon: "⚿", title: "API Keys", desc: "Which providers are connected" },
@@ -36,7 +38,7 @@ export const CATEGORY_META: Record<SettingsCategory, { icon: string; title: stri
 };
 
 const KEYS: Record<Exclude<SettingsCategory, "layout" | "keys">, string[]> = {
-  general: ["general.launch_on_boot", "general.start_minimized"],
+  general: ["general.launch_on_boot", "general.start_minimized", "buddy.enabled"],
   blackhole: ["blackhole.glow", "blackhole.particles", "blackhole.rotation"],
   planets: ["planets.orbit_speed", "planets.rings", "planets.labels"],
   orbits: ["orbits.style", "orbits.opacity", "orbits.width"],
@@ -47,6 +49,11 @@ const KEYS: Record<Exclude<SettingsCategory, "layout" | "keys">, string[]> = {
   voice: ["voice.enabled", "voice.name", "voice.rate", "voice.sensitivity",
           "voice.wake_word", "voice.noise_suppression"],
   autochat: ["autochat.enabled", "autochat.frequency"],
+  // Edited by PhoneReportControls (text and time fields the generic rows
+  // can't draw), but listed here so save() includes them in the patch.
+  phone: ["phone.enabled", "phone.number", "phone.daily", "phone.daily_time",
+          "phone.milestones", "phone.meeting_alert", "phone.meeting_lead",
+          "phone.quiet_start", "phone.quiet_end"],
   privacy: ["privacy.screen_reading", "privacy.store_conversations"],
   behavior: ["behavior.proactive", "behavior.interrupt_work"],
   developer: ["dev.verbose_logs", "dev.show_intents"],
@@ -317,6 +324,7 @@ export default function SettingsOverlay({
           </div>
         );
       case "general":
+      case "phone":
       case "animations":
       case "wallpaper":
       case "privacy":
@@ -350,10 +358,14 @@ export default function SettingsOverlay({
   };
 
   // ---- controls ------------------------------------------------------------
-  const label = (k: string) => k.split(".")[1].replace(/_/g, " ");
+  // A row is labelled by its key's second half ("launch_on_boot"), unless
+  // that alone would just read "enabled".
+  const LABELS: Record<string, string> = { "buddy.enabled": "desktop buddy" };
+  const label = (k: string) => LABELS[k] ?? k.split(".")[1].replace(/_/g, " ");
 
   const controls = () => {
     if (category === "keys") return null;
+    if (category === "phone") return <PhoneReportControls draft={draft} set={set} />;
     if (category === "layout") {
       return (
         <div className="setov__cards">
@@ -465,6 +477,7 @@ export default function SettingsOverlay({
         {/* Privacy is also where you wipe the record. It's an action, not a
             setting, so it lives outside the draft/save flow. */}
         {category === "privacy" && <ClearHistory />}
+        {category === "phone" && <PhoneReportActions dirty={dirty} />}
         {/* Output above (how AURA speaks), input below (how she hears you).
             Not part of the draft — it touches hardware, not settings. */}
         {category === "voice" && <MicCheck />}

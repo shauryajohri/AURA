@@ -1089,12 +1089,52 @@ DEFAULT_SETTINGS = {
     "planets.orbit_speed": 50,     # 0-100
     "planets.rings": True,         # premium models wear rings
     "planets.labels": True,        # show model names
+    # Orbit lines
+    "orbits.opacity": 55,          # 0-100
+    "orbits.width": 50,            # 0-100
+    "orbits.style": "dashed",      # dashed | solid | dotted | hidden
     # Voice
     "voice.enabled": True,
+    "voice.name": "",              # "" = let voice_output.resolve_voice pick
     "voice.rate": 55,              # 0-100 speaking speed
+    "voice.sensitivity": 55,       # 0-100
+    "voice.wake_word": True,
+    "voice.noise_suppression": True,
     # Auto-chat (proactive / attention / curiosity pushes)
     "autochat.enabled": True,
     "autochat.frequency": 40,      # 0-100 how chatty AURA is on her own
+    # Phone report (core/phone_report.py) — AURA rings you with a spoken report
+    "phone.enabled": False,        # master switch for automatic calls
+    "phone.number": "",            # who to ring, E.164: +919876543210
+    "phone.daily": True,
+    "phone.daily_time": "09:00",
+    "phone.milestones": True,      # feature/project done, task blocked
+    "phone.meeting_alert": False,  # heads-up call before a calendar meeting
+    "phone.meeting_lead": 15,      # minutes before it starts
+    "phone.quiet_start": "22:00",  # no automatic calls between these
+    "phone.quiet_end": "08:00",
+    # Desktop buddy — the pixel AURA on the taskbar edge (frontend/electron)
+    "buddy.enabled": True,
+    # General / appearance. Keep this table in step with DEFAULTS in
+    # frontend/src/stores/settingsStore.ts: SettingsOverlay draws a toggle or
+    # a slider from the value's type, so every key needs a typed default.
+    "general.start_minimized": False,
+    "general.launch_on_boot": False,
+    "anim.enabled": True,
+    "anim.intensity": 70,          # 0-100
+    "anim.reduced_motion": False,
+    "wallpaper.video": True,
+    "wallpaper.dim": 30,           # 0-100
+    # Privacy & behaviour
+    "privacy.screen_reading": True,
+    "privacy.store_conversations": True,
+    "behavior.proactive": True,
+    "behavior.interrupt_work": False,
+    # Developer / experimental
+    "dev.verbose_logs": False,
+    "dev.show_intents": False,
+    "experimental.plugins": False,
+    "experimental.cloud_sync": False,
 }
 
 

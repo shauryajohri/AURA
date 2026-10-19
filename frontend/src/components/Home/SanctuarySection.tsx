@@ -3,7 +3,7 @@ import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { useClock } from "../../hooks/useClock";
 import { api, Task, SavedLink, UsageStats, Settings } from "../../api";
 import { useDomainStore, DomainSection } from "../../stores/domainStore";
-import { useSettingsStore } from "../../stores/settingsStore";
+import { useSettingsStore, withDefaults } from "../../stores/settingsStore";
 import { Layout, ColId, DEFAULT_LAYOUT, CARD_TITLES } from "./layoutTypes";
 import SettingsOverlay, { SettingsCategory, CATEGORY_META } from "./SettingsOverlay";
 import FloatingParticles from "./FloatingParticles";
@@ -95,7 +95,7 @@ export default function SanctuarySection({ entered, onEnterDomain }: Props) {
     refreshTasks();
     refreshLinks();
     api.getStats().then(setStats).catch(() => setOffline(true));
-    api.getSettings().then(setSettings).catch(() => setOffline(true));
+    api.getSettings().then((s) => setSettings(withDefaults(s))).catch(() => setOffline(true));
   }, [entered]);
 
   const custom = layout.preset === "custom";

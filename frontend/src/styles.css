@@ -1667,6 +1667,26 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
 }
 .setov__dangerbtn:hover { background: rgba(255, 92, 122, 0.24); color: #fff; }
 
+/* phone report: text/time fields, status and the spoken-script preview */
+.setov__input {
+  width: 200px; padding: 7px 10px;
+  border: 1px solid rgba(150, 125, 255, 0.25); border-radius: 10px;
+  background: rgba(4, 2, 12, 0.5); color: var(--text);
+  font-size: 12.5px; font-variant-numeric: tabular-nums; color-scheme: dark;
+}
+.setov__input:focus { outline: none; border-color: var(--violet-bright); }
+.setov__input--time { width: 104px; }
+.setov__input--num { width: 64px; }
+.setov__phone { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+.setov__save:disabled { opacity: 0.4; box-shadow: none; transform: none; cursor: default; }
+.setov__script {
+  max-height: 220px; overflow-y: auto; padding: 12px 14px;
+  border: 1px solid rgba(150, 125, 255, 0.14); border-radius: 12px;
+  background: rgba(4, 2, 12, 0.4);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.setov__script p { margin: 0; font-size: 12px; line-height: 1.55; color: rgba(230, 226, 255, 0.85); }
+
 /* footer */
 .setov__foot { display: flex; justify-content: flex-end; gap: 10px; }
 .setov__cancel {

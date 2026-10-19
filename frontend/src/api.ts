@@ -255,6 +255,34 @@ export interface ErrorClassification {
   serious: boolean;
 }
 
+// ── Phone report ───────────────────────────────────────────────────────────
+/** Mirrors core/phone_report.status(). Never carries a secret. */
+export interface PhoneReportStatus {
+  enabled: boolean;
+  twilio_configured: boolean;
+  /** Names of the .env variables still to be set. */
+  missing_env: string[];
+  number_valid: boolean;
+  /** Masked, e.g. "+91••••3210". */
+  number: string;
+  ready: boolean;
+  quiet_now: boolean;
+  last: { when: string; kind: string; ok: boolean; error: string } | null;
+}
+
+export interface PhoneReportPreview {
+  status: PhoneReportStatus;
+  /** One entry per spoken paragraph, in the order they're read. */
+  script: string[];
+  report: { calendar: "ok" | "not_connected" | "needs_reconnect" | "error" };
+}
+
+export interface PhoneCallResult {
+  ok: boolean;
+  to?: string;
+  error?: string;
+}
+
 async function j<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(BASE + path, {
     headers: { "Content-Type": "application/json" },
@@ -496,4 +524,9 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ settings: patch }),
     }),
+
+  // Phone report — the schedule and number are ordinary phone.* settings;
+  // these are the preview and the "ring me now".
+  getPhoneReport: () => j<PhoneReportPreview>("/api/phone-report"),
+  callPhoneReport: () => j<PhoneCallResult>("/api/phone-report/call", { method: "POST" }),
 };

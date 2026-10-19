@@ -90,6 +90,24 @@ Reasoning models leak their deliberation as ordinary content ("So answer: …", 
 
 Fenced code is lifted out before filtering and restored byte-for-byte — a filter that flattens a C++ answer into one line is worse than the leak.
 
+### AURA calls you
+
+Give her a phone number (Settings → **Phone Report**) and she rings it and reads the report out loud, most urgent first:
+
+1. **what's waiting on you** — uncommitted or unpushed work, blockers, overdue tasks, features still in planning, quests that need a screenshot
+2. **what's coming up** — meetings (Microsoft 365 calendar, when connected), reminders, tasks due today
+3. **project progress** — the dashboard's numbers, plus what moved today
+4. **tasks and quests**
+
+| When | How |
+|---|---|
+| On demand | *"call me with my progress report"*, the **☏ Call me** button on the Dashboard, or Settings |
+| Daily | once a day at the time you set |
+| Milestones | a feature or project reaches 100%, or a task becomes blocked |
+| Before a meeting | optional, N minutes ahead |
+
+Automatic calls stay silent during quiet hours (22:00–08:00 by default) and are at least 30 minutes apart. Calls go out through Twilio with the script inline, so nothing public is hosted — which also means the call is one-way: she tells you what needs approval, you approve it in AURA. The scheduler only runs while `server.py` does.
+
 ---
 
 ## AURA Domain — the development OS
@@ -140,6 +158,8 @@ GET/POST/PUT/DELETE  /api/quests            daily commitments + screen verificat
 GET  /api/models · POST /api/models/{n}/toggle    model lock
 GET  /api/links · /api/stats · /api/nature · /api/settings
 POST /api/voice/transcribe                  WAV → text fallback
+GET  /api/phone-report                      what a call would say right now
+POST /api/phone-report/call                 ring the saved number
 GET  /api/v3/snapshot · /session · /mistakes       developer state
 POST /api/v3/explain · /api/v3/build              error intelligence
 GET  /health · /api/status
@@ -188,6 +208,7 @@ core/
   brain.py             the turn: intent → context → route → guard
   ai_router.py         5 models, cost-aware routing, leak sanitiser
   work_recall.py       project memory injected into every chat turn
+  phone_report.py      the spoken progress report + the call scheduler
   response_composer.py persona layer + 5 reply styles
   engagement.py        when to speak, when to shut up
   quest_verify.py      screenshot verification (vision model)
@@ -234,6 +255,9 @@ OPENROUTER_KEY_RESEARCH=...
 OPENROUTER_KEY_CHAT=...
 GITHUB_CLIENT_ID=...            # only for Domain → GitHub import
 GITHUB_CLIENT_SECRET=...
+TWILIO_ACCOUNT_SID=...          # only for the phone report
+TWILIO_AUTH_TOKEN=...
+TWILIO_FROM_NUMBER=+1...        # a voice-capable Twilio number
 ```
 
 OAuth callbacks come back to `http://127.0.0.1:8760/api/connectors/callback/<provider>` — nothing public needed. Everything degrades: no OpenRouter key means Groq only; no keys at all still gives you the offline heuristic paths (planning, idea capture, error classification) and the whole filesystem/git/terminal side.
@@ -249,6 +273,7 @@ set PYTHONPATH=.                      # Windows;  export PYTHONPATH=. on Unix
 
 python test_work_recall.py            # project memory in the chat
 python test_reasoning_leak.py         # chain-of-thought never reaches the user
+python test_phone_report.py           # the phone report + call scheduler (fake Twilio)
 python test_memory.py                 # durable facts + context
 python test_engine.py                 # routing + intent
 python test_quests.py                 # quests, verification, pressure
@@ -283,6 +308,8 @@ cd frontend && npx tsc --noEmit       # frontend typecheck
 | Models all locked / no replies | No API key in `.env`, or every model rate-limited |
 | GitHub import says not connected | Set `GITHUB_CLIENT_ID`/`SECRET`, then authorise in Domain → Settings → Connectors |
 | Blank Domain background | `frontend/public/domain.mp4` missing — it falls back to a gradient |
+| "Call me" says Twilio isn't configured | Add the three `TWILIO_*` keys to `.env` and restart the brain |
+| The call has no meetings in it | Connect Microsoft 365 in Domain → Settings → Connectors (reconnect if it was linked before calendar access existed) |
 | She talks about the wrong project | The brain has no project yet: Domain → Projects → import your folder |
 
 ---

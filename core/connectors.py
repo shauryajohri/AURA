@@ -60,7 +60,8 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         "blurb": "Word, Excel and PowerPoint files from OneDrive / SharePoint.",
         "authorize": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
         "token": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
-        "scope": "offline_access User.Read Files.ReadWrite.All Sites.Read.All",
+        # Calendars.Read is for the phone report's "upcoming meetings".
+        "scope": "offline_access User.Read Files.ReadWrite.All Sites.Read.All Calendars.Read",
         "env_id": "MS_CLIENT_ID",
         "env_secret": "MS_CLIENT_SECRET",
         "docs": "https://learn.microsoft.com/graph/auth-v2-user",
@@ -265,7 +266,12 @@ def _refresh(provider: str) -> dict[str, Any]:
         "grant_type": "refresh_token",
     }
     if provider == "microsoft":
-        data["scope"] = p["scope"]
+        # Refresh with what was actually granted: asking for a scope added
+        # since this account connected would fail the whole refresh.
+        granted = tok.get("scope") or p["scope"]
+        # the granted list omits offline_access, which is what keeps the
+        # refresh token rolling
+        data["scope"] = granted if "offline_access" in granted else f"offline_access {granted}"
     res = requests.post(
         p["token"], data=data, headers={"Accept": "application/json"}, timeout=TIMEOUT
     )

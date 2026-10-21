@@ -4,7 +4,14 @@ import { useCoreStore } from "../stores/coreStore";
 import { usePlanetStore } from "../stores/planetStore";
 import { useNotifyStore } from "../stores/notifyStore";
 import { useGuardStore } from "../stores/guardStore";
+import { useSettingsStore } from "../stores/settingsStore";
 import { MODELS } from "../data/models";
+import { useSkin } from "../skins/useSkin";
+import { BACKDROPS, CORE_FORMS, SKINS, type Skin } from "../skins/skins";
+
+/** A tiny black hole in the skin's own light — the menu's swatch. */
+const skinOrb = (sk: Skin) =>
+  `radial-gradient(circle at 50% 50%, #000 40%, rgb(${sk.pal.photon}) 46%, rgb(${sk.pal.main}) 60%, transparent 76%)`;
 
 const KIND_ICON: Record<string, string> = {
   route: "◈", memory: "❋", task: "✓", quest: "❖", build: "⚙", done: "●", info: "◎",
@@ -58,6 +65,14 @@ export default function TopBar({ mode = "CHAT" }: Props) {
   const pMeta = usePlanetStore((s) => s.meta);
   const pSetMeta = usePlanetStore((s) => s.setMeta);
 
+  // Skin quick-switch. Picking here wears the whole design, so any
+  // background/core overrides from Settings → Skins are cleared with it.
+  const [skinOpen, setSkinOpen] = useState(false);
+  const { skin: worn } = useSkin();
+  const applySettings = useSettingsStore((s) => s.apply);
+  const wear = (id: string) =>
+    applySettings({ "skin.id": id, "skin.core": "", "skin.backdrop": "" });
+
   const notices = useNotifyStore((s) => s.notices);
   const bellOpen = useNotifyStore((s) => s.open);
   const setBellOpen = useNotifyStore((s) => s.setOpen);
@@ -82,6 +97,51 @@ export default function TopBar({ mode = "CHAT" }: Props) {
       </div>
 
       <div className="topbar__right">
+        <div className="coremenu-wrap">
+          <button
+            className={"corebtn " + (skinOpen ? "corebtn--open" : "")}
+            onClick={() => setSkinOpen(!skinOpen)}
+            title="Change AURA's skin"
+          >
+            <span className="corebtn__orb" style={{ background: skinOrb(worn) }} />
+            <span className="corebtn__label">Skin</span>
+            <span className="corebtn__caret">{skinOpen ? "▴" : "▾"}</span>
+          </button>
+
+          {skinOpen && (
+            <div className="coremenu skinmenu">
+              <div className="coremenu__head">
+                <span>SKINS</span>
+              </div>
+              <div className="skinmenu__list">
+                {SKINS.map((sk) => {
+                  const on = sk.id === worn.id;
+                  const core = CORE_FORMS.find((c) => c.id === sk.core)!.name;
+                  const sky = BACKDROPS.find((b) => b.id === sk.backdrop)!.name;
+                  return (
+                    <button
+                      key={sk.id}
+                      className={"skinmenu__row" + (on ? " skinmenu__row--on" : "")}
+                      onClick={() => wear(sk.id)}
+                      title={sk.tagline}
+                    >
+                      <span className="skinmenu__orb" style={{ background: skinOrb(sk) }} />
+                      <span className="skinmenu__text">
+                        <span className="skinmenu__name">{sk.name}</span>
+                        <span className="skinmenu__sub">{core} · {sky}</span>
+                      </span>
+                      {on && <span className="skinmenu__on">●</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="coremenu__hint">
+                Mix any background with any core in Settings → Skins.
+              </p>
+            </div>
+          )}
+        </div>
+
         <div className="coremenu-wrap">
           <button
             className={"corebtn " + (menuOpen ? "corebtn--open" : "")}

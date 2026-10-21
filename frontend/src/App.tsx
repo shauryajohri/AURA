@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { useAuraSocket } from "./hooks/useAuraSocket";
 import { useBuddyRelay } from "./hooks/useBuddyRelay";
 import { useLocalStorage } from "./hooks/useLocalStorage";
@@ -9,11 +9,11 @@ import TopBar from "./components/TopBar";
 import Stage from "./components/Stage";
 import ChatDock from "./components/ChatDock";
 import HomeStatusCard from "./components/HomeStatusCard";
-import CosmicBackground from "./components/CosmicBackground";
-import UniverseBackground from "./components/UniverseBackground";
+import WorldBackdrop from "./components/WorldBackdrop";
 import ParticleField from "./components/ParticleField";
 import CursorLens from "./components/CursorLens";
 import PortalTransition from "./components/Domain/PortalTransition";
+import { useSkinDocument } from "./skins/useSkin";
 
 // Pages are code-split: Home boots instantly and the heavy panels (Domain's
 // editor, the settings overlay, the memory/task views) only download when you
@@ -22,6 +22,7 @@ const DomainScreen = lazy(() => import("./components/Domain/DomainScreen"));
 const MemoryPage = lazy(() => import("./views/MemoryPage"));
 const TasksPage = lazy(() => import("./views/TasksPage"));
 const ModelsPage = lazy(() => import("./views/ModelsPage"));
+const ThemesPage = lazy(() => import("./views/ThemesPage"));
 const SettingsView = lazy(() => import("./views/SettingsView"));
 const LabsPage = lazy(() => import("./views/LabsPage"));
 const ChatsPage = lazy(() => import("./views/ChatsPage"));
@@ -64,7 +65,7 @@ const LEGACY: Record<string, string> = {
   skills: "models",
   analytics: "models",
 };
-const PAGES = ["home", "chats", "memory", "tasks", "models", "settings", "labs"];
+const PAGES = ["home", "chats", "memory", "tasks", "models", "themes", "settings", "labs"];
 
 export default function App() {
   const { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, activity, send,
@@ -75,19 +76,6 @@ export default function App() {
   const view = PAGES.includes(rawView) ? rawView : LEGACY[rawView] ?? "home";
   const guest = useGuardStore((s) => s.status?.role === "guest");
   const ownerName = useGuardStore((s) => s.status?.owner_name ?? "");
-
-  // Background video health. A failure swaps in the CSS starfield, but a
-  // transient decoder hiccup shouldn't cost the universe until restart —
-  // retry with backoff before giving up.
-  const [videoOk, setVideoOk] = useState(true);
-  const videoRetriesRef = useRef(0);
-  const handleVideoFail = useCallback(() => {
-    setVideoOk(false);
-    if (videoRetriesRef.current >= 2) return;
-    const delay = 15000 * (videoRetriesRef.current + 1);
-    videoRetriesRef.current += 1;
-    setTimeout(() => setVideoOk(true), delay);
-  }, []);
 
   // Pull saved appearance/voice settings from the brain once at startup and
   // push them into the visual stores (core, planets, background).
@@ -102,6 +90,9 @@ export default function App() {
   useEffect(() => {
     if (status === "open" && settingsLoaded && useSettingsStore.getState().offline) loadSettings();
   }, [status, settingsLoaded, loadSettings]);
+
+  // The skin being worn: tints :root's colour variables, and picks the sky.
+  const { skin, backdrop } = useSkinDocument();
 
   // ---- AURA Domain: the workspace beyond the portal -----------------------
   const [domainOpen, setDomainOpen] = useState(false);
@@ -127,6 +118,8 @@ export default function App() {
         return <TasksPage questEvent={questEvent} />;
       case "models":
         return <ModelsPage v3Events={v3Events} onGoHome={goHome} activeModelId={activeModelId} />;
+      case "themes":
+        return <ThemesPage />;
       case "settings":
         return <SettingsView />;
       case "labs":
@@ -138,12 +131,9 @@ export default function App() {
 
   return (
     <div className="os-root">
-      {/* the living universe — always behind everything, never replaced */}
-      {videoOk ? (
-        <UniverseBackground state={auraState} onFail={handleVideoFail} />
-      ) : (
-        <CosmicBackground state={auraState} />
-      )}
+      {/* the living universe — always behind everything; which one is the
+          skin's call (films fall back to a live sky if they can't play) */}
+      <WorldBackdrop backdrop={backdrop} skin={skin} state={auraState} />
       <ParticleField state={auraState} />
 
       <Sidebar

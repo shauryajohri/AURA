@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { api, type Settings } from "../api";
 import { useCoreStore } from "./coreStore";
 import { usePlanetStore } from "./planetStore";
+import { SKIN_KEYS } from "../skins/skins";
 
 /**
  * Bridge between the backend `app_settings` table and the visuals.
@@ -69,12 +70,44 @@ const DEFAULTS: Settings = {
   "dev.show_intents": false,
   "experimental.plugins": false,
   "experimental.cloud_sync": false,
+  // Skins (src/skins). Core/backdrop "" = wear the skin's own choice.
+  "skin.id": "aura",
+  "skin.core": "",
+  "skin.backdrop": "",
 };
 
 /** A raw /api/settings response with any key the backend doesn't know yet
  *  filled from DEFAULTS. SettingsOverlay picks each row's control by the
  *  value's type, so a missing boolean would otherwise draw as a slider. */
 export const withDefaults = (s: Settings): Settings => ({ ...DEFAULTS, ...s });
+
+// The skin is also cached locally: the backend answers a beat after first
+// paint, and without this every launch would flash the default violet world
+// before switching to the one the user picked. Works with the brain offline.
+const SKIN_CACHE = "aura.skin";
+
+function readSkinCache(): Settings {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SKIN_CACHE) || "{}") as Settings;
+    const out: Settings = {};
+    for (const k of SKIN_KEYS) if (typeof raw[k] === "string") out[k] = raw[k];
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writeSkinCache(s: Settings) {
+  const out: Settings = {};
+  for (const k of SKIN_KEYS) if (k in s) out[k] = s[k];
+  try {
+    localStorage.setItem(SKIN_CACHE, JSON.stringify(out));
+  } catch {
+    /* ignore quota errors */
+  }
+}
+
+const INITIAL: Settings = withDefaults(readSkinCache());
 
 const num = (s: Settings, k: string, fallback: number): number => {
   const v = s[k];
@@ -109,10 +142,16 @@ interface SettingsStore {
   orbitWidthMul: number;
   /** How orbit lines are drawn. "hidden" removes them (edit mode still shows slots). */
   orbitStyle: OrbitStyle;
+  /**
+   * Unsaved skin keys being tried on (the skin gallery). Visuals render
+   * `{...settings, ...skinPreview}`; null when nothing is being previewed.
+   */
+  skinPreview: Settings | null;
 
   load: () => Promise<void>;
   /** Save a partial change AND apply it to the visuals immediately. */
   apply: (patch: Settings) => Promise<void>;
+  setSkinPreview: (p: Settings | null) => void;
 }
 
 // 0–100 slider → a multiplier centred on 1.0 at the default value.
@@ -156,17 +195,21 @@ function pushToBuddy(s: Settings) {
 }
 
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
-  settings: { ...DEFAULTS },
+  settings: INITIAL,
   loaded: false,
   offline: false,
-  ...derive(DEFAULTS),
+  skinPreview: null,
+  ...derive(INITIAL),
 
   load: async () => {
     try {
       const s = await api.getSettings();
-      const merged = withDefaults(s);
+      // A skin chosen while the brain was offline only exists in the cache;
+      // the backend copy wins only for keys it has actually stored.
+      const merged = withDefaults({ ...readSkinCache(), ...s });
       pushToVisualStores(merged);
       pushToBuddy(merged);
+      writeSkinCache(merged);
       set({ settings: merged, loaded: true, offline: false, ...derive(merged) });
     } catch {
       // Brain offline — keep the defaults so the visuals still render.
@@ -179,6 +222,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     // Apply first so the UI responds instantly, then persist.
     pushToVisualStores(merged);
     if ("buddy.enabled" in patch) pushToBuddy(merged);
+    writeSkinCache(merged);
     set({ settings: merged, ...derive(merged) });
     try {
       await api.saveSettings(patch);
@@ -186,4 +230,6 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       set({ offline: true });
     }
   },
+
+  setSkinPreview: (p) => set({ skinPreview: p }),
 }));

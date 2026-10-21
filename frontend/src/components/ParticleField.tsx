@@ -1,5 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { AuraState } from "../types";
+import { useSkin } from "../skins/useSkin";
+import { dustOf } from "../skins/skins";
 
 interface Props {
   state: AuraState;
@@ -23,7 +25,7 @@ interface P {
   x: number; y: number;
   vx: number; vy: number;
   r: number;
-  color: string;
+  ci: number;        // index into the skin's dust colours (resolved per frame)
   base: number;      // base alpha
   tw: number;        // twinkle speed
   phase: number;
@@ -37,15 +39,12 @@ interface Comet {
   rx: number; ry: number;   // orbit radii (fraction of min dim)
   tilt: number;             // orbit rotation
   ang: number; w: number;   // angle + angular speed
-  color: string; size: number;
+  ci: number; size: number; // ci: 0 photon · 1 inner · 2 main
 }
 
-// Monochrome violet dust — matched to the new core. Mostly deep purples and
-// pale lavender, white for the bright ones, the rare cyan as an accent.
-const COLORS = [
-  "#8b5cff", "#7d3cff", "#b18bff", "#d9c8ff",
-  "#a76dff", "#ffffff", "#ffffff", "#38e1ff",
-];
+// Dust colours come from the active skin (skins.dustOf): for the default
+// skin that's the monochrome violet set this field always had — deep
+// purples and pale lavender, white for the bright ones, a rare accent.
 
 const TEMPO: Record<string, number> = { idle: 1, listening: 1.2, thinking: 2.2, speaking: 1.5 };
 const BRIGHT: Record<string, number> = { idle: 1, listening: 1.15, thinking: 1.3, speaking: 1.2 };
@@ -56,6 +55,14 @@ export default function ParticleField({ state }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef<AuraState>(state);
   stateRef.current = state;
+
+  // Read per frame, so changing skin recolours the field without a rebuild.
+  const { skin } = useSkin();
+  const fills = useMemo(() => dustOf(skin).map((c) => `rgb(${c})`), [skin]);
+  const fillsRef = useRef(fills);
+  fillsRef.current = fills;
+  const palRef = useRef(skin.pal);
+  palRef.current = skin.pal;
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -86,7 +93,7 @@ export default function ParticleField({ state }: Props) {
         x, y,
         vx: rand(-0.05, 0.05), vy: rand(-0.05, 0.05),
         r: Math.random() > 0.94 ? rand(1.3, 2.1) : rand(0.4, 1.1),
-        color: COLORS[(Math.random() * COLORS.length) | 0],
+        ci: (Math.random() * 64) | 0,
         base: rand(0.2, 0.8),
         tw: rand(0.5, 2.0),
         phase: Math.random() * Math.PI * 2,
@@ -102,14 +109,13 @@ export default function ParticleField({ state }: Props) {
       const n = Math.min(2400, Math.round((W * H) / 900));
       ps = Array.from({ length: n }, () => spawn(false));
       rings = [];
-      const cometColors = ["216,196,255", "165,110,255", "139,92,255"];
       comets = Array.from({ length: 3 }, (_, i) => ({
         ox: rand(0.25, 0.75), oy: rand(0.25, 0.75),
         rx: rand(0.35, 0.65), ry: rand(0.18, 0.4),
         tilt: rand(0, Math.PI),
         ang: rand(0, Math.PI * 2),
         w: rand(0.00018, 0.00034) * (Math.random() < 0.5 ? 1 : -1),
-        color: cometColors[i],
+        ci: i,
         size: rand(1.8, 2.6),
       }));
     };
@@ -120,6 +126,8 @@ export default function ParticleField({ state }: Props) {
       const dt = Math.min(50, t - prev); prev = t;
 
       const st = stateRef.current as string;
+      const pal = palRef.current;
+      const dust = fillsRef.current;
       const tempo = TEMPO[st] ?? 1;
       const bright = BRIGHT[st] ?? 1;
       const cx = W / 2, cy = H / 2;
@@ -140,12 +148,12 @@ export default function ParticleField({ state }: Props) {
         rg.alpha *= Math.pow(0.985, step);
         if (rg.alpha < 0.01) { rings.splice(i, 1); continue; }
         ctx.globalAlpha = rg.alpha;
-        ctx.strokeStyle = "rgba(196,166,255,1)";
+        ctx.strokeStyle = `rgb(${pal.soft})`;
         ctx.lineWidth = 1.4;
         ctx.beginPath(); ctx.arc(cx, cy, rg.r, 0, Math.PI * 2); ctx.stroke();
       }
 
-      /* occasional shooting star — a violet-white streak, every few seconds */
+      /* occasional shooting star — a white streak in the skin's colours */
       if (t > nextShot) {
         nextShot = t + rand(5000, 13000);
         const fromLeft = Math.random() < 0.5;
@@ -167,9 +175,9 @@ export default function ParticleField({ state }: Props) {
         const fade = Math.sin(Math.PI * Math.min(1, sh.life / sh.max)); // in → out
         const tail = 90;
         const gsh = ctx.createLinearGradient(sh.x, sh.y, sh.x - sh.vx * tail, sh.y - sh.vy * tail);
-        gsh.addColorStop(0, `rgba(245,238,255,${0.85 * fade})`);
-        gsh.addColorStop(0.35, `rgba(177,139,255,${0.4 * fade})`);
-        gsh.addColorStop(1, "rgba(125,60,255,0)");
+        gsh.addColorStop(0, `rgba(${pal.photon},${0.85 * fade})`);
+        gsh.addColorStop(0.35, `rgba(${pal.soft},${0.4 * fade})`);
+        gsh.addColorStop(1, `rgba(${pal.main},0)`);
         ctx.globalAlpha = 1;
         ctx.strokeStyle = gsh;
         ctx.lineWidth = 1.6;
@@ -216,12 +224,13 @@ export default function ParticleField({ state }: Props) {
 
         const a = p.base * (0.55 + 0.45 * Math.sin(t * 0.001 * p.tw * tempo + p.phase)) * bright;
         ctx.globalAlpha = Math.min(1, Math.max(0, a));
-        ctx.fillStyle = p.color;
+        ctx.fillStyle = dust[p.ci % dust.length];
         ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
       }
 
       /* comets — slow decorative orbits with glowing tails */
       for (const c of comets) {
+        const col = c.ci === 0 ? pal.photon : c.ci === 1 ? pal.inner : pal.main;
         c.ang += c.w * dt * tempo;
         const m = Math.min(W, H);
         const pt = (a: number) => {
@@ -237,15 +246,15 @@ export default function ParticleField({ state }: Props) {
           const [tx, ty] = pt(c.ang - dir * k * 0.014);
           const f = 1 - k / 23;
           ctx.globalAlpha = 0.4 * f * f;
-          ctx.fillStyle = `rgba(${c.color},1)`;
+          ctx.fillStyle = `rgba(${col},1)`;
           ctx.beginPath(); ctx.arc(tx, ty, c.size * (0.25 + 0.75 * f), 0, Math.PI * 2); ctx.fill();
         }
         // head with a soft glow
         const [hx, hy] = pt(c.ang);
         const g = ctx.createRadialGradient(hx, hy, 0, hx, hy, c.size * 7);
-        g.addColorStop(0, `rgba(${c.color},0.9)`);
-        g.addColorStop(0.3, `rgba(${c.color},0.35)`);
-        g.addColorStop(1, `rgba(${c.color},0)`);
+        g.addColorStop(0, `rgba(${col},0.9)`);
+        g.addColorStop(0.3, `rgba(${col},0.35)`);
+        g.addColorStop(1, `rgba(${col},0)`);
         ctx.globalAlpha = 1;
         ctx.fillStyle = g;
         ctx.beginPath(); ctx.arc(hx, hy, c.size * 7, 0, Math.PI * 2); ctx.fill();

@@ -12,7 +12,7 @@ import BuddyLockPanel from "../components/Guard/BuddyLockPanel";
 
 const SECTIONS: Array<{ title: string; cats: SettingsCategory[] }> = [
   { title: "System", cats: ["general", "keys", "privacy", "behavior"] },
-  { title: "Appearance", cats: ["blackhole", "planets", "orbits", "animations", "wallpaper", "layout"] },
+  { title: "Appearance", cats: ["skins", "blackhole", "planets", "orbits", "animations", "wallpaper", "layout"] },
   { title: "Voice & Personality", cats: ["voice", "autochat", "phone"] },
   { title: "Advanced", cats: ["developer", "experimental"] },
 ];
@@ -52,7 +52,9 @@ export default function SettingsView() {
                 key={cat}
                 className="san-setopt setview__opt"
                 onClick={() => setFocus(cat)}
-                disabled={!settings && cat !== "layout" && cat !== "keys"}
+                // layout, keys and skins work without the brain (skins are
+                // cached locally); everything else needs its saved values
+                disabled={!settings && cat !== "layout" && cat !== "keys" && cat !== "skins"}
               >
                 <span className="san-setopt__icon">{CATEGORY_META[cat].icon}</span>
                 <span className="san-setopt__meta">

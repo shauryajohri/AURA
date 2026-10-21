@@ -17,13 +17,24 @@ interface Props {
 /*     speaking; speaking also emits expanding light rings              */
 /*                                                                      */
 /* rAF pauses entirely while the window is hidden/minimized.            */
+/*                                                                      */
+/* The dots are drawn with WebGL, in one call. As ~1,400 separate       */
+/* canvas fills a frame they cost the GPU process ~8 ms to replay —     */
+/* most of what kept Home off 60 fps (docs/perf/2026-10-21-*). Same     */
+/* circles: the shader uses the canvas's own anti-aliasing (coverage =  */
+/* radius + ½ − distance) and its additive "lighter" blend. The few     */
+/* gradient shapes (shooting stars, comet heads, speaking rings) stay   */
+/* on a 2D canvas above. Without WebGL the dots go back on that canvas. */
 /* ------------------------------------------------------------------ */
+
+type RGB = readonly [number, number, number];
 
 interface P {
   x: number; y: number;
   vx: number; vy: number;
   r: number;
   color: string;
+  rgb: RGB;          // the same colour, 0–1, for the WebGL dots
   base: number;      // base alpha
   tw: number;        // twinkle speed
   phase: number;
@@ -37,7 +48,7 @@ interface Comet {
   rx: number; ry: number;   // orbit radii (fraction of min dim)
   tilt: number;             // orbit rotation
   ang: number; w: number;   // angle + angular speed
-  color: string; size: number;
+  color: string; rgb: RGB; size: number;
 }
 
 // Monochrome violet dust — matched to the new core. Mostly deep purples and
@@ -51,17 +62,109 @@ const TEMPO: Record<string, number> = { idle: 1, listening: 1.2, thinking: 2.2, 
 const BRIGHT: Record<string, number> = { idle: 1, listening: 1.15, thinking: 1.3, speaking: 1.2 };
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
+const hexRgb = (h: string): RGB => {
+  const n = parseInt(h.slice(1), 16);
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+};
+const csvRgb = (s: string): RGB => {
+  const [r, g, b] = s.split(",").map(Number);
+  return [r / 255, g / 255, b / 255];
+};
+
+/* ---- WebGL dots ------------------------------------------------------ */
+const FLOATS = 7; // per dot: x, y, radius (CSS px), then premultiplied r, g, b, a
+const TAIL = 22;  // dots in each comet's tail
+
+const VERT = `
+attribute vec2 a_pos;
+attribute float a_r;
+attribute vec4 a_col;
+uniform vec2 u_dev;      // canvas size, device px
+uniform float u_dpr;
+varying vec4 v_col;
+varying vec2 v_center;   // device px, gl_FragCoord's bottom-left origin
+varying float v_r;       // radius, device px
+void main() {
+  vec2 dev = a_pos * u_dpr;
+  gl_Position = vec4(dev.x / u_dev.x * 2.0 - 1.0, 1.0 - dev.y / u_dev.y * 2.0, 0.0, 1.0);
+  v_center = vec2(dev.x, u_dev.y - dev.y);
+  v_r = a_r * u_dpr;
+  gl_PointSize = 2.0 * v_r + 3.0; // the circle plus its half-pixel fringe
+  v_col = a_col;
+}`;
+
+const FRAG = `
+precision highp float;
+varying vec4 v_col;
+varying vec2 v_center;
+varying float v_r;
+void main() {
+  // the canvas's own circle anti-aliasing (Skia's CircleOp)
+  float cov = clamp(v_r + 0.5 - distance(gl_FragCoord.xy, v_center), 0.0, 1.0);
+  if (cov <= 0.0) discard;
+  gl_FragColor = v_col * cov;
+}`;
+
+interface DotGL {
+  gl: WebGLRenderingContext;
+  uDev: WebGLUniformLocation;
+  uDpr: WebGLUniformLocation;
+}
+
+/** null when WebGL (or high-precision fragment shaders) isn't available. */
+function initDotGL(canvas: HTMLCanvasElement): DotGL | null {
+  const gl = canvas.getContext("webgl", {
+    alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false,
+  });
+  if (!gl || gl.isContextLost()) return null;
+  const shader = (type: number, src: string) => {
+    const s = gl.createShader(type);
+    if (!s) return null;
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    return gl.getShaderParameter(s, gl.COMPILE_STATUS) ? s : null;
+  };
+  const vs = shader(gl.VERTEX_SHADER, VERT), fs = shader(gl.FRAGMENT_SHADER, FRAG);
+  const prog = gl.createProgram();
+  if (!vs || !fs || !prog) return null;
+  gl.attachShader(prog, vs);
+  gl.attachShader(prog, fs);
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) return null;
+  gl.useProgram(prog);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  const attr = (name: string, size: number, offset: number) => {
+    const loc = gl.getAttribLocation(prog, name);
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, size, gl.FLOAT, false, FLOATS * 4, offset * 4);
+  };
+  attr("a_pos", 2, 0);
+  attr("a_r", 1, 2);
+  attr("a_col", 4, 3);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE); // "lighter": premultiplied source + destination
+  gl.clearColor(0, 0, 0, 0);
+  const uDev = gl.getUniformLocation(prog, "u_dev");
+  const uDpr = gl.getUniformLocation(prog, "u_dpr");
+  return uDev && uDpr ? { gl, uDev, uDpr } : null;
+}
 
 export default function ParticleField({ state }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const glCanvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef<AuraState>(state);
   stateRef.current = state;
 
   useEffect(() => {
     const canvas = canvasRef.current!;
     const ctx = canvas.getContext("2d")!;
+    const glCanvas = glCanvasRef.current!;
+    let dotGL = initDotGL(glCanvas);
+    if (!dotGL) glCanvas.style.display = "none";
+    let dots = new Float32Array(0);
+    let nDots = 0;
     let raf = 0;
-    let W = 0, H = 0;
+    let W = 0, H = 0, DPR = 1;
     let ps: P[] = [];
     let rings: Ring[] = [];
     let comets: Comet[] = [];
@@ -82,11 +185,12 @@ export default function ParticleField({ state }: Props) {
         x = Math.random() * W;
         y = Math.random() * H;
       }
+      const color = COLORS[(Math.random() * COLORS.length) | 0];
       return {
         x, y,
         vx: rand(-0.05, 0.05), vy: rand(-0.05, 0.05),
         r: Math.random() > 0.94 ? rand(1.3, 2.1) : rand(0.4, 1.1),
-        color: COLORS[(Math.random() * COLORS.length) | 0],
+        color, rgb: hexRgb(color),
         base: rand(0.2, 0.8),
         tw: rand(0.5, 2.0),
         phase: Math.random() * Math.PI * 2,
@@ -94,10 +198,12 @@ export default function ParticleField({ state }: Props) {
     };
 
     const build = () => {
-      const DPR = Math.min(window.devicePixelRatio || 1, 2);
+      DPR = Math.min(window.devicePixelRatio || 1, 2);
       W = window.innerWidth; H = window.innerHeight;
-      canvas.width = W * DPR; canvas.height = H * DPR;
-      canvas.style.width = W + "px"; canvas.style.height = H + "px";
+      for (const c of [canvas, glCanvas]) {
+        c.width = W * DPR; c.height = H * DPR;
+        c.style.width = W + "px"; c.style.height = H + "px";
+      }
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
       const n = Math.min(2400, Math.round((W * H) / 900));
       ps = Array.from({ length: n }, () => spawn(false));
@@ -110,8 +216,47 @@ export default function ParticleField({ state }: Props) {
         ang: rand(0, Math.PI * 2),
         w: rand(0.00018, 0.00034) * (Math.random() < 0.5 ? 1 : -1),
         color: cometColors[i],
+        rgb: csvRgb(cometColors[i]),
         size: rand(1.8, 2.6),
       }));
+      dots = new Float32Array((n + comets.length * TAIL) * FLOATS);
+    };
+
+    // One dot: into the WebGL batch, or — without WebGL — straight onto the
+    // 2D canvas exactly as it used to be drawn ("lighter" is set by then).
+    const dot = (x: number, y: number, r: number, rgb: RGB, css: string, a: number) => {
+      if (!dotGL) {
+        ctx.globalAlpha = a;
+        ctx.fillStyle = css;
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+        return;
+      }
+      if (a <= 0) return;
+      const o = nDots++ * FLOATS;
+      dots[o] = x; dots[o + 1] = y; dots[o + 2] = r;
+      dots[o + 3] = rgb[0] * a; dots[o + 4] = rgb[1] * a; dots[o + 5] = rgb[2] * a; dots[o + 6] = a;
+    };
+    const flushDots = () => {
+      if (!dotGL) return;
+      const { gl, uDev, uDpr } = dotGL;
+      gl.viewport(0, 0, glCanvas.width, glCanvas.height);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.uniform2f(uDev, glCanvas.width, glCanvas.height);
+      gl.uniform1f(uDpr, DPR);
+      gl.bufferData(gl.ARRAY_BUFFER, dots.subarray(0, nDots * FLOATS), gl.DYNAMIC_DRAW);
+      gl.drawArrays(gl.POINTS, 0, nDots);
+      nDots = 0;
+    };
+    // A lost context (driver reset, GPU switch) falls back to the 2D dots
+    // until the browser hands it back.
+    const onLost = (e: Event) => {
+      e.preventDefault();
+      dotGL = null;
+      glCanvas.style.display = "none";
+    };
+    const onRestored = () => {
+      dotGL = initDotGL(glCanvas);
+      glCanvas.style.display = dotGL ? "" : "none";
     };
 
     let prev = performance.now();
@@ -215,9 +360,7 @@ export default function ParticleField({ state }: Props) {
         }
 
         const a = p.base * (0.55 + 0.45 * Math.sin(t * 0.001 * p.tw * tempo + p.phase)) * bright;
-        ctx.globalAlpha = Math.min(1, Math.max(0, a));
-        ctx.fillStyle = p.color;
-        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+        dot(p.x, p.y, p.r, p.rgb, p.color, Math.min(1, Math.max(0, a)));
       }
 
       /* comets — slow decorative orbits with glowing tails */
@@ -233,12 +376,10 @@ export default function ParticleField({ state }: Props) {
         };
         // tail: fading samples trailing behind along the orbit
         const dir = c.w >= 0 ? 1 : -1;
-        for (let k = 22; k >= 1; k--) {
+        for (let k = TAIL; k >= 1; k--) {
           const [tx, ty] = pt(c.ang - dir * k * 0.014);
-          const f = 1 - k / 23;
-          ctx.globalAlpha = 0.4 * f * f;
-          ctx.fillStyle = `rgba(${c.color},1)`;
-          ctx.beginPath(); ctx.arc(tx, ty, c.size * (0.25 + 0.75 * f), 0, Math.PI * 2); ctx.fill();
+          const f = 1 - k / (TAIL + 1);
+          dot(tx, ty, c.size * (0.25 + 0.75 * f), c.rgb, `rgba(${c.color},1)`, 0.4 * f * f);
         }
         // head with a soft glow
         const [hx, hy] = pt(c.ang);
@@ -255,6 +396,7 @@ export default function ParticleField({ state }: Props) {
 
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = "source-over";
+      flushDots();
     };
 
     const onMouse = (e: MouseEvent) => { mouse.x = e.clientX; mouse.y = e.clientY; };
@@ -271,14 +413,25 @@ export default function ParticleField({ state }: Props) {
     window.addEventListener("mousemove", onMouse);
     window.addEventListener("mouseout", onLeave);
     document.addEventListener("visibilitychange", onVis);
+    glCanvas.addEventListener("webglcontextlost", onLost);
+    glCanvas.addEventListener("webglcontextrestored", onRestored);
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", build);
       window.removeEventListener("mousemove", onMouse);
       window.removeEventListener("mouseout", onLeave);
       document.removeEventListener("visibilitychange", onVis);
+      glCanvas.removeEventListener("webglcontextlost", onLost);
+      glCanvas.removeEventListener("webglcontextrestored", onRestored);
     };
   }, []);
 
-  return <canvas ref={canvasRef} className="particle-field" aria-hidden="true" />;
+  // Dots underneath (WebGL), the gradient shapes on top (2D). Both add light,
+  // so which one sits on top makes no visible difference.
+  return (
+    <>
+      <canvas ref={glCanvasRef} className="particle-field" aria-hidden="true" />
+      <canvas ref={canvasRef} className="particle-field" aria-hidden="true" />
+    </>
+  );
 }

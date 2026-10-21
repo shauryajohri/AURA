@@ -28,6 +28,7 @@ const CYAN = "56,225,255";
 const DUST_SAND = "218,208,186";
 const DUST_GREY = "198,200,212";
 const DUST_ICE = "255,250,240";
+const DUST_ALPHAS = [0.26, 0.37, 0.48, 0.59]; // midpoints of 0.2–0.65 in four bins
 
 const rgba = (c: string, a: number) => `rgba(${c},${a < 0 ? 0 : a > 1 ? 1 : a})`;
 
@@ -49,6 +50,9 @@ interface Props {
   state: AuraState;
   size?: number;
   activeModelId?: string | null; // planet of the model that last answered
+  /** Stop drawing while something covers the core (the Domain). The scene
+   *  holds its place and carries on from there when uncovered. */
+  paused?: boolean;
 }
 
 /** One crackling electric wisp swirling around the void. */
@@ -58,13 +62,16 @@ interface Filament {
 }
 interface Node { ring: number; a: number; tw: number; big: boolean; }
 
-export default function BlackHole({ state, size: sizeProp, activeModelId = null }: Props) {
+export default function BlackHole({ state, size: sizeProp, activeModelId = null, paused = false }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef<AuraState>(state);
   stateRef.current = state;
   const activeRef = useRef<string | null>(activeModelId);
   activeRef.current = activeModelId;
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
+  const resumeRef = useRef<() => void>(() => {});
 
   // Planet settings (Planets menu in the top bar) — read live via ref so the
   // sliders act instantly without restarting the render loop.
@@ -156,6 +163,39 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
     canvas.style.width = D + "px";
     canvas.style.height = D + "px";
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+    // ---- Glow layers. A canvas shadow drawn under the "lighter" blend makes
+    // Chromium blur a layer the size of the WHOLE canvas (here ~2175×2175 px),
+    // and the ring and planet rims drew ~30 of them a frame — that alone held
+    // Home at ~5 fps on an Iris Xe (docs/perf/2026-10-21-baseline.md). So the
+    // ring is drawn, with the very same strokes and shadows, into a small
+    // canvas just big enough for it, then added onto the scene with one
+    // drawImage. Additive blending makes that pixel-identical: summing the
+    // group first and adding it once clamps to the same result.
+    // Use these sparingly: every canvas redrawn in a frame is its own raster
+    // pass in the GPU process (~2 ms each here). Anything whose shape doesn't
+    // change belongs in a sprite drawn once — see rimSprite below.
+    interface GlowLayer { c: HTMLCanvasElement; g: CanvasRenderingContext2D }
+    const glowLayer = (): GlowLayer => {
+      const c = document.createElement("canvas");
+      return { c, g: c.getContext("2d")! };
+    };
+    /** Paint a group (in scene coordinates) into `layer` around (x, y), out to
+     *  `half` px — strokes plus their blur — then add it onto the scene. */
+    const withGlow = (layer: GlowLayer, x: number, y: number, half: number,
+                      paint: (g: CanvasRenderingContext2D) => void) => {
+      const { c, g } = layer;
+      // whole device pixels, so the stamp lands 1:1 — no resampling blur
+      const ox = Math.floor((x - half) * DPR), oy = Math.floor((y - half) * DPR);
+      const n = Math.ceil(half * 2 * DPR) + 2;
+      if (c.width !== n) { c.width = n; c.height = n; } // resizing also clears
+      else { g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, n, n); }
+      g.setTransform(DPR, 0, 0, DPR, -ox, -oy);
+      g.globalCompositeOperation = "lighter";
+      g.lineCap = "round"; // as on the scene, where the filaments set it first
+      paint(g);
+      ctx.drawImage(c, ox / DPR, oy / DPR, n / DPR, n / DPR);
+    };
 
     const s = size / REF;
     const cx = D / 2, cy = D / 2;
@@ -278,14 +318,20 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
       return tc;
     };
 
+    interface Dust { ang: number; rf: number; sz: number; al: number; t: string }
+    interface DustGroup { t: string; al: number; items: Dust[] }
+    interface RimSprite { key: string; c: HTMLCanvasElement; half: number }
     interface Planet {
       id: string; name: string; role: string; c: string;
       a: number; def: number; w: number; pr: number;
       tex: HTMLCanvasElement; rot: number; rw: number;
+      rim: RimSprite | null; // its pre-blurred rim glow, see rimSprite
+      halo: RimSprite | null; // atmosphere + local orbits, see planetHalo
       x: number; y: number; curR: number;
       ring: boolean; tilt: number;
       ringA: number; ringW: number;
-      ringDust: Array<{ ang: number; rf: number; sz: number; al: number; t: string }>;
+      ringDust: Dust[];
+      dustGroups: DustGroup[]; // ringDust by colour + alpha, one path each
       // card-design extras: faint local orbit circles + tiny travelling dots,
       // and one small grey moon of its own
       loc: number[];
@@ -304,6 +350,8 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
       tex: makeTexture(hexRgb(m.color)),
       rot: Math.random() * Math.PI * 2,
       rw: (Math.PI * 2) / (25 + (i % 4) * 6),      // self-rotation 25–43s
+      rim: null,
+      halo: null,
       x: 0, y: 0, curR: 0,                          // live position (hit-testing)
       ring: !!m.ring,                                // paid LLMs wear rings
       tilt: -0.45 + (i % 3) * 0.35,
@@ -315,10 +363,13 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
           ang: Math.random() * Math.PI * 2,
           rf: 0.82 + Math.random() * 0.36,           // spread across the band
           sz: roll > 0.93 ? 1.6 + Math.random() : 0.5 + Math.random() * 0.8,
-          al: roll > 0.93 ? 0.85 : 0.2 + Math.random() * 0.45, // comets sparkle
+          // comets sparkle; the rest spread over 0.2–0.65 in four steps, so
+          // the dust batches into a handful of paths (see drawRingDust)
+          al: roll > 0.93 ? 0.85 : DUST_ALPHAS[Math.floor(Math.random() * DUST_ALPHAS.length)],
           t: roll > 0.93 ? DUST_ICE : roll > 0.5 ? DUST_SAND : DUST_GREY,
         };
       }),
+      dustGroups: [],
       loc: [1.55, 1.95, 2.35].slice(0, 2 + (i % 2)),
       locDots: Array.from({ length: 3 + (i % 3) }, () => ({
         ri: Math.floor(Math.random() * 3),
@@ -331,6 +382,90 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
       moonS: 0.14 + (i % 3) * 0.04,
     }));
     planetsRef.current = planets as never[];
+    for (const pl of planets) {
+      const groups = new Map<string, DustGroup>();
+      for (const dd of pl.ringDust) {
+        const k = `${dd.t}|${dd.al}`;
+        if (!groups.has(k)) groups.set(k, { t: dd.t, al: dd.al, items: [] });
+        groups.get(k)!.items.push(dd);
+      }
+      pl.dustGroups = [...groups.values()];
+    }
+
+    // ---- Planet rims: a full ring in the planet's colour, a hot arc facing
+    // the core and a white-hot edge, each with a glow. The glows used to be
+    // canvas shadows every frame (see Glow layers above), then a glow layer
+    // per planet — nine extra raster passes a frame. But a rim's shape never
+    // changes, only which way it faces the core, so its glow is blurred ONCE
+    // into a sprite pointing along +x and rotated into place each frame. The
+    // strokes themselves are drawn live, shadowless, so they stay crisp.
+    // Shadows and strokes all add ("lighter"), so splitting them is exact.
+    const rimStrokes = (isAct: boolean) => [
+      { r: 0.99, half: Math.PI, w: 1.6, blur: 10, white: false, al: isAct ? 0.5 : 0.3 },  // full ring
+      { r: 0.97, half: 1.25, w: 2.2, blur: 14, white: false, al: isAct ? 0.95 : 0.75 },   // lit arc
+      { r: 0.96, half: 0.8, w: 1, blur: 8, white: true, al: 0.55 },                        // white edge
+    ];
+    const RIM_STROKES = { idle: rimStrokes(false), active: rimStrokes(true) };
+    const rimSprite = (pl: Planet, pr: number, isAct: boolean): RimSprite => {
+      const key = `${pr}|${isAct}`;
+      if (pl.rim?.key === key) return pl.rim;
+      const n = Math.ceil((pr + 30 * s + 2) * 2 * DPR); // out past the widest blur (14·s)
+      const c = document.createElement("canvas");
+      c.width = n; c.height = n;
+      const g = c.getContext("2d")!;
+      g.globalCompositeOperation = "lighter";
+      // Each shadow alone, on a scratch canvas: the stroke is drawn far off to
+      // the left and its shadow thrown back to the centre, so only the glow
+      // lands. (Shadow offsets are in device pixels — the transform doesn't
+      // apply to them.) Plain source-over there, where this trick is reliable;
+      // the three are then added together onto the sprite.
+      const tmp = document.createElement("canvas");
+      tmp.width = n; tmp.height = n;
+      const t = tmp.getContext("2d")!;
+      const OFF = n * 4;
+      t.lineCap = "round";
+      t.shadowOffsetX = OFF * DPR;
+      for (const k of isAct ? RIM_STROKES.active : RIM_STROKES.idle) {
+        t.setTransform(1, 0, 0, 1, 0, 0);
+        t.clearRect(0, 0, n, n);
+        t.setTransform(DPR, 0, 0, DPR, n / 2, n / 2);
+        t.shadowColor = k.white ? "rgba(255,255,255,1)" : rgba(pl.c, 1);
+        t.shadowBlur = k.blur * s;
+        t.strokeStyle = k.white ? rgba("255,255,255", k.al) : rgba(pl.c, k.al);
+        t.lineWidth = k.w * s;
+        t.beginPath(); t.arc(-OFF, 0, pr * k.r, -k.half, k.half); t.stroke();
+        g.drawImage(tmp, 0, 0);
+      }
+      return (pl.rim = { key, c, half: n / 2 / DPR });
+    };
+    const planetHalo = (pl: Planet, pr: number, isAct: boolean, orbitsOn: boolean,
+                        ocfg: { mul: number; wmul: number; style: string }, orbitDash: number[]): RimSprite => {
+      const key = `${pr}|${isAct}|${orbitsOn}|${ocfg.style}|${ocfg.mul}|${ocfg.wmul}`;
+      if (pl.halo?.key === key) return pl.halo;
+      const n = Math.ceil((pr * 3 + 2) * 2 * DPR); // the atmosphere is the widest part
+      const c = pl.halo?.c ?? document.createElement("canvas");
+      c.width = n; c.height = n; // also clears
+      const g = c.getContext("2d")!;
+      g.setTransform(DPR, 0, 0, DPR, n / 2, n / 2);
+      g.globalCompositeOperation = "lighter";
+      const atm = g.createRadialGradient(0, 0, pr * 0.4, 0, 0, pr * 3);
+      atm.addColorStop(0, rgba(pl.c, isAct ? 0.6 : 0.35));
+      atm.addColorStop(1, rgba(pl.c, 0));
+      g.fillStyle = atm;
+      g.beginPath(); g.arc(0, 0, pr * 3, 0, Math.PI * 2); g.fill();
+      if (orbitsOn) {
+        g.setLineDash(orbitDash);
+        for (let li = 0; li < pl.loc.length; li++) {
+          g.strokeStyle = rgba(
+            pl.c,
+            (0.13 - li * 0.03) * (isAct ? 1.7 : 1) * Math.min(1.6, ocfg.mul),
+          );
+          g.lineWidth = 1 * ocfg.wmul;
+          g.beginPath(); g.arc(0, 0, pr * pl.loc[li], 0, Math.PI * 2); g.stroke();
+        }
+      }
+      return (pl.halo = { key, c, half: n / 2 / DPR });
+    };
 
     // ---- Orbital guides + node dots ----------------------------------------
     const rMin = R * 1.4, rMax = size / 2 - 4 * s;
@@ -345,10 +480,41 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
       }
     }
 
+    // The ring's glow layer reaches the widest thing in it — the speaking
+    // ring at 1.12× (or the halo's 34·s blur) — at the fullest breath.
+    const ringGlow = glowLayer();
+    const ringHalf = R * 1.03 * 1.015 * 1.12 + 73 * s + 2;
+
+    // ---- Cached layers: parts of the scene that only change with a setting
+    // (the backing, the orbit guides, the slot orbits). Each is painted once,
+    // in scene coordinates, into a canvas aligned to whole device pixels —
+    // so stamping it back is pixel-identical — and repainted only when its
+    // key changes. Dashed circles are some of the costliest strokes a canvas
+    // draws, so not redrawing ~40 of them every frame matters.
+    interface Cached { key: string; c: HTMLCanvasElement; ox: number; oy: number; n: number }
+    const cachedLayer = (slot: { v: Cached | null }, key: string, x: number, y: number,
+                         half: number, paint: (g: CanvasRenderingContext2D) => void) => {
+      if (slot.v?.key !== key) {
+        const ox = Math.floor((x - half) * DPR), oy = Math.floor((y - half) * DPR);
+        const n = Math.ceil(half * 2 * DPR) + 2;
+        const c = slot.v?.c ?? document.createElement("canvas");
+        c.width = n; c.height = n; // also clears
+        const g = c.getContext("2d")!;
+        g.setTransform(DPR, 0, 0, DPR, -ox, -oy);
+        paint(g);
+        slot.v = { key, c, ox, oy, n };
+      }
+      const v = slot.v;
+      ctx.drawImage(v.c, v.ox / DPR, v.oy / DPR, v.n / DPR, v.n / DPR);
+    };
+    const backLayer: { v: Cached | null } = { v: null };
+    const slotLayer: { v: Cached | null } = { v: null };
+
     let rot = 0, glow = 0.55, pulse = 0, raf = 0;
     let last = performance.now();
 
     const draw = (now: number) => {
+      if (pausedRef.current) { raf = 0; return; } // resumeRef restarts it
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       const os: OrbState = (stateRef.current as OrbState) in SPIN ? (stateRef.current as OrbState) : "idle";
@@ -371,34 +537,38 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
 
       ctx.clearRect(0, 0, D, D);
 
-      // Deep black backing — the core lives in true darkness, like the still.
-      // This buries the busy universe video around the ring so the flare and
-      // filaments are the only light sources near the void.
-      const backing = ctx.createRadialGradient(cx, cy, R * 0.5, cx, cy, R * 3.6);
-      backing.addColorStop(0, "rgba(0,0,0,0.97)");
-      backing.addColorStop(0.5, "rgba(0,0,3,0.82)");
-      backing.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = backing;
-      ctx.beginPath(); ctx.arc(cx, cy, R * 3.6, 0, Math.PI * 2); ctx.fill();
-
-      // Orbital guides — styled by Settings → Orbit Lines: brightness,
-      // width and dash style are the user's, "hidden" removes them entirely.
       const ocfg = orbitCfgRef.current;
       const orbitsOn = ocfg.style !== "hidden" && ocfg.mul > 0.01;
       const orbitDash: number[] =
         ocfg.style === "solid" ? [] :
         ocfg.style === "dotted" ? [1.5 * s, 7 * s] : [5 * s, 9 * s];
-      if (orbitsOn) {
-        ctx.setLineDash(ocfg.style === "dashed" ? [] : orbitDash); // guides stay calm
-        for (let i = 0; i < RINGS; i++) {
-          ctx.beginPath();
-          ctx.arc(cx, cy, guideR[i], 0, Math.PI * 2);
-          ctx.strokeStyle = rgba(INNER, (0.035 + (i % 4 === 0 ? 0.02 : 0)) * ocfg.mul);
-          ctx.lineWidth = 1 * ocfg.wmul;
-          ctx.stroke();
+      // The backing and the guides never move — one cached layer, repainted
+      // only when an Orbit Lines setting changes.
+      cachedLayer(backLayer, `${ocfg.style}|${ocfg.mul}|${ocfg.wmul}`, cx, cy,
+                  Math.max(R * 3.6, rMax + ocfg.wmul) + 4, (g) => {
+        // Deep black backing — the core lives in true darkness, like the still.
+        // This buries the busy universe video around the ring so the flare and
+        // filaments are the only light sources near the void.
+        const backing = g.createRadialGradient(cx, cy, R * 0.5, cx, cy, R * 3.6);
+        backing.addColorStop(0, "rgba(0,0,0,0.97)");
+        backing.addColorStop(0.5, "rgba(0,0,3,0.82)");
+        backing.addColorStop(1, "rgba(0,0,0,0)");
+        g.fillStyle = backing;
+        g.beginPath(); g.arc(cx, cy, R * 3.6, 0, Math.PI * 2); g.fill();
+
+        // Orbital guides — styled by Settings → Orbit Lines: brightness,
+        // width and dash style are the user's, "hidden" removes them entirely.
+        if (orbitsOn) {
+          g.setLineDash(ocfg.style === "dashed" ? [] : orbitDash); // guides stay calm
+          for (let i = 0; i < RINGS; i++) {
+            g.beginPath();
+            g.arc(cx, cy, guideR[i], 0, Math.PI * 2);
+            g.strokeStyle = rgba(INNER, (0.035 + (i % 4 === 0 ? 0.02 : 0)) * ocfg.mul);
+            g.lineWidth = 1 * ocfg.wmul;
+            g.stroke();
+          }
         }
-        ctx.setLineDash([]);
-      }
+      });
       if (orbitsOn) for (const n of nodes) {
         const a = n.a + rot * 0.25;
         const x = cx + guideR[n.ring] * Math.cos(a);
@@ -482,44 +652,44 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
       // wrapped in electric violet, hugging the void tightly.
       const ringR = R * 1.03 * breathe;
       ctx.globalCompositeOperation = "lighter";
-      ctx.save();
-      // wide outer violet halo
-      ctx.shadowColor = rgba(MAIN, 1);
-      ctx.shadowBlur = 34 * s;
-      ctx.strokeStyle = rgba(MAIN, 0.45 * glow + 0.18);
-      ctx.lineWidth = 9 * s;
-      ctx.beginPath(); ctx.arc(cx, cy, ringR * 1.06, 0, Math.PI * 2); ctx.stroke();
-      // bright violet band
-      ctx.shadowColor = rgba(INNER, 1);
-      ctx.shadowBlur = 24 * s;
-      ctx.strokeStyle = rgba(INNER, 0.7 * glow + 0.22);
-      ctx.lineWidth = 4.5 * s;
-      ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, Math.PI * 2); ctx.stroke();
-      // white-hot inner filament — brightness rides the flicker
-      ctx.shadowColor = rgba(PHOTON, 1);
-      ctx.shadowBlur = 15 * s;
-      ctx.strokeStyle = rgba(PHOTON, (0.72 + 0.28 * glow) * flicker);
-      ctx.lineWidth = 2.1 * s;
-      ctx.beginPath(); ctx.arc(cx, cy, ringR * 0.985, 0, Math.PI * 2); ctx.stroke();
-      // shimmer arcs — three hot segments racing around the ring at
-      // different speeds/directions, so the ring is never the same twice.
-      // Thinking spins the core fast, and these whip around with it.
-      for (let si2 = 0; si2 < 3; si2++) {
-        const dir2 = si2 % 2 ? -1 : 1;
-        const sa = rot * (1.6 + si2 * 0.7) * dir2 + si2 * 2.3;
-        const alen = 0.7 + 0.35 * Math.sin(pulse * 1.7 + si2 * 2.1);
-        ctx.shadowBlur = 20 * s;
-        ctx.strokeStyle = rgba(PHOTON, (0.2 + 0.22 * Math.sin(pulse * 2.4 + si2 * 1.4)) * glow + 0.05);
-        ctx.lineWidth = 2.6 * s;
-        ctx.beginPath(); ctx.arc(cx, cy, ringR, sa, sa + alen); ctx.stroke();
-      }
-      if (os === "speaking") {
-        ctx.shadowBlur = 0;
-        ctx.strokeStyle = rgba(CYAN, 0.18 + 0.18 * Math.sin(pulse * 2));
-        ctx.lineWidth = 1.8 * s;
-        ctx.beginPath(); ctx.arc(cx, cy, ringR * 1.12, 0, Math.PI * 2); ctx.stroke();
-      }
-      ctx.restore();
+      withGlow(ringGlow, cx, cy, ringHalf, (g) => {
+        // wide outer violet halo
+        g.shadowColor = rgba(MAIN, 1);
+        g.shadowBlur = 34 * s;
+        g.strokeStyle = rgba(MAIN, 0.45 * glow + 0.18);
+        g.lineWidth = 9 * s;
+        g.beginPath(); g.arc(cx, cy, ringR * 1.06, 0, Math.PI * 2); g.stroke();
+        // bright violet band
+        g.shadowColor = rgba(INNER, 1);
+        g.shadowBlur = 24 * s;
+        g.strokeStyle = rgba(INNER, 0.7 * glow + 0.22);
+        g.lineWidth = 4.5 * s;
+        g.beginPath(); g.arc(cx, cy, ringR, 0, Math.PI * 2); g.stroke();
+        // white-hot inner filament — brightness rides the flicker
+        g.shadowColor = rgba(PHOTON, 1);
+        g.shadowBlur = 15 * s;
+        g.strokeStyle = rgba(PHOTON, (0.72 + 0.28 * glow) * flicker);
+        g.lineWidth = 2.1 * s;
+        g.beginPath(); g.arc(cx, cy, ringR * 0.985, 0, Math.PI * 2); g.stroke();
+        // shimmer arcs — three hot segments racing around the ring at
+        // different speeds/directions, so the ring is never the same twice.
+        // Thinking spins the core fast, and these whip around with it.
+        for (let si2 = 0; si2 < 3; si2++) {
+          const dir2 = si2 % 2 ? -1 : 1;
+          const sa = rot * (1.6 + si2 * 0.7) * dir2 + si2 * 2.3;
+          const alen = 0.7 + 0.35 * Math.sin(pulse * 1.7 + si2 * 2.1);
+          g.shadowBlur = 20 * s;
+          g.strokeStyle = rgba(PHOTON, (0.2 + 0.22 * Math.sin(pulse * 2.4 + si2 * 1.4)) * glow + 0.05);
+          g.lineWidth = 2.6 * s;
+          g.beginPath(); g.arc(cx, cy, ringR, sa, sa + alen); g.stroke();
+        }
+        if (os === "speaking") {
+          g.shadowBlur = 0;
+          g.strokeStyle = rgba(CYAN, 0.18 + 0.18 * Math.sin(pulse * 2));
+          g.lineWidth = 1.8 * s;
+          g.beginPath(); g.arc(cx, cy, ringR * 1.12, 0, Math.PI * 2); g.stroke();
+        }
+      });
 
       // ---- Twin hotspots — the two blinding points where the beam pierces
       // the ring at the horizontal, exactly like the reference.
@@ -593,20 +763,25 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
       // visible orbit rings — one slot per planet. Styled by the Orbit Lines
       // settings; edit mode overrides them (you need to SEE where to drop a
       // planet), and the hovered slot lights up cyan during a drag.
+      // Cached like the guides; a drag repaints it only when the hovered slot
+      // changes.
       if (orbitsOn || editMode) {
-        for (let si = 0; si < SLOT_FRACS.length; si++) {
-          const rr = slotR(si);
-          const hovered = planetDragRef.current !== null && dragSlotRef.current === si;
-          ctx.setLineDash(editMode ? [5 * s, 9 * s] : orbitDash);
-          ctx.beginPath();
-          ctx.arc(cx, cy, rr, 0, Math.PI * 2);
-          ctx.strokeStyle = hovered
-            ? rgba(CYAN, 0.65)
-            : rgba(INNER, editMode ? 0.45 : Math.min(0.6, 0.22 * ocfg.mul));
-          ctx.lineWidth = hovered ? 1.8 : 1.2 * (editMode ? 1 : ocfg.wmul);
-          ctx.stroke();
-          ctx.setLineDash([]);
-        }
+        const hov = planetDragRef.current !== null ? dragSlotRef.current ?? -1 : -1;
+        cachedLayer(slotLayer, `${editMode}|${hov}|${pcfg.orbit}|${ocfg.style}|${ocfg.mul}|${ocfg.wmul}`,
+                    cx, cy, slotR(SLOT_FRACS.length - 1) + 2 * Math.max(1, ocfg.wmul) + 4, (g) => {
+          for (let si = 0; si < SLOT_FRACS.length; si++) {
+            const rr = slotR(si);
+            const hovered = si === hov;
+            g.setLineDash(editMode ? [5 * s, 9 * s] : orbitDash);
+            g.beginPath();
+            g.arc(cx, cy, rr, 0, Math.PI * 2);
+            g.strokeStyle = hovered
+              ? rgba(CYAN, 0.65)
+              : rgba(INNER, editMode ? 0.45 : Math.min(0.6, 0.22 * ocfg.mul));
+            g.lineWidth = hovered ? 1.8 : 1.2 * (editMode ? 1 : ocfg.wmul);
+            g.stroke();
+          }
+        });
       }
 
       for (const pl of planets) {
@@ -624,29 +799,14 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
         const pr = pl.pr * s * pcfg.size * (isAct ? 1.25 : 1);
         pl.x = x; pl.y = y; pl.curR = pr; // published for hit-testing
 
-        // atmosphere glow
+        // atmosphere glow + local orbit circles — the card design's faint
+        // rings + tiny dots travelling them, all in the planet's own color.
+        // The rings follow the Orbit Lines setting too (dimmed, styled, or
+        // gone). Neither changes shape as the planet moves, so both live in
+        // one sprite per planet, repainted only when a setting changes.
         ctx.globalCompositeOperation = "lighter";
-        const atm = ctx.createRadialGradient(x, y, pr * 0.4, x, y, pr * 3);
-        atm.addColorStop(0, rgba(pl.c, isAct ? 0.6 : 0.35));
-        atm.addColorStop(1, rgba(pl.c, 0));
-        ctx.fillStyle = atm;
-        ctx.beginPath(); ctx.arc(x, y, pr * 3, 0, Math.PI * 2); ctx.fill();
-
-        // local orbit circles — the card design's faint rings + tiny dots
-        // travelling them, all in the planet's own color. They follow the
-        // Orbit Lines setting too (dimmed, styled, or gone).
-        if (orbitsOn) {
-          ctx.setLineDash(orbitDash);
-          for (let li = 0; li < pl.loc.length; li++) {
-            ctx.strokeStyle = rgba(
-              pl.c,
-              (0.13 - li * 0.03) * (isAct ? 1.7 : 1) * Math.min(1.6, ocfg.mul),
-            );
-            ctx.lineWidth = 1 * ocfg.wmul;
-            ctx.beginPath(); ctx.arc(x, y, pr * pl.loc[li], 0, Math.PI * 2); ctx.stroke();
-          }
-          ctx.setLineDash([]);
-        }
+        const halo = planetHalo(pl, pr, isAct, orbitsOn, ocfg, orbitDash);
+        ctx.drawImage(halo.c, x - halo.half, y - halo.half, halo.half * 2, halo.half * 2);
         for (const ld of pl.locDots) {
           const ang = ld.a + pulse * ld.w;
           const lr = pr * pl.loc[ld.ri % pl.loc.length];
@@ -663,18 +823,26 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
         const rgMul = Math.max(0.6, pcfg.rings);
         const rgx = pr * 2.2 * rgMul, rgy = pr * 0.66 * rgMul;
         const ringCt = Math.cos(pl.tilt), ringSt = Math.sin(pl.tilt);
+        // One path per colour + alpha instead of one fill per grain: ~95
+        // grains a ringed planet became a dozen fills. (Additive, so the
+        // order the grains land in doesn't matter.)
+        const dustR = s * Math.max(0.7, Math.min(2, pcfg.size));
         const drawRingDust = (frontHalf: boolean) => {
-          for (const dd of pl.ringDust) {
-            const th = dd.ang + pl.ringA;
-            const sn = Math.sin(th);
-            if (frontHalf ? sn < 0 : sn >= 0) continue;
-            const ex = Math.cos(th) * rgx * dd.rf;
-            const ey = sn * rgy * dd.rf;
-            const px = x + ex * ringCt - ey * ringSt;
-            const py = y + ex * ringSt + ey * ringCt;
-            ctx.fillStyle = rgba(dd.t, dd.al * (frontHalf ? 1 : 0.55));
+          for (const grp of pl.dustGroups) {
+            ctx.fillStyle = rgba(grp.t, grp.al * (frontHalf ? 1 : 0.55));
             ctx.beginPath();
-            ctx.arc(px, py, dd.sz * s * Math.max(0.7, Math.min(2, pcfg.size)), 0, Math.PI * 2);
+            for (const dd of grp.items) {
+              const th = dd.ang + pl.ringA;
+              const sn = Math.sin(th);
+              if (frontHalf ? sn < 0 : sn >= 0) continue;
+              const ex = Math.cos(th) * rgx * dd.rf;
+              const ey = sn * rgy * dd.rf;
+              const px = x + ex * ringCt - ey * ringSt;
+              const py = y + ex * ringSt + ey * ringCt;
+              const dr = dd.sz * dustR;
+              ctx.moveTo(px + dr, py); // start each grain on its own subpath
+              ctx.arc(px, py, dr, 0, Math.PI * 2);
+            }
             ctx.fill();
           }
         };
@@ -714,23 +882,20 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
         // blazing brightest on the core-facing side (that's the light source)
         const toCore = Math.atan2(cy - y, cx - x);
         ctx.globalCompositeOperation = "lighter";
+        const rim = rimSprite(pl, pr, isAct);
         ctx.save();
-        ctx.shadowColor = rgba(pl.c, 1);
-        ctx.shadowBlur = 10 * s;
-        ctx.strokeStyle = rgba(pl.c, isAct ? 0.5 : 0.3);
-        ctx.lineWidth = 1.6 * s;
-        ctx.beginPath(); ctx.arc(x, y, pr * 0.99, 0, Math.PI * 2); ctx.stroke();
-        // hot lit arc facing the core
-        ctx.shadowBlur = 14 * s;
-        ctx.strokeStyle = rgba(pl.c, isAct ? 0.95 : 0.75);
-        ctx.lineWidth = 2.2 * s;
-        ctx.beginPath(); ctx.arc(x, y, pr * 0.97, toCore - 1.25, toCore + 1.25); ctx.stroke();
-        ctx.shadowColor = "rgba(255,255,255,1)";
-        ctx.shadowBlur = 8 * s;
-        ctx.strokeStyle = "rgba(255,255,255,0.55)";
-        ctx.lineWidth = 1 * s;
-        ctx.beginPath(); ctx.arc(x, y, pr * 0.96, toCore - 0.8, toCore + 0.8); ctx.stroke();
+        ctx.translate(x, y);
+        ctx.rotate(toCore);
+        ctx.drawImage(rim.c, -rim.half, -rim.half, rim.half * 2, rim.half * 2);
         ctx.restore();
+        for (const k of isAct ? RIM_STROKES.active : RIM_STROKES.idle) {
+          ctx.strokeStyle = k.white ? rgba("255,255,255", k.al) : rgba(pl.c, k.al);
+          ctx.lineWidth = k.w * s;
+          ctx.beginPath();
+          if (k.half === Math.PI) ctx.arc(x, y, pr * k.r, 0, Math.PI * 2);
+          else ctx.arc(x, y, pr * k.r, toCore - k.half, toCore + k.half);
+          ctx.stroke();
+        }
 
         // Saturn ring — front half sweeping over the body
         if (pl.ring) {
@@ -800,10 +965,22 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null 
     };
 
     raf = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(raf);
+    resumeRef.current = () => {
+      if (raf) return;
+      last = performance.now(); // no catch-up jump for the time spent paused
+      raf = requestAnimationFrame(draw);
+    };
+    return () => {
+      cancelAnimationFrame(raf);
+      resumeRef.current = () => {};
+    };
     // `density` is a real dependency: particle arrays are sized once at setup,
     // so changing it has to rebuild the scene rather than just re-render.
   }, [size, density]);
+
+  useEffect(() => {
+    if (!paused) resumeRef.current();
+  }, [paused]);
 
   // Dragging the core is only possible in edit mode (Core menu → Edit).
   // Position persists on Save, so AURA is exactly where you left her on relaunch.

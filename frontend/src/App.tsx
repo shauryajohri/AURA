@@ -165,6 +165,9 @@ export default function App() {
                 activeModelId={activeModelId}
                 activity={activity}
                 listening={presence === "working"}
+                // Home stays mounted under the Domain; without this the core
+                // kept drawing behind it and the Domain ran at ~6 fps.
+                paused={domainOpen}
               />
               <HomeStatusCard status={status} activeModelId={activeModelId} mode={mode} />
             </div>

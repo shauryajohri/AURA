@@ -1,0 +1,2080 @@
+{
+  "label": "baseline",
+  "when": "2026-10-21T13:00:10",
+  "machine": {
+    "cpu_threads": 12,
+    "ram_gb": 15.7
+  },
+  "scenarios": [
+    {
+      "label": "machine idle (AURA closed)",
+      "seconds": 15,
+      "aura": {
+        "cpu_pct": 0,
+        "ram_mb": 0,
+        "gpu_pct": 0,
+        "gpu_shared_mb": 0,
+        "processes": 0
+      },
+      "per_process": {},
+      "machine": {
+        "cpu_pct": 13.386666666666667,
+        "gpu_3d_pct": 0.5075016955042501,
+        "ram_used_mb": 13440.08984375,
+        "gpu_samples": 15,
+        "top_other_cpu_pct": {
+          "(this script)": 3.9522222222222223,
+          "claude.exe": 2.376111111111111,
+          "svchost.exe": 1.7177777777777774,
+          "System": 0.9338888888888889,
+          "comet.exe": 0.7244444444444444,
+          "dwm.exe": 0.24444444444444444
+        }
+      },
+      "frames": null
+    },
+    {
+      "label": "Home \u2014 idle",
+      "seconds": 15,
+      "aura": {
+        "cpu_pct": 8.051111111111112,
+        "ram_mb": 641.80859375,
+        "gpu_pct": 85.43781855558373,
+        "gpu_shared_mb": 386.0078125,
+        "processes": 7
+      },
+      "per_process": {
+        "electron main": {
+          "count": 1.0,
+          "cpu_pct": 0.545,
+          "cpu_pct_peak": 1.3916666666666666,
+          "ram_mb": 28.1953125,
+          "commit_mb": 37.8515625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "gpu process": {
+          "count": 1.0,
+          "cpu_pct": 5.4255555555555555,
+          "cpu_pct_peak": 6.841666666666666,
+          "ram_mb": 422.5234375,
+          "commit_mb": 467.5703125,
+          "gpu_pct": 85.43781855558373,
+          "3d_pct": 85.43781855558373,
+          "video_decode_pct": 1.054900459060976,
+          "shared_mb": 386.0078125,
+          "dedicated_mb": 0.0
+        },
+        "network": {
+          "count": 1.0,
+          "cpu_pct": 0.0027777777777777775,
+          "cpu_pct_peak": 0.024999999999999998,
+          "ram_mb": 7.92578125,
+          "commit_mb": 12.88671875,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "main window": {
+          "count": 1.0,
+          "cpu_pct": 1.32,
+          "cpu_pct_peak": 2.2583333333333333,
+          "ram_mb": 73.8203125,
+          "commit_mb": 87.890625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "buddy window": {
+          "count": 1.0,
+          "cpu_pct": 0.42166666666666663,
+          "cpu_pct_peak": 0.9166666666666666,
+          "ram_mb": 16.81640625,
+          "commit_mb": 26.11328125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "brain (python)": {
+          "count": 2.0,
+          "cpu_pct": 0.33611111111111114,
+          "cpu_pct_peak": 0.9583333333333334,
+          "ram_mb": 92.52734375,
+          "commit_mb": 451.14453125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        }
+      },
+      "machine": {
+        "cpu_pct": 36.846666666666664,
+        "gpu_3d_pct": 85.78292672715054,
+        "ram_used_mb": 14066.49609375,
+        "gpu_samples": 15,
+        "top_other_cpu_pct": {
+          "(this script)": 7.069444444444444,
+          "Code.exe": 3.2249999999999996,
+          "svchost.exe": 3.1805555555555562,
+          "System": 2.3316666666666666,
+          "comet.exe": 1.5655555555555556,
+          "dwm.exe": 0.9450000000000001
+        }
+      },
+      "frames": {
+        "fps": 5.632206425616028,
+        "frame_ms_p50": 183.10000000000582,
+        "frame_ms_p95": 217,
+        "frame_ms_max": 266.59999999999854,
+        "slow_frames_pct": 100,
+        "visible": "visible",
+        "focused": false,
+        "js_heap_mb": 9.5367431640625,
+        "dom_nodes": 166,
+        "dpr": 1.25,
+        "viewport": "1536x816",
+        "videos_playing": [
+          "aura-main.mp4 1672x940"
+        ],
+        "canvases": [
+          "particle-field 1920x1020",
+          "bh-canvas 2175x2175",
+          "cursor-lens 175x175"
+        ]
+      }
+    },
+    {
+      "label": "Home \u2014 thinking (simulated)",
+      "seconds": 15,
+      "aura": {
+        "cpu_pct": 6.321666666666667,
+        "ram_mb": 649.23046875,
+        "gpu_pct": 84.26259093946676,
+        "gpu_shared_mb": 389.70703125,
+        "processes": 7
+      },
+      "per_process": {
+        "electron main": {
+          "count": 1.0,
+          "cpu_pct": 0.041666666666666664,
+          "cpu_pct_peak": 0.125,
+          "ram_mb": 28.15625,
+          "commit_mb": 37.796875,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "gpu process": {
+          "count": 1.0,
+          "cpu_pct": 4.518888888888889,
+          "cpu_pct_peak": 4.991666666666666,
+          "ram_mb": 427.546875,
+          "commit_mb": 472.62109375,
+          "gpu_pct": 84.26259093946676,
+          "3d_pct": 84.26259093946676,
+          "video_decode_pct": 0.7639808425780489,
+          "shared_mb": 389.70703125,
+          "dedicated_mb": 0.0
+        },
+        "network": {
+          "count": 1.0,
+          "cpu_pct": 0.004999999999999999,
+          "cpu_pct_peak": 0.024999999999999998,
+          "ram_mb": 7.890625,
+          "commit_mb": 12.8125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "main window": {
+          "count": 1.0,
+          "cpu_pct": 1.2433333333333334,
+          "cpu_pct_peak": 1.8416666666666668,
+          "ram_mb": 75.9453125,
+          "commit_mb": 92.80859375,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "buddy window": {
+          "count": 1.0,
+          "cpu_pct": 0.2783333333333333,
+          "cpu_pct_peak": 0.525,
+          "ram_mb": 17.08984375,
+          "commit_mb": 26.5234375,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "brain (python)": {
+          "count": 2.0,
+          "cpu_pct": 0.23444444444444443,
+          "cpu_pct_peak": 0.7916666666666666,
+          "ram_mb": 92.6015625,
+          "commit_mb": 451.1171875,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        }
+      },
+      "machine": {
+        "cpu_pct": 32.013333333333335,
+        "gpu_3d_pct": 84.42982308746822,
+        "ram_used_mb": 14072.546875,
+        "gpu_samples": 15,
+        "top_other_cpu_pct": {
+          "(this script)": 6.9688888888888885,
+          "Code.exe": 3.5172222222222222,
+          "svchost.exe": 3.203333333333332,
+          "System": 2.4205555555555556,
+          "comet.exe": 2.3088888888888888,
+          "audiodg.exe": 0.7961111111111111
+        }
+      },
+      "frames": {
+        "fps": 5.456480878181582,
+        "frame_ms_p50": 183.29999999998836,
+        "frame_ms_p95": 216.70000000001164,
+        "frame_ms_max": 250.5,
+        "slow_frames_pct": 100,
+        "visible": "visible",
+        "focused": false,
+        "js_heap_mb": 9.5367431640625,
+        "dom_nodes": 166,
+        "dpr": 1.25,
+        "viewport": "1536x816",
+        "videos_playing": [
+          "aura-main.mp4 1672x940"
+        ],
+        "canvases": [
+          "particle-field 1920x1020",
+          "bh-canvas 2175x2175",
+          "cursor-lens 175x175"
+        ]
+      }
+    },
+    {
+      "label": "Home \u2014 speaking (simulated, no audio)",
+      "seconds": 15,
+      "aura": {
+        "cpu_pct": 7.520555555555555,
+        "ram_mb": 690.79296875,
+        "gpu_pct": 82.18309122521582,
+        "gpu_shared_mb": 431.90234375,
+        "processes": 7
+      },
+      "per_process": {
+        "electron main": {
+          "count": 1.0,
+          "cpu_pct": 0.03666666666666667,
+          "cpu_pct_peak": 0.16666666666666666,
+          "ram_mb": 28.21875,
+          "commit_mb": 37.8671875,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "gpu process": {
+          "count": 1.0,
+          "cpu_pct": 5.646111111111111,
+          "cpu_pct_peak": 6.608333333333333,
+          "ram_mb": 470.7421875,
+          "commit_mb": 516.2890625,
+          "gpu_pct": 82.18309122521582,
+          "3d_pct": 82.18309122521582,
+          "video_decode_pct": 0.30775488033807946,
+          "shared_mb": 431.90234375,
+          "dedicated_mb": 0.0
+        },
+        "network": {
+          "count": 1.0,
+          "cpu_pct": 0.0011111111111111111,
+          "cpu_pct_peak": 0.016666666666666666,
+          "ram_mb": 7.8984375,
+          "commit_mb": 12.81640625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "main window": {
+          "count": 1.0,
+          "cpu_pct": 1.2944444444444445,
+          "cpu_pct_peak": 1.7666666666666666,
+          "ram_mb": 73.37109375,
+          "commit_mb": 90.9140625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "buddy window": {
+          "count": 1.0,
+          "cpu_pct": 0.24944444444444444,
+          "cpu_pct_peak": 0.45,
+          "ram_mb": 17.8125,
+          "commit_mb": 27.26171875,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "brain (python)": {
+          "count": 2.0,
+          "cpu_pct": 0.2927777777777778,
+          "cpu_pct_peak": 0.7833333333333333,
+          "ram_mb": 92.75,
+          "commit_mb": 451.29296875,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        }
+      },
+      "machine": {
+        "cpu_pct": 39.54,
+        "gpu_3d_pct": 82.30243863569491,
+        "ram_used_mb": 14353.58203125,
+        "gpu_samples": 15,
+        "top_other_cpu_pct": {
+          "(this script)": 7.031666666666667,
+          "comet.exe": 4.898333333333333,
+          "svchost.exe": 4.2333333333333325,
+          "Code.exe": 4.136666666666666,
+          "System": 2.7688888888888887,
+          "audiodg.exe": 0.9344444444444444
+        }
+      },
+      "frames": {
+        "fps": 5.015580984036617,
+        "frame_ms_p50": 200,
+        "frame_ms_p95": 250,
+        "frame_ms_max": 349.8999999999942,
+        "slow_frames_pct": 100,
+        "visible": "visible",
+        "focused": false,
+        "js_heap_mb": 9.5367431640625,
+        "dom_nodes": 168,
+        "dpr": 1.25,
+        "viewport": "1536x816",
+        "videos_playing": [
+          "aura-main.mp4 1672x940"
+        ],
+        "canvases": [
+          "particle-field 1920x1020",
+          "bh-canvas 2175x2175",
+          "cursor-lens 175x175"
+        ]
+      }
+    },
+    {
+      "label": "Home \u2014 idle, buddy switched off",
+      "seconds": 15,
+      "aura": {
+        "cpu_pct": 11.704444444444444,
+        "ram_mb": 648.578125,
+        "gpu_pct": 99.36665675620442,
+        "gpu_shared_mb": 398.7578125,
+        "processes": 7
+      },
+      "per_process": {
+        "electron main": {
+          "count": 1.0,
+          "cpu_pct": 0.08833333333333333,
+          "cpu_pct_peak": 0.16666666666666666,
+          "ram_mb": 27.4921875,
+          "commit_mb": 37.87109375,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "gpu process": {
+          "count": 1.0,
+          "cpu_pct": 9.323888888888888,
+          "cpu_pct_peak": 9.691666666666666,
+          "ram_mb": 428.80078125,
+          "commit_mb": 478.23828125,
+          "gpu_pct": 99.36665675620442,
+          "3d_pct": 99.36665675620442,
+          "video_decode_pct": 2.9013642377399216,
+          "shared_mb": 398.7578125,
+          "dedicated_mb": 0.0
+        },
+        "network": {
+          "count": 1.0,
+          "cpu_pct": 0.005,
+          "cpu_pct_peak": 0.024999999999999998,
+          "ram_mb": 7.6484375,
+          "commit_mb": 12.7890625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "main window": {
+          "count": 1.0,
+          "cpu_pct": 1.885,
+          "cpu_pct_peak": 2.308333333333333,
+          "ram_mb": 75.484375,
+          "commit_mb": 94.0390625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "buddy window": {
+          "count": 1.0,
+          "cpu_pct": 0.009444444444444445,
+          "cpu_pct_peak": 0.041666666666666664,
+          "ram_mb": 17.01171875,
+          "commit_mb": 26.42578125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "brain (python)": {
+          "count": 2.0,
+          "cpu_pct": 0.3927777777777778,
+          "cpu_pct_peak": 0.6666666666666666,
+          "ram_mb": 92.140625,
+          "commit_mb": 451.23046875,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        }
+      },
+      "machine": {
+        "cpu_pct": 62.54666666666667,
+        "gpu_3d_pct": 99.46119489363765,
+        "ram_used_mb": 14173.33984375,
+        "gpu_samples": 15,
+        "top_other_cpu_pct": {
+          "svchost.exe": 11.074444444444444,
+          "Code.exe": 8.443888888888889,
+          "(this script)": 7.556666666666667,
+          "comet.exe": 6.0200000000000005,
+          "System": 5.522777777777778,
+          "audiodg.exe": 1.19
+        }
+      },
+      "frames": {
+        "fps": 5.5212640329530975,
+        "frame_ms_p50": 183.10000000003492,
+        "frame_ms_p95": 216.70000000001164,
+        "frame_ms_max": 300.19999999995343,
+        "slow_frames_pct": 100,
+        "visible": "visible",
+        "focused": false,
+        "js_heap_mb": 9.5367431640625,
+        "dom_nodes": 166,
+        "dpr": 1.25,
+        "viewport": "1536x816",
+        "videos_playing": [
+          "aura-main.mp4 1672x940",
+          "aura-main.mp4 1672x940"
+        ],
+        "canvases": [
+          "particle-field 1920x1020",
+          "bh-canvas 2175x2175",
+          "cursor-lens 175x175"
+        ]
+      }
+    },
+    {
+      "label": "Home \u2014 idle, without background video",
+      "seconds": 15,
+      "aura": {
+        "cpu_pct": 6.313888888888889,
+        "ram_mb": 628.05078125,
+        "gpu_pct": 76.88984897876965,
+        "gpu_shared_mb": 491.66796875,
+        "processes": 7
+      },
+      "per_process": {
+        "electron main": {
+          "count": 1.0,
+          "cpu_pct": 0.04722222222222222,
+          "cpu_pct_peak": 0.10833333333333334,
+          "ram_mb": 25.41796875,
+          "commit_mb": 37.91015625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "gpu process": {
+          "count": 1.0,
+          "cpu_pct": 4.692777777777778,
+          "cpu_pct_peak": 5.091666666666667,
+          "ram_mb": 410.828125,
+          "commit_mb": 473.73828125,
+          "gpu_pct": 76.88984897876965,
+          "3d_pct": 76.88984897876965,
+          "video_decode_pct": 0.5587436950920576,
+          "shared_mb": 491.66796875,
+          "dedicated_mb": 0.0
+        },
+        "network": {
+          "count": 1.0,
+          "cpu_pct": 0.008333333333333333,
+          "cpu_pct_peak": 0.024999999999999998,
+          "ram_mb": 7.15625,
+          "commit_mb": 12.80078125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "main window": {
+          "count": 1.0,
+          "cpu_pct": 1.07,
+          "cpu_pct_peak": 1.2249999999999999,
+          "ram_mb": 77.87890625,
+          "commit_mb": 98.421875,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "buddy window": {
+          "count": 1.0,
+          "cpu_pct": 0.2627777777777778,
+          "cpu_pct_peak": 0.6916666666666668,
+          "ram_mb": 16.60546875,
+          "commit_mb": 27.14453125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "brain (python)": {
+          "count": 2.0,
+          "cpu_pct": 0.23277777777777778,
+          "cpu_pct_peak": 0.425,
+          "ram_mb": 90.1640625,
+          "commit_mb": 451.45703125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        }
+      },
+      "machine": {
+        "cpu_pct": 34.8,
+        "gpu_3d_pct": 76.98634224604768,
+        "ram_used_mb": 13789.4453125,
+        "gpu_samples": 15,
+        "top_other_cpu_pct": {
+          "(this script)": 6.961111111111111,
+          "comet.exe": 4.030555555555556,
+          "svchost.exe": 3.8688888888888875,
+          "Code.exe": 2.9561111111111114,
+          "System": 2.5905555555555555,
+          "audiodg.exe": 0.825
+        }
+      },
+      "frames": {
+        "fps": 4.890799319633889,
+        "frame_ms_p50": 200.09999999997672,
+        "frame_ms_p95": 249.90000000002328,
+        "frame_ms_max": 350.0999999999767,
+        "slow_frames_pct": 100,
+        "visible": "visible",
+        "focused": false,
+        "js_heap_mb": 9.5367431640625,
+        "dom_nodes": 167,
+        "dpr": 1.25,
+        "viewport": "1536x816",
+        "videos_playing": [
+          "aura-main.mp4 1672x940"
+        ],
+        "canvases": [
+          "particle-field 1920x1020",
+          "bh-canvas 2175x2175",
+          "cursor-lens 175x175"
+        ]
+      }
+    },
+    {
+      "label": "Home \u2014 idle, without particle field",
+      "seconds": 15,
+      "aura": {
+        "cpu_pct": 11.20611111111111,
+        "ram_mb": 600.203125,
+        "gpu_pct": 83.11867385566038,
+        "gpu_shared_mb": 474.01171875,
+        "processes": 7
+      },
+      "per_process": {
+        "electron main": {
+          "count": 1.0,
+          "cpu_pct": 0.029444444444444443,
+          "cpu_pct_peak": 0.11666666666666665,
+          "ram_mb": 25.3984375,
+          "commit_mb": 37.875,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "gpu process": {
+          "count": 1.0,
+          "cpu_pct": 9.302777777777777,
+          "cpu_pct_peak": 10.233333333333333,
+          "ram_mb": 394.671875,
+          "commit_mb": 457.2890625,
+          "gpu_pct": 83.11867385566038,
+          "3d_pct": 83.11867385566038,
+          "video_decode_pct": 0.6004433549233863,
+          "shared_mb": 474.01171875,
+          "dedicated_mb": 0.0
+        },
+        "network": {
+          "count": 1.0,
+          "cpu_pct": 0.006666666666666666,
+          "cpu_pct_peak": 0.024999999999999998,
+          "ram_mb": 7.12890625,
+          "commit_mb": 12.7421875,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "main window": {
+          "count": 1.0,
+          "cpu_pct": 1.305,
+          "cpu_pct_peak": 1.5833333333333333,
+          "ram_mb": 66.5,
+          "commit_mb": 82.67578125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "buddy window": {
+          "count": 1.0,
+          "cpu_pct": 0.315,
+          "cpu_pct_peak": 0.5416666666666666,
+          "ram_mb": 16.234375,
+          "commit_mb": 26.640625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "brain (python)": {
+          "count": 2.0,
+          "cpu_pct": 0.2472222222222222,
+          "cpu_pct_peak": 0.4666666666666666,
+          "ram_mb": 90.26953125,
+          "commit_mb": 451.4296875,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        }
+      },
+      "machine": {
+        "cpu_pct": 40.28,
+        "gpu_3d_pct": 83.19283870235398,
+        "ram_used_mb": 13694.81640625,
+        "gpu_samples": 15,
+        "top_other_cpu_pct": {
+          "(this script)": 7.107222222222222,
+          "comet.exe": 4.544444444444445,
+          "Code.exe": 3.5955555555555563,
+          "svchost.exe": 3.367777777777777,
+          "System": 2.338888888888889,
+          "audiodg.exe": 0.9405555555555556
+        }
+      },
+      "frames": {
+        "fps": 5.207794613238573,
+        "frame_ms_p50": 183.5,
+        "frame_ms_p95": 233.40000000002328,
+        "frame_ms_max": 267.30000000004657,
+        "slow_frames_pct": 100,
+        "visible": "visible",
+        "focused": false,
+        "js_heap_mb": 9.5367431640625,
+        "dom_nodes": 167,
+        "dpr": 1.25,
+        "viewport": "1536x816",
+        "videos_playing": [
+          "aura-main.mp4 1672x940"
+        ],
+        "canvases": [
+          "particle-field 1920x1020",
+          "bh-canvas 2175x2175",
+          "cursor-lens 175x175"
+        ]
+      }
+    },
+    {
+      "label": "Home \u2014 idle, without black hole",
+      "seconds": 15,
+      "aura": {
+        "cpu_pct": 11.355,
+        "ram_mb": 646.34375,
+        "gpu_pct": 96.21830825417325,
+        "gpu_shared_mb": 406.06640625,
+        "processes": 7
+      },
+      "per_process": {
+        "electron main": {
+          "count": 1.0,
+          "cpu_pct": 0.04888888888888889,
+          "cpu_pct_peak": 0.13333333333333333,
+          "ram_mb": 25.3984375,
+          "commit_mb": 37.87109375,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "gpu process": {
+          "count": 1.0,
+          "cpu_pct": 9.026666666666667,
+          "cpu_pct_peak": 9.4,
+          "ram_mb": 422.5625,
+          "commit_mb": 485.45703125,
+          "gpu_pct": 96.21830825417325,
+          "3d_pct": 96.21830825417325,
+          "video_decode_pct": 1.0454498725373158,
+          "shared_mb": 406.06640625,
+          "dedicated_mb": 0.0
+        },
+        "network": {
+          "count": 1.0,
+          "cpu_pct": 0.012222222222222223,
+          "cpu_pct_peak": 0.03333333333333333,
+          "ram_mb": 7.140625,
+          "commit_mb": 12.75390625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "main window": {
+          "count": 1.0,
+          "cpu_pct": 1.607222222222222,
+          "cpu_pct_peak": 1.825,
+          "ram_mb": 84.078125,
+          "commit_mb": 103.08203125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "buddy window": {
+          "count": 1.0,
+          "cpu_pct": 0.30166666666666664,
+          "cpu_pct_peak": 0.45,
+          "ram_mb": 16.71484375,
+          "commit_mb": 27.2890625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "brain (python)": {
+          "count": 2.0,
+          "cpu_pct": 0.35833333333333334,
+          "cpu_pct_peak": 0.7583333333333333,
+          "ram_mb": 90.44921875,
+          "commit_mb": 451.50390625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        }
+      },
+      "machine": {
+        "cpu_pct": 46.07333333333333,
+        "gpu_3d_pct": 96.30810073707629,
+        "ram_used_mb": 13921.0,
+        "gpu_samples": 15,
+        "top_other_cpu_pct": {
+          "(this script)": 7.5888888888888895,
+          "Code.exe": 5.450000000000001,
+          "comet.exe": 5.289444444444444,
+          "svchost.exe": 4.209444444444446,
+          "System": 2.9155555555555557,
+          "audiodg.exe": 1.0922222222222222
+        }
+      },
+      "frames": {
+        "fps": 5.843356754396411,
+        "frame_ms_p50": 166.79999999993015,
+        "frame_ms_p95": 233.5,
+        "frame_ms_max": 418.4000000000233,
+        "slow_frames_pct": 100,
+        "visible": "visible",
+        "focused": false,
+        "js_heap_mb": 9.5367431640625,
+        "dom_nodes": 167,
+        "dpr": 1.25,
+        "viewport": "1536x816",
+        "videos_playing": [
+          "aura-main.mp4 1672x940"
+        ],
+        "canvases": [
+          "particle-field 1920x1020",
+          "bh-canvas 2175x2175",
+          "cursor-lens 175x175"
+        ]
+      }
+    },
+    {
+      "label": "Home \u2014 idle, without cursor lens",
+      "seconds": 15,
+      "aura": {
+        "cpu_pct": 11.936111111111112,
+        "ram_mb": 651.16796875,
+        "gpu_pct": 94.28665594926879,
+        "gpu_shared_mb": 395.765625,
+        "processes": 7
+      },
+      "per_process": {
+        "electron main": {
+          "count": 1.0,
+          "cpu_pct": 0.057222222222222216,
+          "cpu_pct_peak": 0.15833333333333333,
+          "ram_mb": 25.39453125,
+          "commit_mb": 37.8671875,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "gpu process": {
+          "count": 1.0,
+          "cpu_pct": 9.522222222222222,
+          "cpu_pct_peak": 9.933333333333334,
+          "ram_mb": 423.328125,
+          "commit_mb": 485.93359375,
+          "gpu_pct": 94.28665594926879,
+          "3d_pct": 94.28665594926879,
+          "video_decode_pct": 0.7409274911283997,
+          "shared_mb": 395.765625,
+          "dedicated_mb": 0.0
+        },
+        "network": {
+          "count": 1.0,
+          "cpu_pct": 0.008888888888888889,
+          "cpu_pct_peak": 0.016666666666666666,
+          "ram_mb": 7.15625,
+          "commit_mb": 12.79296875,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "main window": {
+          "count": 1.0,
+          "cpu_pct": 1.6322222222222222,
+          "cpu_pct_peak": 1.8916666666666666,
+          "ram_mb": 88.28125,
+          "commit_mb": 107.67578125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "buddy window": {
+          "count": 1.0,
+          "cpu_pct": 0.375,
+          "cpu_pct_peak": 0.8083333333333332,
+          "ram_mb": 16.3828125,
+          "commit_mb": 26.80078125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "brain (python)": {
+          "count": 2.0,
+          "cpu_pct": 0.34055555555555556,
+          "cpu_pct_peak": 0.6416666666666667,
+          "ram_mb": 90.625,
+          "commit_mb": 451.421875,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        }
+      },
+      "machine": {
+        "cpu_pct": 44.28666666666667,
+        "gpu_3d_pct": 97.05151246252728,
+        "ram_used_mb": 13900.58203125,
+        "gpu_samples": 15,
+        "top_other_cpu_pct": {
+          "(this script)": 7.538333333333333,
+          "Code.exe": 6.728333333333332,
+          "comet.exe": 6.087222222222222,
+          "svchost.exe": 2.359999999999999,
+          "System": 2.348888888888889,
+          "audiodg.exe": 0.9883333333333334
+        }
+      },
+      "frames": {
+        "fps": 5.9259468011232626,
+        "frame_ms_p50": 166.70000000006985,
+        "frame_ms_p95": 233.10000000009313,
+        "frame_ms_max": 283,
+        "slow_frames_pct": 100,
+        "visible": "visible",
+        "focused": false,
+        "js_heap_mb": 9.5367431640625,
+        "dom_nodes": 167,
+        "dpr": 1.25,
+        "viewport": "1536x816",
+        "videos_playing": [
+          "aura-main.mp4 1672x940"
+        ],
+        "canvases": [
+          "particle-field 1920x1020",
+          "bh-canvas 2175x2175",
+          "cursor-lens 175x175"
+        ]
+      }
+    },
+    {
+      "label": "Home \u2014 idle, all four layers hidden",
+      "seconds": 15,
+      "aura": {
+        "cpu_pct": 10.202222222222222,
+        "ram_mb": 675.4375,
+        "gpu_pct": 80.24069691983821,
+        "gpu_shared_mb": 545.58203125,
+        "processes": 7
+      },
+      "per_process": {
+        "electron main": {
+          "count": 1.0,
+          "cpu_pct": 0.07666666666666666,
+          "cpu_pct_peak": 0.2333333333333333,
+          "ram_mb": 25.44140625,
+          "commit_mb": 37.890625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "gpu process": {
+          "count": 1.0,
+          "cpu_pct": 8.443333333333333,
+          "cpu_pct_peak": 9.958333333333334,
+          "ram_mb": 440.21484375,
+          "commit_mb": 503.359375,
+          "gpu_pct": 80.24069691983821,
+          "3d_pct": 80.24069691983821,
+          "video_decode_pct": 0.20839917372759378,
+          "shared_mb": 545.58203125,
+          "dedicated_mb": 0.0
+        },
+        "network": {
+          "count": 1.0,
+          "cpu_pct": 0.012777777777777779,
+          "cpu_pct_peak": 0.09166666666666667,
+          "ram_mb": 7.140625,
+          "commit_mb": 12.75390625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "main window": {
+          "count": 1.0,
+          "cpu_pct": 1.0611111111111111,
+          "cpu_pct_peak": 1.4166666666666667,
+          "ram_mb": 95.37109375,
+          "commit_mb": 113.890625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "buddy window": {
+          "count": 1.0,
+          "cpu_pct": 0.27944444444444444,
+          "cpu_pct_peak": 0.48333333333333334,
+          "ram_mb": 16.5703125,
+          "commit_mb": 26.9609375,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "brain (python)": {
+          "count": 2.0,
+          "cpu_pct": 0.3288888888888889,
+          "cpu_pct_peak": 0.6749999999999999,
+          "ram_mb": 90.69921875,
+          "commit_mb": 451.48828125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        }
+      },
+      "machine": {
+        "cpu_pct": 56.39333333333333,
+        "gpu_3d_pct": 82.28495735295765,
+        "ram_used_mb": 14264.62890625,
+        "gpu_samples": 15,
+        "top_other_cpu_pct": {
+          "(this script)": 7.1305555555555555,
+          "comet.exe": 6.426666666666668,
+          "Code.exe": 5.429444444444444,
+          "svchost.exe": 3.1438888888888887,
+          "System": 3.1044444444444443,
+          "ChatGPT.exe": 2.8188888888888886
+        }
+      },
+      "frames": {
+        "fps": 5.303695623698217,
+        "frame_ms_p50": 166.60000000009313,
+        "frame_ms_p95": 416.80000000004657,
+        "frame_ms_max": 800.2000000000698,
+        "slow_frames_pct": 86.43724696356276,
+        "visible": "visible",
+        "focused": false,
+        "js_heap_mb": 9.5367431640625,
+        "dom_nodes": 167,
+        "dpr": 1.25,
+        "viewport": "1536x816",
+        "videos_playing": [
+          "aura-main.mp4 1672x940"
+        ],
+        "canvases": [
+          "particle-field 1920x1020",
+          "bh-canvas 2175x2175",
+          "cursor-lens 175x175"
+        ]
+      }
+    },
+    {
+      "label": "Chats page",
+      "seconds": 15,
+      "aura": {
+        "cpu_pct": 15.572222222222221,
+        "ram_mb": 631.71875,
+        "gpu_pct": 31.486779264161544,
+        "gpu_shared_mb": 393.17578125,
+        "processes": 7
+      },
+      "per_process": {
+        "electron main": {
+          "count": 1.0,
+          "cpu_pct": 0.08722222222222223,
+          "cpu_pct_peak": 0.6916666666666668,
+          "ram_mb": 25.54296875,
+          "commit_mb": 37.953125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "gpu process": {
+          "count": 1.0,
+          "cpu_pct": 12.692777777777778,
+          "cpu_pct_peak": 13.841666666666667,
+          "ram_mb": 404.79296875,
+          "commit_mb": 463.53515625,
+          "gpu_pct": 31.486779264161544,
+          "3d_pct": 31.486779264161544,
+          "video_decode_pct": 8.057719345621358,
+          "shared_mb": 393.17578125,
+          "dedicated_mb": 0.0
+        },
+        "network": {
+          "count": 1.0,
+          "cpu_pct": 0.008333333333333333,
+          "cpu_pct_peak": 0.125,
+          "ram_mb": 7.1484375,
+          "commit_mb": 12.76171875,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "main window": {
+          "count": 1.0,
+          "cpu_pct": 2.4899999999999998,
+          "cpu_pct_peak": 3.6750000000000003,
+          "ram_mb": 86.82421875,
+          "commit_mb": 104.9453125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "buddy window": {
+          "count": 1.0,
+          "cpu_pct": 0.08666666666666667,
+          "cpu_pct_peak": 0.2916666666666667,
+          "ram_mb": 16.6953125,
+          "commit_mb": 27.078125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "brain (python)": {
+          "count": 2.0,
+          "cpu_pct": 0.20722222222222222,
+          "cpu_pct_peak": 0.9416666666666668,
+          "ram_mb": 90.71484375,
+          "commit_mb": 451.48828125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        }
+      },
+      "machine": {
+        "cpu_pct": 36.92666666666667,
+        "gpu_3d_pct": 35.72801372228063,
+        "ram_used_mb": 13639.48046875,
+        "gpu_samples": 15,
+        "top_other_cpu_pct": {
+          "(this script)": 5.668888888888889,
+          "comet.exe": 2.0349999999999997,
+          "System": 1.7650000000000001,
+          "ChatGPT.exe": 1.327777777777778,
+          "svchost.exe": 1.3244444444444443,
+          "Code.exe": 1.2644444444444445
+        }
+      },
+      "frames": {
+        "fps": 54.71355495685818,
+        "frame_ms_p50": 16.699999999953434,
+        "frame_ms_p95": 33.300000000046566,
+        "frame_ms_max": 50.0999999998603,
+        "slow_frames_pct": 2.8633405639913234,
+        "visible": "visible",
+        "focused": false,
+        "js_heap_mb": 9.5367431640625,
+        "dom_nodes": 156,
+        "dpr": 1.25,
+        "viewport": "1536x816",
+        "videos_playing": [
+          "aura-main.mp4 1672x940",
+          "aura-main.mp4 1672x940"
+        ],
+        "canvases": [
+          "particle-field 1920x1020",
+          "cursor-lens 175x175"
+        ]
+      }
+    },
+    {
+      "label": "Memory page",
+      "seconds": 15,
+      "aura": {
+        "cpu_pct": 16.48611111111111,
+        "ram_mb": 617.8515625,
+        "gpu_pct": 26.53897837495341,
+        "gpu_shared_mb": 371.83984375,
+        "processes": 7
+      },
+      "per_process": {
+        "electron main": {
+          "count": 1.0,
+          "cpu_pct": 0.01888888888888889,
+          "cpu_pct_peak": 0.15833333333333333,
+          "ram_mb": 25.0390625,
+          "commit_mb": 37.20703125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "gpu process": {
+          "count": 1.0,
+          "cpu_pct": 13.972777777777777,
+          "cpu_pct_peak": 14.533333333333333,
+          "ram_mb": 392.81640625,
+          "commit_mb": 451.44140625,
+          "gpu_pct": 26.53897837495341,
+          "3d_pct": 26.53897837495341,
+          "video_decode_pct": 5.131784507831281,
+          "shared_mb": 371.83984375,
+          "dedicated_mb": 0.0
+        },
+        "network": {
+          "count": 1.0,
+          "cpu_pct": 0.0027777777777777775,
+          "cpu_pct_peak": 0.041666666666666664,
+          "ram_mb": 7.13671875,
+          "commit_mb": 12.75,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "main window": {
+          "count": 1.0,
+          "cpu_pct": 2.2294444444444443,
+          "cpu_pct_peak": 2.9583333333333335,
+          "ram_mb": 83.57421875,
+          "commit_mb": 101.54296875,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "buddy window": {
+          "count": 1.0,
+          "cpu_pct": 0.10833333333333332,
+          "cpu_pct_peak": 0.27499999999999997,
+          "ram_mb": 18.55078125,
+          "commit_mb": 28.9921875,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "brain (python)": {
+          "count": 2.0,
+          "cpu_pct": 0.1538888888888889,
+          "cpu_pct_peak": 0.35000000000000003,
+          "ram_mb": 90.734375,
+          "commit_mb": 451.5078125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        }
+      },
+      "machine": {
+        "cpu_pct": 41.62,
+        "gpu_3d_pct": 29.882749533397913,
+        "ram_used_mb": 13631.125,
+        "gpu_samples": 15,
+        "top_other_cpu_pct": {
+          "(this script)": 5.727777777777778,
+          "ChatGPT.exe": 2.5500000000000003,
+          "svchost.exe": 1.938888888888889,
+          "System": 1.7277777777777779,
+          "comet.exe": 1.5211111111111109,
+          "Code.exe": 1.5105555555555557
+        }
+      },
+      "frames": {
+        "fps": 50.061957868649316,
+        "frame_ms_p50": 16.699999999953434,
+        "frame_ms_p95": 33.39999999990687,
+        "frame_ms_max": 50.200000000186265,
+        "slow_frames_pct": 4.3375766148043375,
+        "visible": "visible",
+        "focused": false,
+        "js_heap_mb": 9.5367431640625,
+        "dom_nodes": 100,
+        "dpr": 1.25,
+        "viewport": "1536x816",
+        "videos_playing": [
+          "aura-main.mp4 1672x940"
+        ],
+        "canvases": [
+          "particle-field 1920x1020",
+          "cursor-lens 175x175"
+        ]
+      }
+    },
+    {
+      "label": "Tasks page",
+      "seconds": 15,
+      "aura": {
+        "cpu_pct": 15.273333333333332,
+        "ram_mb": 621.7265625,
+        "gpu_pct": 27.882593587745827,
+        "gpu_shared_mb": 369.6953125,
+        "processes": 7
+      },
+      "per_process": {
+        "electron main": {
+          "count": 1.0,
+          "cpu_pct": 0.0,
+          "cpu_pct_peak": 0.0,
+          "ram_mb": 25.046875,
+          "commit_mb": 37.20703125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "gpu process": {
+          "count": 1.0,
+          "cpu_pct": 13.017222222222221,
+          "cpu_pct_peak": 14.658333333333333,
+          "ram_mb": 395.69140625,
+          "commit_mb": 454.0234375,
+          "gpu_pct": 27.882593587745827,
+          "3d_pct": 27.882593587745827,
+          "video_decode_pct": 5.691626776167505,
+          "shared_mb": 369.6953125,
+          "dedicated_mb": 0.0
+        },
+        "network": {
+          "count": 1.0,
+          "cpu_pct": 0.0,
+          "cpu_pct_peak": 0.0,
+          "ram_mb": 7.13671875,
+          "commit_mb": 12.75,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "main window": {
+          "count": 1.0,
+          "cpu_pct": 2.0844444444444443,
+          "cpu_pct_peak": 2.716666666666667,
+          "ram_mb": 84.5546875,
+          "commit_mb": 102.328125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "buddy window": {
+          "count": 1.0,
+          "cpu_pct": 0.08388888888888889,
+          "cpu_pct_peak": 0.25833333333333336,
+          "ram_mb": 18.5546875,
+          "commit_mb": 28.81640625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "brain (python)": {
+          "count": 2.0,
+          "cpu_pct": 0.08777777777777777,
+          "cpu_pct_peak": 0.35000000000000003,
+          "ram_mb": 90.7421875,
+          "commit_mb": 459.4296875,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        }
+      },
+      "machine": {
+        "cpu_pct": 30.213333333333335,
+        "gpu_3d_pct": 29.872677167985717,
+        "ram_used_mb": 13977.3984375,
+        "gpu_samples": 15,
+        "top_other_cpu_pct": {
+          "(this script)": 5.222222222222222,
+          "ChatGPT.exe": 2.4,
+          "svchost.exe": 1.4733333333333332,
+          "System": 1.0716666666666668,
+          "Code.exe": 0.6283333333333334,
+          "dwm.exe": 0.4722222222222222
+        }
+      },
+      "frames": {
+        "fps": 55.61245336879895,
+        "frame_ms_p50": 16.699999999953434,
+        "frame_ms_p95": 33.300000000046566,
+        "frame_ms_max": 50.10000000009313,
+        "slow_frames_pct": 2.1469465648854964,
+        "visible": "visible",
+        "focused": false,
+        "js_heap_mb": 9.5367431640625,
+        "dom_nodes": 122,
+        "dpr": 1.25,
+        "viewport": "1536x816",
+        "videos_playing": [
+          "aura-main.mp4 1672x940"
+        ],
+        "canvases": [
+          "particle-field 1920x1020",
+          "cursor-lens 175x175"
+        ]
+      }
+    },
+    {
+      "label": "Models page",
+      "seconds": 15,
+      "aura": {
+        "cpu_pct": 17.47888888888889,
+        "ram_mb": 619.515625,
+        "gpu_pct": 37.83130170457812,
+        "gpu_shared_mb": 365.66796875,
+        "processes": 7
+      },
+      "per_process": {
+        "electron main": {
+          "count": 1.0,
+          "cpu_pct": 0.009999999999999998,
+          "cpu_pct_peak": 0.049999999999999996,
+          "ram_mb": 25.0546875,
+          "commit_mb": 37.203125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "gpu process": {
+          "count": 1.0,
+          "cpu_pct": 14.823888888888888,
+          "cpu_pct_peak": 15.725,
+          "ram_mb": 398.1015625,
+          "commit_mb": 456.74609375,
+          "gpu_pct": 37.83130170457812,
+          "3d_pct": 37.83130170457812,
+          "video_decode_pct": 6.443543270451352,
+          "shared_mb": 365.66796875,
+          "dedicated_mb": 0.0
+        },
+        "network": {
+          "count": 1.0,
+          "cpu_pct": 0.0,
+          "cpu_pct_peak": 0.0,
+          "ram_mb": 7.140625,
+          "commit_mb": 12.75390625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "main window": {
+          "count": 1.0,
+          "cpu_pct": 2.4333333333333336,
+          "cpu_pct_peak": 3.0500000000000003,
+          "ram_mb": 76.31640625,
+          "commit_mb": 94.5078125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "buddy window": {
+          "count": 1.0,
+          "cpu_pct": 0.11555555555555555,
+          "cpu_pct_peak": 0.325,
+          "ram_mb": 18.61328125,
+          "commit_mb": 28.9453125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "brain (python)": {
+          "count": 2.0,
+          "cpu_pct": 0.0961111111111111,
+          "cpu_pct_peak": 0.31666666666666665,
+          "ram_mb": 94.2890625,
+          "commit_mb": 455.64453125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        }
+      },
+      "machine": {
+        "cpu_pct": 35.486666666666665,
+        "gpu_3d_pct": 38.13483271221584,
+        "ram_used_mb": 13845.6484375,
+        "gpu_samples": 15,
+        "top_other_cpu_pct": {
+          "(this script)": 5.4911111111111115,
+          "svchost.exe": 2.038888888888889,
+          "comet.exe": 1.2644444444444443,
+          "System": 1.2472222222222222,
+          "Code.exe": 0.85,
+          "explorer.exe": 0.6861111111111111
+        }
+      },
+      "frames": {
+        "fps": 47.94660183180109,
+        "frame_ms_p50": 16.699999999953434,
+        "frame_ms_p95": 33.4000000001397,
+        "frame_ms_max": 50.299999999813735,
+        "slow_frames_pct": 5.669291338582677,
+        "visible": "visible",
+        "focused": false,
+        "js_heap_mb": 9.5367431640625,
+        "dom_nodes": 361,
+        "dpr": 1.25,
+        "viewport": "1536x816",
+        "videos_playing": [
+          "aura-main.mp4 1672x940",
+          "aura-main.mp4 1672x940"
+        ],
+        "canvases": [
+          "particle-field 1920x1020",
+          "cursor-lens 175x175"
+        ]
+      }
+    },
+    {
+      "label": "Settings page",
+      "seconds": 15,
+      "aura": {
+        "cpu_pct": 14.883888888888889,
+        "ram_mb": 615.93359375,
+        "gpu_pct": 29.82807606815349,
+        "gpu_shared_mb": 364.1640625,
+        "processes": 7
+      },
+      "per_process": {
+        "electron main": {
+          "count": 1.0,
+          "cpu_pct": 0.007222222222222223,
+          "cpu_pct_peak": 0.10833333333333334,
+          "ram_mb": 25.0625,
+          "commit_mb": 37.20703125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "gpu process": {
+          "count": 1.0,
+          "cpu_pct": 12.825555555555555,
+          "cpu_pct_peak": 14.025,
+          "ram_mb": 394.00390625,
+          "commit_mb": 452.09765625,
+          "gpu_pct": 29.82807606815349,
+          "3d_pct": 29.82807606815349,
+          "video_decode_pct": 6.016204720946669,
+          "shared_mb": 364.1640625,
+          "dedicated_mb": 0.0
+        },
+        "network": {
+          "count": 1.0,
+          "cpu_pct": 0.0,
+          "cpu_pct_peak": 0.0,
+          "ram_mb": 7.140625,
+          "commit_mb": 12.75390625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "main window": {
+          "count": 1.0,
+          "cpu_pct": 1.82,
+          "cpu_pct_peak": 2.316666666666667,
+          "ram_mb": 76.28515625,
+          "commit_mb": 94.99609375,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "buddy window": {
+          "count": 1.0,
+          "cpu_pct": 0.15055555555555555,
+          "cpu_pct_peak": 0.5083333333333333,
+          "ram_mb": 19.109375,
+          "commit_mb": 29.42578125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "brain (python)": {
+          "count": 2.0,
+          "cpu_pct": 0.08055555555555556,
+          "cpu_pct_peak": 0.2833333333333333,
+          "ram_mb": 94.33203125,
+          "commit_mb": 455.64453125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        }
+      },
+      "machine": {
+        "cpu_pct": 26.14666666666667,
+        "gpu_3d_pct": 29.897900618454877,
+        "ram_used_mb": 13846.20703125,
+        "gpu_samples": 15,
+        "top_other_cpu_pct": {
+          "(this script)": 5.005,
+          "svchost.exe": 1.2905555555555555,
+          "System": 0.915,
+          "Code.exe": 0.6688888888888889,
+          "dwm.exe": 0.3638888888888889,
+          "audiodg.exe": 0.27444444444444444
+        }
+      },
+      "frames": {
+        "fps": 56.603139766682794,
+        "frame_ms_p50": 16.699999999953434,
+        "frame_ms_p95": 33.199999999953434,
+        "frame_ms_max": 50,
+        "slow_frames_pct": 1.632047477744807,
+        "visible": "visible",
+        "focused": false,
+        "js_heap_mb": 9.5367431640625,
+        "dom_nodes": 204,
+        "dpr": 1.25,
+        "viewport": "1536x816",
+        "videos_playing": [
+          "aura-main.mp4 1672x940",
+          "aura-main.mp4 1672x940"
+        ],
+        "canvases": [
+          "particle-field 1920x1020",
+          "cursor-lens 175x175"
+        ]
+      }
+    },
+    {
+      "label": "Labs page",
+      "seconds": 15,
+      "aura": {
+        "cpu_pct": 13.782777777777778,
+        "ram_mb": 614.6875,
+        "gpu_pct": 29.713097723288552,
+        "gpu_shared_mb": 361.79296875,
+        "processes": 7
+      },
+      "per_process": {
+        "electron main": {
+          "count": 1.0,
+          "cpu_pct": 0.0,
+          "cpu_pct_peak": 0.0,
+          "ram_mb": 25.0703125,
+          "commit_mb": 37.203125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "gpu process": {
+          "count": 1.0,
+          "cpu_pct": 11.848888888888888,
+          "cpu_pct_peak": 14.85,
+          "ram_mb": 393.1953125,
+          "commit_mb": 450.5703125,
+          "gpu_pct": 29.713097723288552,
+          "3d_pct": 29.713097723288552,
+          "video_decode_pct": 5.808849442782634,
+          "shared_mb": 361.79296875,
+          "dedicated_mb": 0.0
+        },
+        "network": {
+          "count": 1.0,
+          "cpu_pct": 0.0,
+          "cpu_pct_peak": 0.0,
+          "ram_mb": 7.140625,
+          "commit_mb": 12.75390625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "main window": {
+          "count": 1.0,
+          "cpu_pct": 1.6883333333333332,
+          "cpu_pct_peak": 2.6333333333333333,
+          "ram_mb": 76.39453125,
+          "commit_mb": 95.25390625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "buddy window": {
+          "count": 1.0,
+          "cpu_pct": 0.13444444444444445,
+          "cpu_pct_peak": 0.39166666666666666,
+          "ram_mb": 18.53515625,
+          "commit_mb": 28.671875,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "brain (python)": {
+          "count": 2.0,
+          "cpu_pct": 0.1111111111111111,
+          "cpu_pct_peak": 0.39166666666666666,
+          "ram_mb": 94.3515625,
+          "commit_mb": 455.64453125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        }
+      },
+      "machine": {
+        "cpu_pct": 25.94,
+        "gpu_3d_pct": 29.74472471042701,
+        "ram_used_mb": 13938.23828125,
+        "gpu_samples": 15,
+        "top_other_cpu_pct": {
+          "(this script)": 5.021111111111112,
+          "svchost.exe": 1.4755555555555553,
+          "Code.exe": 1.09,
+          "System": 0.8961111111111111,
+          "dwm.exe": 0.38555555555555554,
+          "audiodg.exe": 0.29055555555555557
+        }
+      },
+      "frames": {
+        "fps": 57.02164097781185,
+        "frame_ms_p50": 16.699999999953434,
+        "frame_ms_p95": 33.10000000009313,
+        "frame_ms_max": 34,
+        "slow_frames_pct": 1.3164310092637739,
+        "visible": "visible",
+        "focused": false,
+        "js_heap_mb": 9.5367431640625,
+        "dom_nodes": 145,
+        "dpr": 1.25,
+        "viewport": "1536x816",
+        "videos_playing": [
+          "aura-main.mp4 1672x940",
+          "aura-main.mp4 1672x940"
+        ],
+        "canvases": [
+          "particle-field 1920x1020",
+          "cursor-lens 175x175"
+        ]
+      }
+    },
+    {
+      "label": "Aura Domain",
+      "seconds": 15,
+      "aura": {
+        "cpu_pct": 8.026666666666667,
+        "ram_mb": 812.34375,
+        "gpu_pct": 77.96931437555462,
+        "gpu_shared_mb": 598.58984375,
+        "processes": 7
+      },
+      "per_process": {
+        "electron main": {
+          "count": 1.0,
+          "cpu_pct": 0.04055555555555555,
+          "cpu_pct_peak": 0.13333333333333333,
+          "ram_mb": 25.08984375,
+          "commit_mb": 37.1953125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "gpu process": {
+          "count": 1.0,
+          "cpu_pct": 6.000555555555556,
+          "cpu_pct_peak": 6.316666666666666,
+          "ram_mb": 566.99609375,
+          "commit_mb": 626.25390625,
+          "gpu_pct": 77.96931437555462,
+          "3d_pct": 77.96931437555462,
+          "video_decode_pct": 0.7077927551356571,
+          "shared_mb": 598.58984375,
+          "dedicated_mb": 0.0
+        },
+        "network": {
+          "count": 1.0,
+          "cpu_pct": 0.004999999999999999,
+          "cpu_pct_peak": 0.024999999999999998,
+          "ram_mb": 7.26953125,
+          "commit_mb": 13.03515625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "main window": {
+          "count": 1.0,
+          "cpu_pct": 1.4383333333333332,
+          "cpu_pct_peak": 1.7750000000000001,
+          "ram_mb": 99.26171875,
+          "commit_mb": 117.9921875,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "buddy window": {
+          "count": 1.0,
+          "cpu_pct": 0.2827777777777778,
+          "cpu_pct_peak": 0.7166666666666667,
+          "ram_mb": 19.1171875,
+          "commit_mb": 29.44140625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "brain (python)": {
+          "count": 2.0,
+          "cpu_pct": 0.2594444444444444,
+          "cpu_pct_peak": 0.6749999999999999,
+          "ram_mb": 94.609375,
+          "commit_mb": 455.64453125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        }
+      },
+      "machine": {
+        "cpu_pct": 34.81333333333333,
+        "gpu_3d_pct": 78.49108383863236,
+        "ram_used_mb": 13864.57421875,
+        "gpu_samples": 15,
+        "top_other_cpu_pct": {
+          "(this script)": 6.928333333333333,
+          "Code.exe": 3.754444444444445,
+          "svchost.exe": 3.162777777777777,
+          "comet.exe": 2.2588888888888885,
+          "System": 2.2094444444444443,
+          "audiodg.exe": 0.7394444444444445
+        }
+      },
+      "frames": {
+        "fps": 5.76013499809162,
+        "frame_ms_p50": 183.0999999998603,
+        "frame_ms_p95": 216.89999999990687,
+        "frame_ms_max": 250,
+        "slow_frames_pct": 100,
+        "visible": "visible",
+        "focused": false,
+        "js_heap_mb": 9.5367431640625,
+        "dom_nodes": 296,
+        "dpr": 1.25,
+        "viewport": "1536x816",
+        "videos_playing": [
+          "aura-main.mp4 1672x940",
+          "aura-main.mp4 1672x940"
+        ],
+        "canvases": [
+          "particle-field 1920x1020",
+          "bh-canvas 2175x2175",
+          "cursor-lens 175x175"
+        ]
+      }
+    },
+    {
+      "label": "Minimised (buddy still out)",
+      "seconds": 15,
+      "aura": {
+        "cpu_pct": 0.2955555555555555,
+        "ram_mb": 578.26953125,
+        "gpu_pct": 0.25797883029589835,
+        "gpu_shared_mb": 391.84375,
+        "processes": 7
+      },
+      "per_process": {
+        "electron main": {
+          "count": 1.0,
+          "cpu_pct": 0.019444444444444445,
+          "cpu_pct_peak": 0.17500000000000002,
+          "ram_mb": 25.11328125,
+          "commit_mb": 37.1796875,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "gpu process": {
+          "count": 1.0,
+          "cpu_pct": 0.09555555555555555,
+          "cpu_pct_peak": 0.27499999999999997,
+          "ram_mb": 353.53125,
+          "commit_mb": 410.1875,
+          "gpu_pct": 0.25797883029589835,
+          "3d_pct": 0.25797883029589835,
+          "video_decode_pct": 0.0,
+          "shared_mb": 391.84375,
+          "dedicated_mb": 0.0
+        },
+        "network": {
+          "count": 1.0,
+          "cpu_pct": 0.0038888888888888883,
+          "cpu_pct_peak": 0.05833333333333333,
+          "ram_mb": 7.2734375,
+          "commit_mb": 13.0390625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "main window": {
+          "count": 1.0,
+          "cpu_pct": 0.0038888888888888883,
+          "cpu_pct_peak": 0.05833333333333333,
+          "ram_mb": 77.80859375,
+          "commit_mb": 96.16015625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "buddy window": {
+          "count": 1.0,
+          "cpu_pct": 0.06555555555555555,
+          "cpu_pct_peak": 0.27499999999999997,
+          "ram_mb": 19.921875,
+          "commit_mb": 30.3203125,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        },
+        "brain (python)": {
+          "count": 2.0,
+          "cpu_pct": 0.10722222222222222,
+          "cpu_pct_peak": 0.35000000000000003,
+          "ram_mb": 94.62109375,
+          "commit_mb": 455.625,
+          "gpu_pct": 0.0,
+          "3d_pct": 0.0,
+          "video_decode_pct": 0.0,
+          "shared_mb": 0.0,
+          "dedicated_mb": 0.0
+        }
+      },
+      "machine": {
+        "cpu_pct": 14.613333333333333,
+        "gpu_3d_pct": 2.8701439234447297,
+        "ram_used_mb": 13667.3828125,
+        "gpu_samples": 15,
+        "top_other_cpu_pct": {
+          "(this script)": 4.680555555555556,
+          "ChatGPT.exe": 2.448888888888889,
+          "Code.exe": 1.6688888888888889,
+          "svchost.exe": 1.6616666666666668,
+          "System": 0.7261111111111112,
+          "MsMpEng.exe": 0.35500000000000004
+        }
+      },
+      "frames": {
+        "fps": 0,
+        "frame_ms_p50": null,
+        "frame_ms_p95": null,
+        "frame_ms_max": null,
+        "slow_frames_pct": null,
+        "visible": "hidden",
+        "focused": false,
+        "js_heap_mb": 9.5367431640625,
+        "dom_nodes": 296,
+        "dpr": 1.25,
+        "viewport": "1536x816",
+        "videos_playing": [],
+        "canvases": [
+          "particle-field 1920x1020",
+          "bh-canvas 2175x2175",
+          "cursor-lens 175x175"
+        ]
+      }
+    }
+  ],
+  "startup": {
+    "window_loaded_s": 0.660048246383667,
+    "brain_listening_s": 2.8914124965667725,
+    "first_paint_in_page_s": null
+  }
+}

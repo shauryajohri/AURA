@@ -9,6 +9,8 @@ interface Props {
   activity?: ActivityEvent | null;
   /** Voice capture running (mic hot) — shows Listening… while idle. */
   listening?: boolean;
+  /** Something covers Home (the Domain) — the core stops drawing meanwhile. */
+  paused?: boolean;
 }
 
 const STATE_TEXT: Record<string, string> = {
@@ -19,7 +21,8 @@ const STATE_TEXT: Record<string, string> = {
 
 // Planets live inside the BlackHole canvas — models orbiting the core,
 // the one that last answered lights up and orbits faster.
-export default function Stage({ state, activeModelId = null, activity = null, listening = false }: Props) {
+export default function Stage({ state, activeModelId = null, activity = null, listening = false,
+                                paused = false }: Props) {
   const text =
     activity?.text ??
     (state === "idle" && listening ? "Listening…" : STATE_TEXT[state] ?? "");
@@ -27,7 +30,7 @@ export default function Stage({ state, activeModelId = null, activity = null, li
 
   return (
     <div className="stage">
-      <BlackHole state={state} activeModelId={activeModelId} />
+      <BlackHole state={state} activeModelId={activeModelId} paused={paused} />
 
       <div className={"corestatus" + (live ? " corestatus--live" : "")}>
         <span className="corestatus__dot" />

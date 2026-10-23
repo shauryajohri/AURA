@@ -573,6 +573,7 @@ class _VisionCtx:
 
 
 def _run_vision(job: Job) -> None:
+    status, reply = "failed", "Something broke while I was working."
     try:
         actions.STOP.clear()
         _announce(f"Remote: {job.text}")
@@ -582,10 +583,13 @@ def _run_vision(job: Job) -> None:
             status, reply = "stopped", f"Stopped ({e})."
         except Exception as e:  # noqa: BLE001
             status, reply = "failed", f"Something broke while I was working: {e}"
-        job.status, job.reply, job.question = status, reply, ""
-        job.finished = time.time()
-        _announce(f"Remote {job.status}: {job.text}")
-        _log(job)
     finally:
         actions.STOP.clear()
         _RUN_LOCK.release()
+    # Report the outcome only once the run lock is free: the phone sends its
+    # next command as soon as it sees this one finish, and that command must
+    # not be turned away as "still doing the last thing".
+    job.status, job.reply, job.question = status, reply, ""
+    job.finished = time.time()
+    _announce(f"Remote {job.status}: {job.text}")
+    _log(job)

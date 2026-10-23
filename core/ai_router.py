@@ -1466,7 +1466,7 @@ def call_groq_raw(prompt: str, system: str, max_tokens: int = 1024,
         return "CONNECTION_ERROR"
 
 
-def call_planner(prompt: str, system: str, model: str = None) -> str:
+def call_planner(prompt: str, system: str, model: str = None, max_tokens: int = 160) -> str:
     """A single deterministic call for AURA's tool/lookup planner (core/tool_loop).
 
     Same clean shape as call_groq_raw, with one extra: Groq's gpt-oss models
@@ -1495,7 +1495,7 @@ def call_planner(prompt: str, system: str, model: str = None) -> str:
                     {"role": "system", "content": system},
                     {"role": "user", "content": prompt},
                 ],
-                "max_tokens": 160,
+                "max_tokens": max_tokens,
                 "temperature": 0.0,
                 "stream": False,
             }, provider),

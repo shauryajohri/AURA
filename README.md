@@ -85,6 +85,18 @@ Ask *"what project were we doing last time?"* and she answers from the project g
 
 If nothing is stored, the block is empty on purpose — she says it's fuzzy rather than inventing a project name.
 
+### Control the laptop from your phone
+
+Open AURA's remote page on your phone and tell her what to do: *"open spotify"*, *"search for flights to goa"*, *"open notepad and write a shopping list"*. She does it on the laptop. If the laptop is locked or remote control is paused, she declines right away and nothing runs.
+
+- **Two servers.** The main bridge stays on `127.0.0.1:8760`. The phone talks to a separate token-protected server, `remote_api.py` on port `8761`, so `/ws` (no auth) is never on the network.
+- **Actions.** `core/actions.py` has `open_app`, `open_url`, `focus_window`, `type_text`, `press`, `hotkey`, `scroll`, `click`, `wait`, `read_screen`, `close_window` and `run_shell` (shell is off unless `AURA_REMOTE_ALLOW_SHELL=1`).
+- **Planning.** Obvious one-liners are parsed locally with no model call. Anything else goes to the planner model, which picks steps from that list.
+- **Confirmation.** Plans with risky steps (closing windows, `alt+f4`, `delete`, shell) wait until you tap Approve on the phone. Set `AURA_REMOTE_CONFIRM=all` to approve every plan.
+- **Kill switches.** There's a Stop button on the phone. Slamming the mouse into a screen corner also stops her (pyautogui fail-safe). Locking the laptop stops a job before the next step. Every job is logged to `memory/remote_actions.jsonl`.
+
+**Setup.** Add `AURA_REMOTE_TOKEN` to `.env` (generate one with `python -c "import secrets; print(secrets.token_urlsafe(24))"`) and start AURA. On the same Wi-Fi, open `http://<laptop-ip>:8761` on the phone and paste the token. From anywhere else, install [Tailscale](https://tailscale.com) on both devices and use the laptop's Tailscale address. Don't port-forward 8761 to the internet. `tailscale serve` adds HTTPS, which also turns on the in-page mic button.
+
 ### The chat answers, it doesn't narrate
 
 Reasoning models leak their deliberation as ordinary content ("So answer: …", "The user wants …", "That's one sentence?"). Three layers stop it:
@@ -376,6 +388,12 @@ GITHUB_CLIENT_SECRET=...
 TWILIO_ACCOUNT_SID=...          # only for the phone report
 TWILIO_AUTH_TOKEN=...
 TWILIO_FROM_NUMBER=+1...        # a voice-capable Twilio number
+
+AURA_REMOTE_TOKEN=...           # enables phone control (16+ chars)
+AURA_REMOTE_HOST=0.0.0.0        # optional; port via AURA_REMOTE_PORT (8761)
+AURA_REMOTE_CONFIRM=risky       # risky | all | none (risky steps always ask)
+AURA_REMOTE_ALLOW_SHELL=0       # 1 lets her plan shell commands (always asks)
+AURA_REMOTE_MAX_IDLE_MIN=0      # decline if the laptop sat idle longer (0 = off)
 ```
 
 OAuth callbacks come back to `http://127.0.0.1:8760/api/connectors/callback/<provider>` — nothing public needed. Everything degrades: no OpenRouter key means Groq only; no keys at all still gives you the offline heuristic paths (planning, idea capture, error classification) and the whole filesystem/git/terminal side. A model without a key is skipped, never called with an empty one; chat with no usable key answers with how to add one, and `/api/status` reports `keys_missing`.
@@ -412,6 +430,8 @@ python test_screen_reading.py         # OCR, language detection
 python tests/test_domain_foundation.py    # brain e2e on this repo, every commit + its files
 python tests/test_domain_api_contract.py  # every endpoint shape the UI reads
 python tests/test_idea_capture.py          # conversation → knowledge
+python tests/test_remote_control.py         # phone control: gate, plans, approval, auth
+python tests/test_vision_agent.py           # vision loop: pointing, questions, stuck/stop, background jobs
 
 cd frontend && npx tsc --noEmit       # frontend typecheck
 ```

@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b10">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>AURA Remote</title>
+<style>
+  :root {
+    --bg: #0b0b10; --panel: #15151d; --line: #262633; --text: #ececf1;
+    --muted: #8c8ca1; --accent: #8b7bff; --ok: #3ecf8e; --warn: #f5b84a; --bad: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 560px; margin: 0 auto; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }
+  header { display: flex; align-items: center; justify-content: space-between; margin: 4px 0 16px; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: .5px; }
+  .pill { font-size: 13px; padding: 4px 10px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+  .pill.active { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+  .pill.off { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+  .muted { color: var(--muted); font-size: 14px; }
+  textarea, input { width: 100%; background: #0f0f15; color: var(--text); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px; font: inherit; resize: none; }
+  textarea:focus, input:focus { outline: none; border-color: var(--accent); }
+  .row { display: flex; gap: 8px; margin-top: 10px; }
+  button { flex: 1; border: 0; border-radius: 10px; padding: 12px; font: inherit; font-weight: 600;
+    background: var(--accent); color: #fff; cursor: pointer; }
+  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); }
+  button.stop { background: var(--bad); }
+  button.icon { flex: 0 0 52px; }
+  button:disabled { opacity: .5; }
+  ol { margin: 8px 0 0; padding-left: 22px; }
+  li { margin: 3px 0; }
+  li.risk::after { content: " · asks first"; color: var(--warn); font-size: 13px; }
+  li.ok { color: var(--ok); } li.fail { color: var(--bad); }
+  .reply { white-space: pre-wrap; }
+  .tag { font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+  .hist { font-size: 14px; border-top: 1px solid var(--line); padding: 8px 0; }
+  .hist:first-child { border-top: 0; }
+  .hidden { display: none !important; }
+  #screen { width: 100%; border-radius: 10px; border: 1px solid var(--line); margin-top: 10px; display: block; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>AURA</h1>
+    <span id="pill" class="pill">checking…</span>
+  </header>
+
+  <section id="setup" class="card hidden">
+    <div class="tag">Connect</div>
+    <p class="muted">Paste the <code>AURA_REMOTE_TOKEN</code> from the laptop's <code>.env</code>. It stays on this phone only.</p>
+    <input id="token" type="password" autocomplete="off" placeholder="token">
+    <div class="row"><button id="saveToken">Connect</button></div>
+  </section>
+
+  <section id="console" class="hidden">
+    <div class="card">
+      <textarea id="cmd" rows="3" placeholder="Tell AURA what to do on your laptop…"></textarea>
+      <div class="row">
+        <button id="mic" class="ghost icon hidden" title="Speak">🎙</button>
+        <button id="send">Send</button>
+        <button id="stop" class="stop hidden">Stop</button>
+      </div>
+    </div>
+
+    <div id="result" class="card hidden">
+      <div class="tag" id="resultTag"></div>
+      <div class="reply" id="reply"></div>
+      <img id="screen" class="hidden" alt="What AURA sees on the laptop">
+      <ol id="steps"></ol>
+      <div class="row hidden" id="confirmRow">
+        <button id="cancel" class="ghost">Cancel</button>
+        <button id="approve">Approve</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="tag">Recent</div>
+      <div id="history" class="muted">Nothing yet.</div>
+    </div>
+    <p class="muted" style="text-align:center"><a href="#" id="forget" style="color:var(--muted)">Forget token</a></p>
+  </section>
+</main>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  let token = "";
+  try { token = localStorage.getItem("aura_remote_token") || ""; } catch (_) {}
+  let pendingId = null;
+  let pollTimer = null;
+  let shownScreen = { id: null, v: -1 };
+
+  async function api(path, opts = {}) {
+    const res = await fetch("/remote/api" + path, {
+      ...opts,
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+    });
+    if (res.status === 401) { showSetup("That token didn't work."); throw new Error("bad token"); }
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
+    return res.json();
+  }
+
+  function showSetup(msg) {
+    $("setup").classList.remove("hidden");
+    $("console").classList.add("hidden");
+    if (msg) $("setup").querySelector("p").textContent = msg;
+  }
+  function showConsole() {
+    $("setup").classList.add("hidden");
+    $("console").classList.remove("hidden");
+  }
+
+  function setPill(text, cls) {
+    $("pill").textContent = text;
+    $("pill").className = "pill " + (cls || "");
+  }
+
+  async function refreshStatus() {
+    if (!token) return;
+    try {
+      const s = await api("/status");
+      if (s.active) setPill("laptop active", "active");
+      else setPill({ locked: "locked", paused: "paused", idle: "idle", no_desktop: "no desktop" }[s.state] || "inactive", "off");
+    } catch (e) {
+      if (e.message !== "bad token") setPill("offline", "off");
+    }
+  }
+
+  const TAGS = { done: "Done", pending: "Needs your OK", declined: "Declined", failed: "Didn't finish",
+                 stopped: "Stopped", cancelled: "Cancelled", expired: "Expired", running: "Working…" };
+
+  function render(job) {
+    $("result").classList.remove("hidden");
+    $("resultTag").textContent = TAGS[job.status] || job.status;
+    $("reply").textContent = job.reply || "";
+    const ol = $("steps");
+    ol.innerHTML = "";
+    const results = job.results || [];
+    (job.steps || []).forEach((s, i) => {
+      const li = document.createElement("li");
+      li.textContent = s.desc;
+      const r = results[i];
+      if (r) { li.className = r.ok ? "ok" : "fail"; if (!r.ok) li.title = r.result; }
+      else if (job.status === "pending" && s.risk === "confirm") li.className = "risk";
+      ol.appendChild(li);
+    });
+    pendingId = job.status === "pending" ? job.id : null;
+    $("confirmRow").classList.toggle("hidden", !pendingId);
+    if (job.mode === "vision") showScreen(job); else $("screen").classList.add("hidden");
+
+    // A vision job keeps working after the request returns: poll until it settles.
+    clearTimeout(pollTimer);
+    const live = job.mode === "vision" && (job.status === "running" || job.status === "pending");
+    busy(job.status === "running");
+    if (live) pollTimer = setTimeout(() => poll(job.id), 1500);
+    else loadHistory();
+  }
+
+  async function poll(id) {
+    try { render(await api(`/jobs/${id}`)); }
+    catch (e) { pollTimer = setTimeout(() => poll(id), 3000); }
+  }
+
+  async function showScreen(job) {
+    if (!job.screen_version || (shownScreen.id === job.id && shownScreen.v === job.screen_version)) return;
+    shownScreen = { id: job.id, v: job.screen_version };
+    try {
+      const res = await fetch(`/remote/api/jobs/${job.id}/screen`, { headers: { "Authorization": "Bearer " + token } });
+      if (!res.ok) return;
+      const img = $("screen");
+      const old = img.src;
+      img.src = URL.createObjectURL(await res.blob());
+      img.classList.remove("hidden");
+      if (old.startsWith("blob:")) URL.revokeObjectURL(old);
+    } catch (_) {}
+  }
+
+  function busy(on) {
+    $("send").disabled = on;
+    $("stop").classList.toggle("hidden", !on);
+    $("send").classList.toggle("hidden", on);
+  }
+
+  async function run(path, body) {
+    busy(true);
+    let job = null;
+    try { job = await api(path, { method: "POST", body: body ? JSON.stringify(body) : undefined }); }
+    catch (e) { job = { status: "failed", reply: "Couldn't reach AURA: " + e.message, steps: [] }; }
+    busy(false);
+    render(job);
+    refreshStatus();
+  }
+
+  async function loadHistory() {
+    try {
+      const { jobs } = await api("/jobs");
+      const box = $("history");
+      if (!jobs.length) { box.textContent = "Nothing yet."; return; }
+      box.innerHTML = "";
+      jobs.slice(0, 8).forEach((j) => {
+        const d = document.createElement("div");
+        d.className = "hist";
+        d.textContent = `${TAGS[j.status] || j.status} · ${j.text}`;
+        box.appendChild(d);
+      });
+    } catch (_) {}
+  }
+
+  $("send").onclick = () => {
+    const text = $("cmd").value.trim();
+    if (!text) return;
+    $("cmd").value = "";
+    run("/command", { text });
+  };
+  $("cmd").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("send").click(); }
+  });
+  $("approve").onclick = () => pendingId && run(`/jobs/${pendingId}/approve`);
+  $("cancel").onclick = () => pendingId && run(`/jobs/${pendingId}/cancel`);
+  $("stop").onclick = () => api("/stop", { method: "POST" }).catch(() => {});
+
+  $("saveToken").onclick = () => {
+    token = $("token").value.trim();
+    try { localStorage.setItem("aura_remote_token", token); } catch (_) {}
+    showConsole(); refreshStatus(); loadHistory();
+  };
+  $("forget").onclick = (e) => {
+    e.preventDefault();
+    token = "";
+    try { localStorage.removeItem("aura_remote_token"); } catch (_) {}
+    showSetup();
+  };
+
+  // Voice: browsers only expose speech recognition on HTTPS (e.g. Tailscale
+  // Serve). On plain http the button stays hidden and the keyboard's own
+  // dictation mic still works.
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SR && window.isSecureContext) {
+    $("mic").classList.remove("hidden");
+    $("mic").onclick = () => {
+      const rec = new SR();
+      rec.lang = navigator.language || "en-US";
+      rec.interimResults = false;
+      $("mic").textContent = "…";
+      rec.onresult = (e) => { $("cmd").value = e.results[0][0].transcript; $("send").click(); };
+      rec.onend = () => { $("mic").textContent = "🎙"; };
+      rec.start();
+    };
+  }
+
+  if (token) { showConsole(); refreshStatus(); loadHistory(); } else { showSetup(); setPill("not connected"); }
+  setInterval(refreshStatus, 15000);
+})();
+</script>
+</body>
+</html>

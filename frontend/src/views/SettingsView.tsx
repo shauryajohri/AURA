@@ -14,7 +14,7 @@ import { usePerfStore } from "../stores/perfStore";
 const SECTIONS: Array<{ title: string; cats: SettingsCategory[] }> = [
   { title: "System", cats: ["general", "keys", "privacy", "behavior"] },
   { title: "Appearance", cats: ["skins", "blackhole", "planets", "orbits", "animations", "wallpaper", "layout"] },
-  { title: "Voice & Personality", cats: ["voice", "autochat", "phone"] },
+  { title: "Voice & Personality", cats: ["relationship", "voice", "autochat", "phone"] },
   { title: "Advanced", cats: ["developer", "experimental"] },
 ];
 

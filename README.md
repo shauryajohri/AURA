@@ -115,6 +115,19 @@ A coding answer is saved to the chat exactly as shown (the chat line plus the fe
 
 The Prompt Maker (`/prompt` … `/prompt_end`) is not a chat reply, so none of this applies to it: the build is one clean call with no persona, no length limit and no filtering, and the prompt is shown whole. After it, *"run"* (or *"2"*) runs that prompt as a coding task, and `/prompt save` / `/prompt export` use the built prompt, not your notes.
 
+### Who AURA is to you
+
+`core/persona.py` builds the top of every system prompt from Settings → Relationship:
+
+| Mode | AURA is… |
+|---|---|
+| **Buddy** (default) | a sharp, close friend — the original Donna-style AURA |
+| **Assistant** | a capable chief of staff — warm, efficient, a step ahead |
+| **Mentor** | wants you to get better — hints first, honest feedback |
+| **Custom** | whatever you describe in your own words |
+
+You can also tell her what to call you. The **nature** lock (Chill / Focus / Savage / Professional) still sits on top and controls tone inside any role. The web demo and a Buddy Lock guest always get the default role, never your saved one.
+
 ### What she remembers about you
 
 Plain statements ("my name is …", "I'm learning …", "I prefer short replies", "the project is called …") become durable facts (`modules/fact_extractor.py`). The same words inside a question, a hypothetical, a quote or something someone else said, a joke or sarcasm, or a pasted line of code don't, and a negation is never a fact: "can you call me later?" doesn't make your name "later", and "my name is not important" saves nothing. Only a handful of facts fit in the prompt, so your name and role are pinned first, then facts you typed into the Memory panel, then projects and preferences, then the rest, newest first. You can edit or delete any of them in the Memory panel.
@@ -329,6 +342,7 @@ core/
   brain.py             the turn: intent → context → route → guard
   ai_router.py         5 models, cost-aware routing, leak sanitiser
   work_recall.py       project memory injected into every chat turn
+  persona.py           relationship modes: buddy / assistant / mentor / custom
   phone_report.py      the spoken progress report + the call scheduler
   response_composer.py persona layer + 5 reply styles
   engagement.py        when to speak, when to shut up
@@ -408,6 +422,7 @@ All standalone — no pytest, no fixtures, just run them.
 set PYTHONPATH=.                      # Windows;  export PYTHONPATH=. on Unix
 
 python test_work_recall.py            # project memory in the chat
+python test_persona.py                # relationship modes
 python test_guard.py                  # Buddy Lock: policy, passes, gate (+ real face/voice samples)
 python tests/test_local_auth.py       # launch token: /api/* and /ws refuse other pages
 python tests/test_model_lock.py       # model locks + routing work without PySide6
@@ -456,6 +471,7 @@ cd frontend && npx tsc --noEmit       # frontend typecheck
 | Every call is `401` in the app | The window and the brain are from different launches. Close AURA and start it again |
 | `npm run dev` can't find electron | `npm install` inside `frontend/` |
 | Models all locked / no replies | Every model locked or rate-limited |
+| She doesn't sound like the mode you picked | A **nature** lock is on — set it back to Auto |
 | *"I don't have an AI key yet…"* on every message | No `GROQ_API_KEY` / `OPENROUTER_API_KEY` in `.env` (a leftover `your-…` placeholder doesn't count). Add one and restart |
 | `pip install` stops building pygame or PyAudio | The old requirement list on Python 3.14. Pull: it uses pygame-ce now, and PyAudio moved to `requirements-optional.txt` |
 | Lock screen won't recognise you | Light on your face, sit where you enrolled; Settings → Security → Re-enroll. PIN gets you in meanwhile |

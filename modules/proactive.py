@@ -592,7 +592,7 @@ Rules:
 """
 
 LOCKED_IDLE_LINES = [
-    "nothing's happening on {app}. off doing something else, Shaurya?",
+    "nothing's happening on {app}. off doing something else?",
     "{app}'s just sitting there. did you wander off on me?",
     "quiet over here on {app}. you still with me?",
     "you locked me onto {app} and then vanished. classic.",

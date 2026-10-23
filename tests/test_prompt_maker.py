@@ -73,7 +73,7 @@ def _fake_raw(prompt, system, max_tokens=1024, temperature=0.4, model=None):
     return RAW["answer"]
 
 
-def _fake_stream(prompt, system=ai_router.DONNA_SYSTEM_PROMPT, intent="CASUAL", model=None):
+def _fake_stream(prompt, system=None, intent="CASUAL", model=None):
     CALLS.append(("stream", intent, system, prompt))
     if system == PROMPT_ENGINEER_SYSTEM:
         yield BUILT

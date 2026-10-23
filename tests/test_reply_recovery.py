@@ -62,7 +62,7 @@ STREAM: dict = {"chunks": []}
 PROMPTS: list[str] = []
 
 
-def _fake_provider(prompt, system=ai_router.DONNA_SYSTEM_PROMPT, intent="CASUAL", model=None):
+def _fake_provider(prompt, system=None, intent="CASUAL", model=None):
     PROMPTS.append(prompt)
     yield from STREAM["chunks"]
 

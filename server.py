@@ -664,6 +664,9 @@ async def api_save_settings(req: Request) -> dict[str, Any]:
     if not isinstance(patch, dict):
         return {"ok": False, "error": "settings object required"}
     store.set_settings(patch)
+    if any(str(k).startswith("persona.") for k in patch):
+        from core import persona
+        persona.invalidate()   # the next reply speaks in the new role
     return {"ok": True, "settings": store.get_settings()}
 
 

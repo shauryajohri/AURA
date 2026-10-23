@@ -29,7 +29,9 @@ _EXPLAIN_HINT = re.compile(r"(?i)\b(explain|how (?:does|do|is|can)|what (?:is|ar
 
 def _system(owner: str) -> str:
     try:
-        from core.personality import DONNA_SYSTEM_PROMPT as base
+        from core.personality import system_prompt
+        # use_saved=False: the owner's saved role and name are theirs, not a guest's
+        base = system_prompt(use_saved=False)
     except Exception:  # noqa: BLE001
         base = "You are AURA, a sharp, warm AI companion."
     return (

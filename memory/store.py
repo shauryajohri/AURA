@@ -1150,6 +1150,10 @@ DEFAULT_SETTINGS = {
     "dev.show_intents": False,
     "experimental.plugins": False,
     "experimental.cloud_sync": False,
+    # Relationship — who AURA is to the user (core/persona.py)
+    "persona.mode": "buddy",       # buddy | assistant | mentor | custom
+    "persona.user_name": "",       # what AURA calls them
+    "persona.custom": "",          # their own role description (mode=custom)
 }
 
 

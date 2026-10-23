@@ -3,7 +3,7 @@ import re
 import threading
 import requests
 from dotenv import load_dotenv
-from core.personality import DONNA_SYSTEM_PROMPT, INTENT_PERSONALITY_ADJUSTMENTS
+from core.personality import system_prompt as _system_prompt, INTENT_PERSONALITY_ADJUSTMENTS
 
 load_dotenv()  # must be before os.getenv
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")  # get from console.groq.com
@@ -400,7 +400,9 @@ PERSONAL MODE — you're a close friend right now, not a tool:
 - It's fine to reference what you know about them and your shared history."""
 
 
-def call_groq_streaming(prompt: str, system: str = DONNA_SYSTEM_PROMPT, intent: str = "CASUAL", model: str = None):
+def call_groq_streaming(prompt: str, system: str | None = None, intent: str = "CASUAL", model: str = None):
+    if system is None:
+        system = _system_prompt()   # built per call so a persona change applies at once
     model_id = model or GROQ_MODEL
     provider, url, api_key = _endpoint_for(model_id)
     cd_key = _cooldown_key(provider, model_id)
@@ -498,7 +500,7 @@ OVERRIDE ALL YOUR DEFAULT BEHAVIOR:
 _CLASSIFIER_SYSTEM = "You are a classifier. Output ONLY the requested single word. No personality, no extra text, no punctuation."
 
 
-def call_claude(prompt: str, system: str = DONNA_SYSTEM_PROMPT) -> str:
+def call_claude(prompt: str, system: str | None = None) -> str:
     """Meta-call alias used by think/anticipate/knowledge/tasks/curiosity —
     routed to the LIGHT model so it never competes with chat for 70B quota."""
     return call_groq(prompt, system, intent="CASUAL", model=GROQ_MODEL_LIGHT)
@@ -549,7 +551,7 @@ def call_classifier(prompt: str) -> str:
 
 def route(intent: str, prompt: str) -> str:
     extra = INTENT_PERSONALITY_ADJUSTMENTS.get(intent, "")
-    system = DONNA_SYSTEM_PROMPT + extra
+    system = _system_prompt() + extra
     candidates = _resolve_candidates(intent, None)
     if not candidates:
         return _ALL_LOCKED_MSG
@@ -1374,7 +1376,7 @@ def route_streaming(intent: str, prompt: str, system_prompt: str | None = None, 
     else:
         # relationship shapes the voice on Auto; nature overlay goes LAST so
         # a manual lock overrides everything (including relationship tone)
-        system = (DONNA_SYSTEM_PROMPT + extra + _user_facts_block()
+        system = (_system_prompt() + extra + _user_facts_block()
                   + _relationship_block() + _nature_overlay())
 
     # Resolve the model chain for this intent (or the explicit plan model),
@@ -1534,7 +1536,9 @@ def call_planner(prompt: str, system: str, model: str = None, max_tokens: int = 
         return "CONNECTION_ERROR"
 
 
-def call_groq(prompt: str, system: str = DONNA_SYSTEM_PROMPT, intent: str = "CASUAL", model: str = None) -> str:
+def call_groq(prompt: str, system: str | None = None, intent: str = "CASUAL", model: str = None) -> str:
+    if system is None:
+        system = _system_prompt()   # built per call so a persona change applies at once
     model_id = model or GROQ_MODEL
     provider, url, api_key = _endpoint_for(model_id)
     cd_key = _cooldown_key(provider, model_id)

@@ -3128,6 +3128,16 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
 /* ---------- Orbit Lines settings ---------------------------------------- */
 .setov__orbitsvg { width: 100%; max-width: 300px; height: auto; }
 .setov__stylepick { display: flex; gap: 6px; flex-wrap: wrap; }
+.setov__text, .setov__textarea {
+  background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border);
+  border-radius: 10px; color: var(--text); font-family: var(--font-body); font-size: 13px;
+  padding: 8px 12px; outline: none;
+}
+.setov__text { flex: 1; min-width: 0; }
+.setov__text:focus, .setov__textarea:focus { border-color: rgba(150, 125, 255, 0.55); }
+.setov__field { display: flex; flex-direction: column; gap: 6px; }
+.setov__textarea { width: 100%; resize: vertical; line-height: 1.5; box-sizing: border-box; }
+.setov__fieldnote { font-size: 11px; color: var(--muted); align-self: flex-end; }
 .setov__stylebtn {
   padding: 6px 13px;
   border: 1px solid var(--border);

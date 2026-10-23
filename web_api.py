@@ -211,8 +211,9 @@ def _notes_block(s: WebSession) -> str:
 
 def _build_system(s: WebSession) -> str:
     try:
-        from core.personality import DONNA_SYSTEM_PROMPT
-        base = DONNA_SYSTEM_PROMPT
+        from core.personality import system_prompt
+        # use_saved=False: the demo must never read the owner's personal store
+        base = system_prompt(use_saved=False)
     except Exception:  # noqa: BLE001
         base = "You are AURA, a sharp, dry, useful AI companion."
     return base + _WEB_ADDON + _facts_block(s) + _notes_block(s)

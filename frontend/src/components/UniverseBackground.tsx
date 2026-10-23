@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AuraState } from "../types";
+import { usePerfStore } from "../stores/perfStore";
 
 interface Props {
   state: AuraState;
@@ -60,6 +61,7 @@ export default function UniverseBackground({ state, sources = UNIVERSE_SOURCES, 
   const vbRef = useRef<HTMLVideoElement>(null);
   const stateRef = useRef<AuraState>(state);
   stateRef.current = state;
+  const perf = usePerfStore((st) => st.perf);
 
   /* state → tempo + tone (no re-render churn; direct style writes) */
   useEffect(() => {
@@ -68,9 +70,11 @@ export default function UniverseBackground({ state, sources = UNIVERSE_SOURCES, 
       if (v) v.playbackRate = rate;
     }
     if (wrapRef.current) {
-      wrapRef.current.style.filter = FILTER[state] ?? FILTER.idle;
+      // A CSS filter on a playing video is re-applied every frame; perf mode
+      // gives up the mood tint to save that work.
+      wrapRef.current.style.filter = perf ? "none" : FILTER[state] ?? FILTER.idle;
     }
-  }, [state]);
+  }, [state, perf]);
 
   useEffect(() => {
     const va = vaRef.current!;

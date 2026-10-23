@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
+import { usePerfStore, PERF_FRAME_MS } from "../stores/perfStore";
 import type { AuraState } from "../types";
 import { useSkin } from "../skins/useSkin";
 import { dustOf } from "../skins/skins";
@@ -151,6 +152,7 @@ export default function ParticleField({ state }: Props) {
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef<AuraState>(state);
   stateRef.current = state;
+  const perf = usePerfStore((st) => st.perf);
 
   // Read per frame, so changing skin recolours the field without a rebuild.
   // Each dust colour comes as CSS for the 2D canvas and 0–1 for WebGL.
@@ -210,7 +212,7 @@ export default function ParticleField({ state }: Props) {
         c.style.width = W + "px"; c.style.height = H + "px";
       }
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-      const n = Math.min(2400, Math.round((W * H) / 900));
+      const n = Math.min(perf ? 600 : 2400, Math.round((W * H) / (perf ? 3600 : 900)));
       ps = Array.from({ length: n }, () => spawn(false));
       rings = [];
       comets = Array.from({ length: 3 }, (_, i) => ({
@@ -265,6 +267,7 @@ export default function ParticleField({ state }: Props) {
     let prev = performance.now();
     const draw = (t: number) => {
       raf = requestAnimationFrame(draw);
+      if (perf && t - prev < PERF_FRAME_MS) return;
       const dt = Math.min(50, t - prev); prev = t;
 
       const st = stateRef.current as string;
@@ -432,7 +435,7 @@ export default function ParticleField({ state }: Props) {
       glCanvas.removeEventListener("webglcontextlost", onLost);
       glCanvas.removeEventListener("webglcontextrestored", onRestored);
     };
-  }, []);
+  }, [perf]);
 
   // Dots underneath (WebGL), the gradient shapes on top (2D). Both add light,
   // so which one sits on top makes no visible difference.

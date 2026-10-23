@@ -101,7 +101,7 @@ export default function SkinPreview({
       renderCore({
         ctx, cx, cy, R, s: R / 168, D: Math.max(W, H), rot, w, glow, pulse, flicker,
         breathe: 1 + 0.015 * Math.sin(pulse), talk: os === "speaking" ? 0.25 * Math.sin(pulse * 6) : 0,
-        dt, now, os, pal: skin.pal,
+        dt, now, os, pal: skin.pal, blur: 1,
       });
       ctx.globalCompositeOperation = "source-over";
       ctx.globalAlpha = 1;

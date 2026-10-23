@@ -94,7 +94,7 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
 
-  const appendChunk = useCallback((text: string) => {
+  const appendNow = useCallback((text: string) => {
     setTurns((prev) => {
       const last = prev[prev.length - 1];
       if (last && last.role === "aura" && last.streaming) {
@@ -103,6 +103,22 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
       return [...prev, { id: newId(), role: "aura", text, streaming: true, ts: nowTime() }];
     });
   }, []);
+
+  // Tokens can arrive dozens per frame. Each setTurns re-renders the whole
+  // app shell, so buffer them and commit at most once per animation frame.
+  const pendingRef = useRef("");
+  const flushRafRef = useRef(0);
+  const flushChunks = useCallback(() => {
+    if (flushRafRef.current) cancelAnimationFrame(flushRafRef.current);
+    flushRafRef.current = 0;
+    const text = pendingRef.current;
+    pendingRef.current = "";
+    if (text) appendNow(text);
+  }, [appendNow]);
+  const appendChunk = useCallback((text: string) => {
+    pendingRef.current += text;
+    if (!flushRafRef.current) flushRafRef.current = requestAnimationFrame(flushChunks);
+  }, [flushChunks]);
 
   // On "done" the backend sends the REFINED final text (guard-cleaned, with
   // code blocks). Replace the raw streamed text with it so backend context
@@ -165,10 +181,12 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
           appendChunk(msg.payload.text);
           break;
         case "done":
+          flushChunks();
           finishStream(msg.payload.text);
           if (msg.payload.model) setActiveModelId(modelIdToNode(msg.payload.model));
           break;
         case "push":
+          flushChunks();
           pushMessage(msg.payload.text, msg.payload.source);
           break;
         case "presence":
@@ -221,6 +239,7 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
           break;
         }
         case "error":
+          flushChunks();
           pushMessage("[error] " + msg.payload.message, "error");
           finishStream();
           break;
@@ -234,7 +253,7 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
     };
 
     ws.onerror = () => ws.close();
-  }, [url, appendChunk, finishStream, pushMessage]);
+  }, [url, appendChunk, flushChunks, finishStream, pushMessage]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -242,6 +261,7 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
     return () => {
       mountedRef.current = false;
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
+      if (flushRafRef.current) cancelAnimationFrame(flushRafRef.current);
       wsRef.current?.close();
       wsRef.current = null;
     };
@@ -272,12 +292,13 @@ export function useAuraSocket(url: string = window.aura?.bridgeUrl ?? DEFAULT_UR
    *  just makes the window agree with it. */
   const loadTurns = useCallback(
     (msgs: { role: string; text: string; created_at?: string | null }[]) => {
+      pendingRef.current = "";
       setTurns(toTurns(msgs));
     },
     []
   );
 
-  const clearTurns = useCallback(() => setTurns([]), []);
+  const clearTurns = useCallback(() => { pendingRef.current = ""; setTurns([]); }, []);
 
   return { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, roomEvent, activity, send, loadTurns, clearTurns };
 }

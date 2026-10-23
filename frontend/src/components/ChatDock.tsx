@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AuraState, ChatTurn, ConnStatus, RoomEvent, SendOptions } from "../types";
 import { useVoiceInput } from "../hooks/useVoiceInput";
 import { useLocalStorage } from "../hooks/useLocalStorage";
@@ -30,6 +30,31 @@ interface Props {
   /** The last time AURA filed or moved the chat (for the room pill). */
   roomEvent?: RoomEvent | null;
 }
+
+/**
+ * One message. Memoised so typing in the composer, the mic level meter and
+ * streaming tokens only re-render the bubble that actually changed — before
+ * this, every keystroke and every token re-parsed the markdown of the whole
+ * conversation, which is what made the dock crawl on a long chat.
+ */
+const Bubble = memo(function Bubble({ turn: t }: { turn: ChatTurn }) {
+  const body = useMemo(() => renderMarkdown(t.text), [t.text]);
+  return (
+    <div className={"bubble bubble--" + t.role}>
+      <span className="bubble__who">
+        {t.role === "user" ? "You" : "AURA"}
+        {t.source && t.source !== "greeting" && (
+          <span className={"bubble__src bubble__src--" + t.source}>{t.source}</span>
+        )}
+        {t.ts && <span className="bubble__time">{t.ts}</span>}
+      </span>
+      <div className="bubble__text">
+        {body}
+        {t.streaming && <span className="caret" />}
+      </div>
+    </div>
+  );
+});
 
 const MAX_ATTACH = 200 * 1024; // read text attachments up to 200 KB inline
 
@@ -105,8 +130,18 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
   });
   const { toggle: toggleVoice, stop: stopVoice, listening } = voice;
 
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  // Follow the conversation — but only while the reader is already at the
+  // bottom, and with an instant jump. A smooth scroll restarted on every
+  // streamed token never finishes and keeps the compositor busy; yanking the
+  // view down while someone scrolls back to read is worse.
+  const pinnedRef = useRef(true);
+  const onLogScroll = () => {
+    const el = scrollRef.current;
+    if (el) pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+  };
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
   }, [turns, voice.interim, logOpen]);
 
   useEffect(() => {
@@ -136,6 +171,7 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim()) return;
+    pinnedRef.current = true; // sending always brings you back to the latest
     onSend(input);
     setInput("");
   };
@@ -179,27 +215,13 @@ export default function ChatDock({ status, turns, onSend, auraState, onLoadTurns
 
       {/* conversation log — floats above the composer inside the same glass */}
       {logOpen ? (
-        <div className="dock__log" ref={scrollRef}>
+        <div className="dock__log" ref={scrollRef} onScroll={onLogScroll}>
           {turns.length === 0 && (
             <p className="dock__empty">
               {status === "open" ? "AURA is here. Say something to begin." : "Connecting to AURA..."}
             </p>
           )}
-          {turns.map((t) => (
-            <div key={t.id} className={"bubble bubble--" + t.role}>
-              <span className="bubble__who">
-                {t.role === "user" ? "You" : "AURA"}
-                {t.source && t.source !== "greeting" && (
-                  <span className={"bubble__src bubble__src--" + t.source}>{t.source}</span>
-                )}
-                {t.ts && <span className="bubble__time">{t.ts}</span>}
-              </span>
-              <div className="bubble__text">
-                {renderMarkdown(t.text)}
-                {t.streaming && <span className="caret" />}
-              </div>
-            </div>
-          ))}
+          {turns.map((t) => <Bubble key={t.id} turn={t} />)}
         </div>
       ) : (
         last && (

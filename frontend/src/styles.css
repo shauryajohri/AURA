@@ -2165,7 +2165,9 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
      conversation is the thing being read, so it gets an opaque backing and
      the cosmos stays outside it. */
   background: rgba(9, 10, 24, 0.94);
-  backdrop-filter: var(--glass-blur);
+  /* No backdrop-filter: at 94% opacity the blur was invisible, yet the GPU
+     re-blurred the whole dock every frame because the video and canvases
+     behind it never stop moving. That was a big part of the chat lag. */
   box-shadow: var(--glass-highlight), 0 18px 50px rgba(0, 0, 0, 0.5);
   overflow: hidden;
   transition: max-height 0.4s cubic-bezier(0.22, 0.8, 0.3, 1);
@@ -3445,3 +3447,29 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
 .skinmenu__name { font-size: 12.5px; color: var(--text); }
 .skinmenu__sub { font-size: 10px; color: var(--muted); }
 .skinmenu__on { color: var(--cyan); font-size: 10px; }
+/* ============ Performance mode (stores/perfStore.ts sets html.perf) ============
+   Glass panels re-blur the moving video and canvases behind them every frame;
+   on integrated graphics that alone can halve the frame rate. In perf mode
+   the blur goes and the panels get a more opaque tint so text stays legible. */
+html.perf {
+  --panel: rgba(16, 18, 40, 0.72);
+  --panel-solid: rgba(12, 14, 30, 0.86);
+}
+html.perf *,
+html.perf *::before,
+html.perf *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.setview__perf {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 22px;
+  padding: 15px 18px;
+  border-radius: 16px;
+  background: rgba(22, 18, 48, 0.34);
+  border: 1px solid var(--border);
+}
+.setview__perf .san-setopt__meta { flex: 1; min-width: 0; }

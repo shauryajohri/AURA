@@ -4,6 +4,7 @@ import { useBuddyRelay } from "./hooks/useBuddyRelay";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useGuardStore } from "./stores/guardStore";
+import { usePerfStore } from "./stores/perfStore";
 import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
 import Stage from "./components/Stage";
@@ -79,6 +80,7 @@ export default function App() {
 
   // Pull saved appearance/voice settings from the brain once at startup and
   // push them into the visual stores (core, planets, background).
+  const perf = usePerfStore((s) => s.perf);
   const loadSettings = useSettingsStore((s) => s.load);
   useEffect(() => { loadSettings(); }, [loadSettings]);
   // In prod Electron spawns the brain alongside this window, so that first
@@ -189,8 +191,9 @@ export default function App() {
         />
       )}
 
-      {/* the pointer is a tiny black hole — lives above everything */}
-      <CursorLens />
+      {/* the pointer is a tiny black hole — lives above everything
+          (skipped in performance mode; the OS cursor image stays) */}
+      {!perf && <CursorLens />}
     </div>
   );
 }

@@ -43,6 +43,9 @@ export interface CoreFrame {
   now: number;
   os: OrbState;
   pal: CorePalette;
+  /** Multiplies every shadowBlur a form sets: 1 normally, 0 in Performance
+   *  mode, where blurred glows are the first thing to go. */
+  blur: number;
   /** Paint a group of shadowed strokes (scene coordinates, "lighter") into a
    *  small layer around the core, out to `half` px, and add it onto the scene
    *  in one drawImage. A shadow drawn straight onto a big canvas under
@@ -228,17 +231,17 @@ function createHorizon(N: Counter): CoreRenderer {
     ctx.globalCompositeOperation = "lighter";
     glowGroup(f, ringHalf, (g) => {
       g.shadowColor = rgba(pal.main, 1);
-      g.shadowBlur = 34 * s;
+      g.shadowBlur = 34 * s * f.blur;
       g.strokeStyle = rgba(pal.main, 0.45 * glow + 0.18);
       g.lineWidth = 9 * s;
       g.beginPath(); g.arc(cx, cy, ringR * 1.06, 0, TAU); g.stroke();
       g.shadowColor = rgba(pal.inner, 1);
-      g.shadowBlur = 24 * s;
+      g.shadowBlur = 24 * s * f.blur;
       g.strokeStyle = rgba(pal.inner, 0.7 * glow + 0.22);
       g.lineWidth = 4.5 * s;
       g.beginPath(); g.arc(cx, cy, ringR, 0, TAU); g.stroke();
       g.shadowColor = rgba(pal.photon, 1);
-      g.shadowBlur = 15 * s;
+      g.shadowBlur = 15 * s * f.blur;
       g.strokeStyle = rgba(pal.photon, (0.72 + 0.28 * glow) * flicker);
       g.lineWidth = 2.1 * s;
       g.beginPath(); g.arc(cx, cy, ringR * 0.985, 0, TAU); g.stroke();
@@ -247,7 +250,7 @@ function createHorizon(N: Counter): CoreRenderer {
         const dir = si % 2 ? -1 : 1;
         const sa = rot * (1.6 + si * 0.7) * dir + si * 2.3;
         const alen = 0.7 + 0.35 * Math.sin(pulse * 1.7 + si * 2.1);
-        g.shadowBlur = 20 * s;
+        g.shadowBlur = 20 * s * f.blur;
         g.strokeStyle = rgba(pal.photon, (0.2 + 0.22 * Math.sin(pulse * 2.4 + si * 1.4)) * glow + 0.05);
         g.lineWidth = 2.6 * s;
         g.beginPath(); g.arc(cx, cy, ringR, sa, sa + alen); g.stroke();
@@ -540,14 +543,14 @@ function createGargantua(N: Counter): CoreRenderer {
       const t = k / 6;
       const rx = R * (1.12 + t * 0.55) * breathe;
       const ry = R * (1.08 + t * 0.75) * breathe;
-      ctx.shadowBlur = (16 - t * 10) * s;
+      ctx.shadowBlur = (16 - t * 10) * s * f.blur;
       ctx.strokeStyle = rgba(t < 0.3 ? pal.hot : t < 0.6 ? pal.inner : pal.main, (0.5 - t * 0.38) * gain);
       ctx.lineWidth = (4.2 - t * 2.4) * s;
       ctx.beginPath(); ctx.ellipse(cx, cy - R * 0.04, rx, ry, 0, Math.PI, TAU); ctx.stroke();
     }
     // and its fainter secondary image wrapping underneath
     for (let k = 0; k < 3; k++) {
-      ctx.shadowBlur = 8 * s;
+      ctx.shadowBlur = 8 * s * f.blur;
       ctx.strokeStyle = rgba(pal.inner, (0.26 - k * 0.07) * gain);
       ctx.lineWidth = (2.2 - k * 0.5) * s;
       ctx.beginPath();
@@ -563,7 +566,7 @@ function createGargantua(N: Counter): CoreRenderer {
     // photon ring — razor-thin, hugging the shadow
     ctx.save();
     ctx.shadowColor = rgba(pal.photon, 1);
-    ctx.shadowBlur = 12 * s;
+    ctx.shadowBlur = 12 * s * f.blur;
     ctx.strokeStyle = rgba(pal.photon, (0.6 + 0.35 * glow) * flicker);
     ctx.lineWidth = 1.6 * s;
     ctx.beginPath(); ctx.arc(cx, cy, R * 1.015 * breathe, 0, TAU); ctx.stroke();
@@ -665,7 +668,7 @@ function createEclipse(N: Counter): CoreRenderer {
     // inner corona — the bright pearl ring right at the limb
     ctx.save();
     ctx.shadowColor = rgba(pal.photon, 1);
-    ctx.shadowBlur = 26 * s;
+    ctx.shadowBlur = 26 * s * f.blur;
     ctx.strokeStyle = rgba(pal.photon, (0.55 + 0.35 * glow) * flicker);
     ctx.lineWidth = 5 * s;
     ctx.beginPath(); ctx.arc(cx, cy, rr * 1.02, 0, TAU); ctx.stroke();
@@ -803,7 +806,7 @@ function createQuasar(N: Counter): CoreRenderer {
     // white-hot inner edge of the disk
     ctx.save();
     ctx.shadowColor = rgba(pal.hot, 1);
-    ctx.shadowBlur = 22 * s;
+    ctx.shadowBlur = 22 * s * f.blur;
     ctx.strokeStyle = rgba(pal.hot, (0.6 + 0.35 * glow) * flicker);
     ctx.lineWidth = 3 * s;
     ctx.beginPath(); ctx.arc(cx, cy, R * 0.95 * breathe, 0, TAU); ctx.stroke();
@@ -939,12 +942,12 @@ function createWormhole(N: Counter): CoreRenderer {
     // the mouth — a bright lip of bent light
     ctx.save();
     ctx.shadowColor = rgba(pal.main, 1);
-    ctx.shadowBlur = 30 * s;
+    ctx.shadowBlur = 30 * s * f.blur;
     ctx.strokeStyle = rgba(pal.main, 0.4 * glow + 0.15);
     ctx.lineWidth = 7 * s;
     ctx.beginPath(); ctx.arc(cx, cy, mouth * 1.03, 0, TAU); ctx.stroke();
     ctx.shadowColor = rgba(pal.photon, 1);
-    ctx.shadowBlur = 14 * s;
+    ctx.shadowBlur = 14 * s * f.blur;
     ctx.strokeStyle = rgba(pal.photon, (0.6 + 0.3 * glow) * flicker);
     ctx.lineWidth = 2 * s;
     ctx.beginPath(); ctx.arc(cx, cy, mouth, 0, TAU); ctx.stroke();

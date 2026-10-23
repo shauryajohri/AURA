@@ -3,6 +3,7 @@ import type { AuraState } from "../types";
 import { useCoreStore } from "../stores/coreStore";
 import { usePlanetStore } from "../stores/planetStore";
 import { useSettingsStore } from "../stores/settingsStore";
+import { usePerfStore, PERF_FRAME_MS } from "../stores/perfStore";
 import { MODELS } from "../data/models";
 import { useSkin } from "../skins/useSkin";
 import { rgba } from "../skins/skins";
@@ -86,6 +87,8 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null,
   // the setup effect — changing it rebuilds the scene. Rotation and labels are
   // read per-frame through refs, so those apply instantly without a rebuild.
   const density = useSettingsStore((st) => st.density);
+  // Performance mode rebuilds the scene at 1x density without blur glows.
+  const perf = usePerfStore((st) => st.perf);
   const rotationMul = useSettingsStore((st) => st.rotationMul);
   const showLabels = useSettingsStore((st) => st.showLabels);
   const rotationMulRef = useRef(rotationMul);
@@ -152,7 +155,7 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null,
     // orbits are never cut off no matter where the core sits or how far out
     // an orbit goes. DPR is trimmed on huge canvases to keep memory sane.
     const D = Math.ceil(Math.hypot(window.innerWidth, window.innerHeight));
-    const DPR = Math.min(window.devicePixelRatio || 1, D > 1700 ? 1.5 : 2);
+    const DPR = perf ? 1 : Math.min(window.devicePixelRatio || 1, D > 1700 ? 1.5 : 2);
     canvas.width = D * DPR;
     canvas.height = D * DPR;
     canvas.style.width = D + "px";
@@ -199,7 +202,11 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null,
     // Particle counts scale with the Sanctuary "particles" setting — this is
     // also the performance dial on a weaker GPU, so it's clamped rather than
     // trusted blindly.
-    const dens = Math.max(0.1, Math.min(1.8, density));
+    const dens = Math.max(0.1, Math.min(1.8, density)) * (perf ? 0.5 : 1);
+    // shadowBlur is the most expensive canvas op there is; perf mode skips it
+    // (the core form scales its shadows by frame.blur, the planets drop their
+    // rim glow sprite).
+    const blurK = perf ? 0 : 1;
     const N = (base: number) => Math.max(4, Math.round(base * dens));
 
     // ---- The core form (skin) — owns its own particles, sized by density.
@@ -486,6 +493,7 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null,
 
     const draw = (now: number) => {
       if (pausedRef.current) { raf = 0; return; } // resumeRef restarts it
+      if (perf && now - last < PERF_FRAME_MS) { raf = requestAnimationFrame(draw); return; }
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       const os: OrbState = (stateRef.current as OrbState) in SPIN ? (stateRef.current as OrbState) : "idle";
@@ -564,7 +572,7 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null,
       const talk = os === "speaking" ? 0.25 * Math.sin(pulse * 6) : 0;
       const frame: CoreFrame = {
         ctx, cx, cy, R, s, D, rot, w, glow, pulse, flicker, breathe, talk,
-        dt, now, os, pal, withGlow: coreWithGlow,
+        dt, now, os, pal, withGlow: coreWithGlow, blur: blurK,
       };
       renderCore(frame);
       ctx.globalCompositeOperation = "source-over";
@@ -699,12 +707,14 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null,
         // blazing brightest on the core-facing side (that's the light source)
         const toCore = Math.atan2(cy - y, cx - x);
         ctx.globalCompositeOperation = "lighter";
-        const rim = rimSprite(pl, pr, isAct);
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.rotate(toCore);
-        ctx.drawImage(rim.c, -rim.half, -rim.half, rim.half * 2, rim.half * 2);
-        ctx.restore();
+        if (blurK) { // Performance mode keeps the crisp rim, not its glow
+          const rim = rimSprite(pl, pr, isAct);
+          ctx.save();
+          ctx.translate(x, y);
+          ctx.rotate(toCore);
+          ctx.drawImage(rim.c, -rim.half, -rim.half, rim.half * 2, rim.half * 2);
+          ctx.restore();
+        }
         for (const k of isAct ? RIM_STROKES.active : RIM_STROKES.idle) {
           ctx.strokeStyle = k.white ? rgba("255,255,255", k.al) : rgba(pl.c, k.al);
           ctx.lineWidth = k.w * s;
@@ -791,9 +801,9 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null,
       cancelAnimationFrame(raf);
       resumeRef.current = () => {};
     };
-    // `density` and `coreForm` are real dependencies: particle arrays are
-    // sized once at setup, so changing either rebuilds the scene.
-  }, [size, density, coreForm]);
+    // `density`, `coreForm` and `perf` are real dependencies: particle arrays
+    // are sized once at setup, so changing any of them rebuilds the scene.
+  }, [size, density, coreForm, perf]);
 
   useEffect(() => {
     if (!paused) resumeRef.current();

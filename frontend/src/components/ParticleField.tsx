@@ -88,7 +88,10 @@ void main() {
   vec2 dev = a_pos * u_dpr;
   gl_Position = vec4(dev.x / u_dev.x * 2.0 - 1.0, 1.0 - dev.y / u_dev.y * 2.0, 0.0, 1.0);
   v_center = vec2(dev.x, u_dev.y - dev.y);
-  v_r = a_r * u_dpr;
+  // +0.04: the 2D canvas draws almost every arc() as a polygon whose
+  // anti-aliased edge comes out ~0.04 device px fatter than a true circle —
+  // measured dot by dot against it, so these dots carry the same light.
+  v_r = a_r * u_dpr + 0.04;
   gl_PointSize = 2.0 * v_r + 3.0; // the circle plus its half-pixel fringe
   v_col = a_col;
 }`;

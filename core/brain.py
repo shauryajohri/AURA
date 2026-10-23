@@ -2,7 +2,8 @@ import datetime
 import re
 import time
 from modules.proactive import set_app_lock, clear_app_lock, get_app_lock
-from core.ai_router import call_claude, route, route_streaming, extract_code_block, call_classifier, last_model_used
+from core.ai_router import (call_claude, route, route_streaming, extract_code_block, call_classifier,
+                             last_model_used, set_turn_model, NO_KEY_MSG)
 from core.response_composer import compose_text
 from core.thinking import think, post_think
 from memory import store
@@ -32,9 +33,10 @@ def reset_history() -> None:
     """Drop the in-RAM turn mirror.
 
     Called when the user switches chats. `_history` is only a fallback for
-    when the store read fails, but it is NOT session-aware — left alone it
-    would carry the previous chat's turns into the one just opened, which is
-    the exact cross-talk sessions exist to prevent.
+    when the store read fails or Store Conversations is off, but it is NOT
+    session-aware — left alone it would carry the previous chat's turns into
+    the one just opened, which is the exact cross-talk sessions exist to
+    prevent.
     """
     _history.clear()
 
@@ -361,6 +363,10 @@ def _recent_turns(max_turns: int = 8) -> str:
          session is long-dormant AND has fresh turns, never to a chat the
          user has just deliberately opened.
     """
+    # Store Conversations off (Settings → Privacy): the turns since never
+    # reached the store, so the in-RAM mirror is the only transcript there is.
+    if not store.privacy_allows("store_conversations"):
+        return "\n".join(_ram_turns(max_turns))
     lines = []
     try:
         import time as _time
@@ -384,17 +390,43 @@ def _recent_turns(max_turns: int = 8) -> str:
             text = (message or "").strip()
             if not text or _is_context_junk(text):
                 continue
-            kept.append(("User" if role == "user" else "AURA", text[:400]))
+            label = "User" if role == "user" else "AURA"
+            kept.append((label, _clip_turn(label, text)))
         for label, text in reversed(kept):
             lines.append(f"{label}: {text}")
     except Exception:
         # Fall back to in-RAM history if the store read fails.
-        for h in _history[-max_turns:]:
-            text = (h.get("text") or "").strip()
-            if text and not _is_context_junk(text):
-                label = "User" if h.get("role") == "user" else "AURA"
-                lines.append(f"{label}: {text[:400]}")
+        lines.extend(_ram_turns(max_turns))
     return "\n".join(lines[-max_turns:])
+
+
+def _ram_turns(max_turns: int) -> list[str]:
+    """The last turns of `_history` as transcript lines."""
+    lines = []
+    for h in _history[-max_turns:]:
+        text = (h.get("text") or "").strip()
+        if text and not _is_context_junk(text):
+            label = "User" if h.get("role") == "user" else "AURA"
+            lines.append(f"{label}: {_clip_turn(label, text)}")
+    return lines
+
+
+# A turn in the transcript is cut to 400 chars. AURA's code replies get more
+# room: the follow-up ("what's the complexity of that?") is about the code,
+# and the first 400 chars of a reply are mostly its chat line and imports.
+_CODE_TURN_CHARS = 1500
+
+
+def _clip_turn(label: str, text: str) -> str:
+    if label != "AURA" or "```" not in text:
+        return text[:400]
+    if len(text) <= _CODE_TURN_CHARS:
+        return text
+    cut = text[:_CODE_TURN_CHARS]
+    cut = cut[:cut.rfind("\n")] if "\n" in cut else cut   # whole lines only
+    if cut.count("```") % 2:
+        cut += "\n…\n```"   # close the fence the cut left open
+    return cut
 
 
 def part_of_day(hour: int) -> str:
@@ -855,47 +887,92 @@ def handle_observation_followup(query: str) -> str | None:
         "Do not write a full code file. Ask before making changes."
     )
     answer = route("CASUAL", prompt)
+    if answer == "NO_KEY":
+        return NO_KEY_MSG
     if answer in {"CONNECTION_ERROR", "RATE_LIMIT", "THINKING_LEAK"} or answer.startswith("ERROR"):
         return "I saw the error, but the model connection stumbled. Paste the terminal text and I’ll reason from it."
     return guard_output(answer)
 
 
-def process(query: str) -> str:
+# ── Chat shortcuts ───────────────────────────────────────────────────────────
+# Instant commands typed in chat ("add task ...", "afk?", "gold price"). They
+# read only the user's own words: never a payload the Director wrapped around
+# them (mode instruction, compiled plan, /prompt notes), never an attached
+# file or fenced code, and the command has to BE the message, not a word
+# somewhere inside it. As bare substrings, "kafka" read as "afk", "the golden
+# ratio" as a gold quote and a pasted file's "# TODO" as a new task.
+_AFK_RE = re.compile(r"\bafk\b", re.I)
+_ERROR_CHECK_RE = re.compile(
+    r"^(?:(?:hey\s+)?aura[\s,:]+)?(?:please\s+|can\s+you\s+|could\s+you\s+)?"
+    r"(?:check\s+for\s+errors?|any\s+errors?|(?:is|are)\s+there\s+(?:an?\s+|any\s+)?errors?|errors?)"
+    r"(?:\s+(?:on\s+(?:my\s+|the\s+)?screen|in\s+(?:my\s+|the\s+)?(?:code|terminal|editor)|now))?"
+    r"[\s?!.]*$", re.I)
+_FOREX_RE = re.compile(
+    r"\b(?:eur/?usd|gbp/?usd|usd/?jpy|xau(?:/?usd)?)\b"
+    r"|\bgold\b.*\b(?:price|prices|chart|quote|rate|trading)\b"
+    r"|\b(?:price|chart|quote|rate)\s+(?:of|for)\s+gold\b", re.I | re.S)
+
+# Live prices and clipboard saves need the full install (requirements.txt:
+# yfinance/ta/pandas, pyperclip). On a backend-only install they say so
+# instead of failing the whole turn with an import error.
+_FULL_INSTALL = ("For {what} I need the full install: run pip install -r requirements.txt "
+                 "in the AURA folder, then restart me.")
+
+
+def _forex_quote(text: str) -> str:
+    try:
+        from modules.forex_report import get_quick_price
+    except ImportError:
+        return _FULL_INSTALL.format(what="live forex and gold prices")
+    return get_quick_price(text.lower())
+
+
+def _save_clipboard() -> str:
+    try:
+        from modules.knowledge import save_from_clipboard
+    except ImportError:
+        return _FULL_INSTALL.format(what="saving from the clipboard")
+    return save_from_clipboard()
+
+
+def _command_text(user_text: str | None) -> str | None:
+    """What the shortcuts may read: the message as the user typed it, or None
+    when there is none or it carries a file or code to talk about."""
+    if not user_text or "```" in user_text or "[attached file:" in user_text:
+        return None
+    return user_text.strip()
+
+
+def _canned(line: str) -> str:
+    """A fixed line in place of the model's answer. The turn then reports no
+    model, so the chip doesn't credit one that failed or was never called."""
+    set_turn_model("")
+    return line
+
+
+def process(query: str, user_text: str | None = None) -> str:
     print(f"\n[AURA] Processing: '{query}'")
-    query_lower = query.lower()
+    said = _command_text(user_text)
     focus_response = handle_focus_command(query)
     if focus_response:
         store.save_conversation("user", query)
         store.save_conversation("aura", focus_response)
         return focus_response
 
-    if any(w in query_lower for w in ["add task", "new task", "i need to", "todo", "add a task", "remind me to"]):
-        from modules.tasks import handle_add_task
-        result = handle_add_task(query)
-        store.save_conversation("user", query)
-        store.save_conversation("aura", result)
-        speak_response(result, "COMMAND")
-        return result
+    task_reply = None
+    if said:
+        from modules.tasks import handle_task_command
+        task_reply = handle_task_command(said)
+    if task_reply:
+        store.save_conversation("user", said)
+        store.save_conversation("aura", task_reply)
+        speak_response(task_reply, "COMMAND")
+        return task_reply
 
-    if any(w in query_lower for w in ["done with", "completed", "finished", "mark done"]):
-        from modules.tasks import handle_complete_task
-        result = handle_complete_task(query)
-        store.save_conversation("user", query)
-        store.save_conversation("aura", result)
-        speak_response(result, "COMMAND")
-        return result
-
-    if any(w in query_lower for w in ["remove task", "delete task", "cancel task"]):
-        from modules.tasks import handle_remove_task
-        result = handle_remove_task(query)
-        store.save_conversation("user", query)
-        store.save_conversation("aura", result)
-        speak_response(result, "COMMAND")
-        return result
-    if any(w in query_lower for w in ["check for error", "any error", "is there an error", "errors?", "any errors"]):
+    if said and _ERROR_CHECK_RE.match(said):
         from modules.error_detector import handle_error_check
-        result = handle_error_check(query)
-        store.save_conversation("user", query)
+        result = handle_error_check(said)
+        store.save_conversation("user", said)
         store.save_conversation("aura", result)
         speak_response(result, "COMMAND")
         return result
@@ -915,10 +992,9 @@ def process(query: str) -> str:
         store.save_conversation("aura", cmd_response)
         return cmd_response
 
-    if any(p in query.lower() for p in ["eurusd", "gbpusd", "usdjpy", "eur/usd", "gbp/usd", "gold"]):
-        from modules.forex_report import get_quick_price
-        result = get_quick_price(query.lower())
-        store.save_conversation("user", query)
+    if said and _FOREX_RE.search(said):
+        result = _forex_quote(said)
+        store.save_conversation("user", said)
         store.save_conversation("aura", result)
         return result
 
@@ -938,8 +1014,7 @@ def process(query: str) -> str:
         return result
 
     if intent == "SAVE":
-        from modules.knowledge import save_from_clipboard
-        result = save_from_clipboard()
+        result = _save_clipboard()
         store.save_conversation("user", query)
         store.save_conversation("aura", result)
         return result
@@ -950,16 +1025,19 @@ def process(query: str) -> str:
     print("[AURA] Routing to AI...")
     answer = route(intent, full_prompt)
 
+    if answer == "NO_KEY":
+        return _canned(NO_KEY_MSG)
+
     if answer.startswith("ERROR") or answer == "CONNECTION_ERROR":
-        return "Connection trouble — one sec."
+        return _canned("Connection trouble — one sec.")
 
     if answer == "RATE_LIMIT":
-        return "Hit my rate limit — give me a moment."
+        return _canned("Hit my rate limit — give me a moment.")
 
     # The model produced nothing but chain-of-thought (ai_router filtered it
     # all out). Better to ask again than to print the deliberation.
     if answer == "THINKING_LEAK":
-        return "Lost my train of thought there — say that again?"
+        return _canned("Lost my train of thought there — say that again?")
 
     final_answer = compose_text(answer, intent, query, last_model_used())
     post_think(query, final_answer, intent)
@@ -981,7 +1059,10 @@ def process(query: str) -> str:
     return final_answer
 
 
-def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: str | None = None, model: str | None = None, intent_hint: str | None = None) -> str:
+def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: str | None = None, model: str | None = None, intent_hint: str | None = None, user_text: str | None = None) -> str:
+    # `query` is what the model answers — possibly the Director's wrapped
+    # payload. `user_text` is the message as typed; chat shortcuts read only
+    # that (see _command_text), and none run when the caller doesn't pass it.
     mark_user_active(query)
     # Did the user just return after a nudge / being away? If so, the reply
     # should resume the thread ("since you're back...") instead of a separate
@@ -993,7 +1074,7 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
     except Exception:
         pass
     print(f"\n[AURA] Streaming: '{query}'")
-    query_lower = query.lower()
+    said = _command_text(user_text)
     focus_response = handle_focus_command(query)
     if focus_response:
         store.save_conversation("user", query)
@@ -1009,55 +1090,39 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
         if on_chunk:
             on_chunk(observation_followup)
         return observation_followup
-    if "afk" in query_lower:
+    if said and _AFK_RE.search(said):
           from modules.command_handler import describe_afk_status
           result = describe_afk_status()
-          store.save_conversation("user", query)
+          store.save_conversation("user", said)
           store.save_conversation("aura", result)
           if on_chunk:
               on_chunk(result)
           return result
-    if any(w in query_lower for w in ["add task", "new task", "i need to", "todo", "add a task", "remind me to"]):
-        from modules.tasks import handle_add_task
-        result = handle_add_task(query)
-        store.save_conversation("user", query)
-        store.save_conversation("aura", result)
+    task_reply = None
+    if said:
+        from modules.tasks import handle_task_command
+        task_reply = handle_task_command(said)
+    if task_reply:
+        store.save_conversation("user", said)
+        store.save_conversation("aura", task_reply)
         if on_chunk:
-            on_chunk(result)
-        return result
-
-    if any(w in query_lower for w in ["done with", "completed", "finished", "mark done"]):
-        from modules.tasks import handle_complete_task
-        result = handle_complete_task(query)
-        store.save_conversation("user", query)
-        store.save_conversation("aura", result)
-        if on_chunk:
-            on_chunk(result)
-        return result
-
-    if any(w in query_lower for w in ["remove task", "delete task", "cancel task"]):
-        from modules.tasks import handle_remove_task
-        result = handle_remove_task(query)
-        store.save_conversation("user", query)
-        store.save_conversation("aura", result)
-        if on_chunk:
-            on_chunk(result)
-        return result
+            on_chunk(task_reply)
+        return task_reply
     # Quests: status and creation, both in plain language. Placed above the
     # generic task handlers because "add quest japanese 2 hrs" contains "add",
     # which the task matcher would otherwise claim.
-    quest_reply = handle_quest_command(query)
+    quest_reply = handle_quest_command(said) if said else None
     if quest_reply:
-        store.save_conversation("user", query)
+        store.save_conversation("user", said)
         store.save_conversation("aura", quest_reply)
         if on_chunk:
             on_chunk(quest_reply)
         return quest_reply
 
-    if any(w in query_lower for w in ["check for error", "any error", "is there an error", "errors?", "any errors"]):
+    if said and _ERROR_CHECK_RE.match(said):
         from modules.error_detector import handle_error_check
-        result = handle_error_check(query)
-        store.save_conversation("user", query)
+        result = handle_error_check(said)
+        store.save_conversation("user", said)
         store.save_conversation("aura", result)
         if on_chunk:
             on_chunk(result)
@@ -1083,10 +1148,9 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
             on_chunk(instant_response)
         return instant_response
 
-    if any(p in query_lower for p in ["eurusd", "gbpusd", "usdjpy", "eur/usd", "gbp/usd", "gold"]):
-        from modules.forex_report import get_quick_price
-        result = get_quick_price(query_lower)
-        store.save_conversation("user", query)
+    if said and _FOREX_RE.search(said):
+        result = _forex_quote(said)
+        store.save_conversation("user", said)
         store.save_conversation("aura", result)
         if on_chunk:
             on_chunk(result)
@@ -1182,27 +1246,41 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
             raw_chunks.append(chunk)
         raw = "".join(raw_chunks).strip()
 
-        if raw in {"CONNECTION_ERROR", "RATE_LIMIT"}:
-            msg = "Connection trouble — one sec." if raw == "CONNECTION_ERROR" \
-                  else "Hit my rate limit — give me a moment."
+        if raw in {"CONNECTION_ERROR", "RATE_LIMIT", "NO_KEY"}:
+            msg = {"CONNECTION_ERROR": "Connection trouble — one sec.",
+                   "RATE_LIMIT": "Hit my rate limit — give me a moment.",
+                   "NO_KEY": NO_KEY_MSG}[raw]
             if on_chunk:
                 on_chunk(msg)
-            return msg
+            return _canned(msg)
 
         chat_part, lang, code = extract_code_block(raw)
-        chat_msg = chat_part if chat_part else "Here's the code:"
-        # Persona layer: even the coding chat line sounds like AURA.
-        chat_msg = compose_text(chat_msg, "CODING", query, last_model_used())
+        if chat_part:
+            # The prose around the code gets the same leak filter as every
+            # other lane ("The user wants it short so we need to…" after the
+            # block was shown and spoken). The code is already lifted out.
+            from core.ai_router import sanitize_text
+            chat_part = sanitize_text(chat_part, query=query)
+        # Persona layer: even the coding chat line sounds like AURA. With code
+        # attached, an empty line becomes a neutral intro, not a "say that
+        # again" over working code.
+        chat_msg = compose_text(chat_part, "CODING", query, last_model_used(),
+                                with_code=bool(code))
 
         if on_chunk:
             on_chunk(chat_msg)
         if code and on_code:
             on_code(lang, code)
 
+        # History gets what the UI shows: the chat line AND the code (the
+        # server appends the same fenced block to the "done" text). Saving
+        # the line alone left follow-ups ("what's the complexity of that?")
+        # and reopened chats with no code to refer to.
+        shown = f"{chat_msg}\n\n```{lang or 'text'}\n{code}\n```" if code else chat_msg
         store.save_conversation("user", query)
-        store.save_conversation("aura", chat_msg)
+        store.save_conversation("aura", shown)
         _history.append({"role": "user", "text": query})
-        _history.append({"role": "aura", "text": chat_msg})
+        _history.append({"role": "aura", "text": shown})
         post_think(query, chat_msg, intent)
         return chat_msg
 
@@ -1211,7 +1289,7 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
     for chunk in route_streaming(intent, full_prompt, system_prompt=system_prompt, model=model):
         # Sentinels can arrive mid-stream (provider died after content began).
         # They are status codes, not text — never show or store them.
-        if chunk in {"CONNECTION_ERROR", "RATE_LIMIT"}:
+        if chunk in {"CONNECTION_ERROR", "RATE_LIMIT", "NO_KEY"}:
             saw_sentinel = chunk
             continue
         chunks.append(chunk)
@@ -1219,10 +1297,21 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
             on_chunk(chunk)
 
     answer = "".join(chunks).strip()
+    if not answer and saw_sentinel == "NO_KEY":
+        # No model has a key: nothing was called, and "one sec" would promise
+        # a retry that never comes. Say what to do instead.
+        return _canned(NO_KEY_MSG)
     if not answer and saw_sentinel == "RATE_LIMIT":
-        return "Hit my rate limit — give me a moment."
-    if answer.startswith("ERROR") or not answer:
-        return "Connection trouble — one sec."
+        return _canned("Hit my rate limit — give me a moment.")
+    if answer.startswith("ERROR") or (not answer and saw_sentinel):
+        return _canned("Connection trouble — one sec.")
+    if not answer:
+        # The model answered, but the stream filter found nothing in it except
+        # deliberation. Every provider or network failure arrives as a
+        # sentinel, so calling this one "Connection trouble" was a lie.
+        from core.ai_router import note_leak
+        note_leak("streamed")
+        return _canned("Lost my train of thought there — say that again?")
 
     # Final reasoning-leak pass over the ASSEMBLED answer.
     #
@@ -1242,7 +1331,7 @@ def process_streaming(query: str, on_chunk=None, on_code=None, system_prompt: st
             # The model spent its whole budget deliberating and never wrote an
             # answer. Showing the monologue is strictly worse than admitting it.
             note_leak("streamed")
-            return "Lost my train of thought there — say that again?"
+            return _canned("Lost my train of thought there — say that again?")
         if deleaked != answer:
             # Repaired, not lost: usually the seam cut recovering the reply the
             # model settled on. Still counted — five leaks in five days means

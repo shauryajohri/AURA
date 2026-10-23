@@ -450,6 +450,11 @@ def get_session_messages(session_id: int, limit: int = 200) -> list:
 
 
 def save_conversation(role: str, message: str, session_id: int = None):
+    # Settings → Privacy → Store Conversations off: nothing is written. The
+    # check lives here rather than at the ~20 call sites so a new branch in
+    # brain/server can't forget it.
+    if not privacy_allows("store_conversations"):
+        return
     sid = session_id if session_id is not None else active_session_id()
     conn = _connect()
     try:
@@ -847,11 +852,21 @@ def save_user_fact(fact: str, category: str = "general"):
 
 
 def get_user_facts(limit: int = 12) -> list:
+    """The facts that go into the prompt. Only `limit` fit, so they're ranked
+    rather than just the newest: who the user is (their name, their role) is
+    pinned first, then facts they typed into the Memory panel, then projects
+    and preferences, then the rest — newest first within each tier. Newest-only
+    let a dozen passing remarks push the user's own name out of the prompt."""
     conn = _connect()
     try:
         conn.execute(_USER_FACTS_DDL)
         cur = conn.cursor()
-        cur.execute('SELECT fact FROM user_facts ORDER BY id DESC LIMIT ?', (limit,))
+        cur.execute(
+            "SELECT fact FROM user_facts ORDER BY CASE"
+            " WHEN category = 'identity' OR fact LIKE 'their name is %' THEN 0"
+            " WHEN category = 'general' THEN 1"
+            " WHEN category IN ('project', 'preference') THEN 2"
+            " ELSE 3 END, id DESC LIMIT ?", (limit,))
         return [r[0] for r in cur.fetchall()]
     finally:
         conn.close()
@@ -1125,9 +1140,9 @@ DEFAULT_SETTINGS = {
     "anim.reduced_motion": False,
     "wallpaper.video": True,
     "wallpaper.dim": 30,           # 0-100
-    # Privacy & behaviour
-    "privacy.screen_reading": True,
-    "privacy.store_conversations": True,
+    # Privacy (read live by privacy_allows()) & behaviour
+    "privacy.screen_reading": True,       # screenshots, OCR, clipboard
+    "privacy.store_conversations": True,  # write chat turns to `conversations`
     "behavior.proactive": True,
     "behavior.interrupt_work": False,
     # Developer / experimental
@@ -1172,6 +1187,38 @@ def set_settings(patch: dict):
         conn.commit()
     finally:
         conn.close()
+
+
+def privacy_allows(what: str) -> bool:
+    """Settings → Privacy: may AURA do `what` ("screen_reading",
+    "store_conversations")?
+
+    Read from the table on every call, so flipping the switch counts from the
+    very next message or screen look — no restart, no cache to go stale. Unset
+    means the default (on). A read that fails means NO: when AURA can't tell
+    whether she's allowed, she doesn't look and doesn't keep.
+    """
+    import json as _json
+    key = f"privacy.{what}"
+    try:
+        conn = _connect()
+        try:
+            conn.execute(_SETTINGS_DDL)
+            row = conn.execute(
+                'SELECT value FROM app_settings WHERE key=?', (key,)).fetchone()
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001
+        return False
+    if row is None:
+        return bool(DEFAULT_SETTINGS.get(key, True))
+    try:
+        value = _json.loads(row[0])
+    except Exception:  # noqa: BLE001
+        value = row[0]
+    if isinstance(value, str):
+        return value.strip().lower() not in ("false", "0", "off", "no")
+    return bool(value)
 
 
 # ── Quests: the daily board AURA actually watches ────────────────────────────

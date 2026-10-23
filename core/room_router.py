@@ -93,6 +93,12 @@ def switch_note(room: dict) -> str:
     return f"Switching us to {(room or {}).get('name') or 'another room'} — I'll keep this thread there."
 
 
+def file_note(room: dict) -> str:
+    """What AURA says when she files the open, unfiled chat into a room. The
+    chat and its history stay; only the brief she answers with changes."""
+    return f"Filed this chat under {(room or {}).get('name') or 'a room'} — I'll answer in that room's style."
+
+
 def route(text: str) -> dict:
     """Decide, don't act. Returns {switch, room, room_id, from_room_id, note}."""
     from memory import store

@@ -17,6 +17,7 @@ interface Props {
 export default function HomeStatusCard({ status, activeModelId, mode = "CHAT" }: Props) {
   const [factCount, setFactCount] = useState<number | null>(null);
   const [nextTask, setNextTask] = useState<string | null>(null);
+  const [keysMissing, setKeysMissing] = useState(false);
 
   // One gentle poll — refreshed when the connection (re)opens, never spammy.
   useEffect(() => {
@@ -28,6 +29,7 @@ export default function HomeStatusCard({ status, activeModelId, mode = "CHAT" }:
         setNextTask(t ? t.title : null);
       })
       .catch(() => setNextTask(null));
+    api.getStatus().then((s) => setKeysMissing(!!s.keys_missing)).catch(() => setKeysMissing(false));
   }, [status]);
 
   const model = MODELS.find((m) => m.id === activeModelId);
@@ -42,7 +44,9 @@ export default function HomeStatusCard({ status, activeModelId, mode = "CHAT" }:
       <div className="syscard__row">
         <span className="syscard__orb" style={{ background: model?.color ?? "#7d3cff" }} />
         <span className="syscard__key">Model</span>
-        <span className="syscard__val">{model ? model.name : "auto-routing"}</span>
+        <span className="syscard__val">
+          {model ? model.name : keysMissing ? "no API key — see .env" : "auto-routing"}
+        </span>
       </div>
       <div className="syscard__row">
         <span className="syscard__spark">❋</span>

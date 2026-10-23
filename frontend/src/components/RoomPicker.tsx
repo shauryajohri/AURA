@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, type Chat, type ChatMessage, type Room } from "../api";
+import type { RoomEvent } from "../types";
 
 /**
  * The room selector that lives in the Home dock.
@@ -22,6 +23,8 @@ interface Props {
   onLoad: (messages: ChatMessage[]) => void;
   /** Empty the dock transcript (a brand-new chat). */
   onClear: () => void;
+  /** AURA filed or moved the chat on her own; the pill re-reads the room. */
+  roomEvent?: RoomEvent | null;
 }
 
 interface PopPos {
@@ -32,7 +35,7 @@ interface PopPos {
   maxHeight: number;
 }
 
-export default function RoomPicker({ onLoad, onClear }: Props) {
+export default function RoomPicker({ onLoad, onClear, roomEvent }: Props) {
   const [open, setOpen] = useState(false);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [chatsByRoom, setChatsByRoom] = useState<Record<number, Chat[]>>({});
@@ -64,6 +67,7 @@ export default function RoomPicker({ onLoad, onClear }: Props) {
   // Load once so the pill shows the current room even while closed.
   useEffect(() => { load(); }, []);
   useEffect(() => { if (open) load(); }, [open]);
+  useEffect(() => { if (roomEvent) load(); }, [roomEvent]);
 
   // Anchor the popover above the pill. Recomputed on open and whenever the
   // window resizes, so it tracks the dock as it's dragged taller/shorter.

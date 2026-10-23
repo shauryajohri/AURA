@@ -8,7 +8,8 @@ command differs.
 --------------------------------------------------------------------
 1) PREREQUISITES
 --------------------------------------------------------------------
-- Python 3.10 or newer installed (check with: python --version)
+- Python 3.10 to 3.14 installed (check with: python --version).
+  3.15 isn't supported yet: some dependencies have no wheels for it.
 - Git installed (if you're cloning instead of copying the folder)
 - A microphone if you want voice features (optional)
 
@@ -39,11 +40,22 @@ once it's active. Do the remaining steps with it active.
 --------------------------------------------------------------------
 4) INSTALL DEPENDENCIES
 --------------------------------------------------------------------
+    pip install -r requirements-web.txt
     pip install -r requirements.txt
 
+requirements-web.txt alone is enough to run the backend and chat;
+requirements.txt adds voice/TTS, forex prices and clipboard saves.
+
 Notes:
+- Updating an older install? Run "pip uninstall -y pygame" first.
+  AURA now uses pygame-ce (same "import pygame"); the two share a
+  folder, so removing pygame later would break pygame-ce.
+- Optional: pip install -r requirements-optional.txt
+  (PyAudio, pvporcupine, pvrecorder for the wake word / live mic, and
+  PySide6, only to carry over model locks saved by older versions).
+  Nothing wired into the app needs them.
 - PyAudio can fail to install with a plain pip install on some
-  systems.
+  systems (on Windows with Python 3.14 there is no ready-made wheel).
     Windows: if it fails, run:
         pip install pipwin
         pipwin install pyaudio
@@ -119,8 +131,10 @@ clear errors if a required key is missing or invalid.
 --------------------------------------------------------------------
 - "No Picovoice key set" message: expected if you skipped that key —
   voice wake word is just disabled, everything else still works.
-- Replies never come back / "CONNECTION_ERROR": almost always means
-  GROQ_API_KEY is missing, blank, or invalid in .env.
+- "I don't have an AI key yet..." on every message: GROQ_API_KEY
+  (or OPENROUTER_API_KEY) is missing or blank in .env. Add it and restart.
+- "Connection trouble — one sec." with a key set: the key is invalid,
+  or the provider can't be reached.
 - PyAudio install errors: see step 4 notes above for your OS.
 - Make sure your virtual environment is activated (see step 3)
   before running pip install or python main.py — otherwise packages

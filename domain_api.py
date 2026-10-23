@@ -18,6 +18,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
+from starlette.concurrency import run_in_threadpool
 
 router = APIRouter()
 
@@ -544,7 +545,10 @@ async def brain_import_project(req: Request) -> dict[str, Any]:
         import os as _os
         name = _os.path.basename(root.rstrip("/\\")) or "Project"
     try:
-        return {"ok": True, **project_brain.import_from_folder(name, root)}
+        # A full import writes a node per commit and file — seconds of
+        # blocking work. Off the event loop, or every socket stalls with it.
+        return {"ok": True, **await run_in_threadpool(
+            project_brain.import_from_folder, name, root)}
     except Exception as e:  # noqa: BLE001
         return _err(f"import failed: {e}")
 
@@ -609,11 +613,11 @@ async def brain_rescan(pid: str) -> dict[str, Any]:
         return _err("project not found", 404)
     if not p.get("root"):
         return _err("project has no local root to scan")
-    gs = git_scan.scan(p["root"])
+    gs = await run_in_threadpool(git_scan.scan, p["root"])
     if not gs.get("is_repo"):
         return _err("root is not a git repo")
-    return {"ok": True, "imported": project_brain.import_git_scan(pid, gs),
-            "head": gs.get("head", {})}
+    imported = await run_in_threadpool(project_brain.import_git_scan, pid, gs)
+    return {"ok": True, "imported": imported, "head": gs.get("head", {})}
 
 
 @router.post("/api/domain/project/{pid}/plan")
@@ -719,7 +723,9 @@ async def gh_import(req: Request) -> dict[str, Any]:
     full_name = (body.get("full_name") or "").strip()
     if not full_name:
         return _err("full_name required (e.g. 'octocat/Hello-World')")
-    return github_import.import_repo(
+    # Clone + import block for seconds; keep them off the event loop.
+    return await run_in_threadpool(
+        github_import.import_repo,
         full_name, clone_url=body.get("clone_url", ""),
         name=body.get("name", ""), branch=body.get("branch", ""),
         force=bool(body.get("force")))

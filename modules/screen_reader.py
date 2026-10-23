@@ -93,7 +93,23 @@ def describe_current_focus() -> str:
         return f"I'm currently {_current_focus['action']} in {_current_focus['app']}."
     return f"I'm just keeping an eye on what you're doing — right now that's {get_active_window()}."
 
+# Settings → Privacy → Screen Reading. Checked on every look (not cached), so
+# switching it off stops the very next capture without a restart.
+SCREEN_READING_OFF = "screen reading is off (Settings → Privacy)"
+
+
+def reading_allowed() -> bool:
+    try:
+        from memory import store
+        return store.privacy_allows("screen_reading")
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def take_screenshot(window=None):
+    # Every capture comes through here: OCR and quest verification alike.
+    if not reading_allowed():
+        raise RuntimeError(SCREEN_READING_OFF)
     if mss is None or Image is None:
         raise RuntimeError("screen capture dependencies are not installed")
 
@@ -111,7 +127,7 @@ def take_screenshot(window=None):
         return img
 
 def extract_text_from_screen(window=None) -> str:
-    if pytesseract is None:
+    if pytesseract is None or not reading_allowed():
         return ""
 
     try:
@@ -144,7 +160,12 @@ def get_screen_context(target_app_name: str = None) -> dict:
     import time as _t
     window = find_window(target_app_name) if target_app_name else None
     app = window.title if window else get_active_window()
-    visible = extract_text_from_screen(window)
+    # Screen reading off: no screenshot, no OCR, no clipboard. The focused
+    # window's title still comes back — it isn't screen content, and quests
+    # count time by it.
+    reading = reading_allowed()
+    visible = extract_text_from_screen(window) if reading else ""
+    clipboard = get_clipboard() if reading else ""
 
     app_low = (app or "").lower()
     if any(m in app_low for m in _OWN_WINDOW_MARKERS):
@@ -155,12 +176,12 @@ def get_screen_context(target_app_name: str = None) -> dict:
         stale = (_t.time() - _last_external["ts"]) > _EXTERNAL_STALE_SECONDS
         return {
             "app": "unknown" if stale else _last_external["app"],
-            "visible_text": "" if stale else _last_external["visible_text"],
-            "clipboard": get_clipboard(),
+            "visible_text": "" if stale or not reading else _last_external["visible_text"],
+            "clipboard": clipboard,
             "note": "user is focused on the AURA window (talking to you)",
         }
 
     _last_external["app"] = app
     _last_external["visible_text"] = visible or ""
     _last_external["ts"] = _t.time()
-    return {"app": app, "visible_text": visible, "clipboard": get_clipboard()}
+    return {"app": app, "visible_text": visible, "clipboard": clipboard}

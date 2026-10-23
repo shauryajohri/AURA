@@ -459,8 +459,11 @@ async def api_models() -> dict[str, Any]:
 @app.post("/api/models/{name}/toggle")
 async def api_toggle_lock(name: str) -> dict[str, Any]:
     from core import model_lock
-    # accept either node id or display name
-    disp = next((m["name"] for m in _MODELS if m["id"] == name or m["name"] == name), name)
+    # accept either node id or display name — and nothing else, or any typo
+    # would be stored as a lock on a model that doesn't exist
+    disp = next((m["name"] for m in _MODELS if m["id"] == name or m["name"] == name), None)
+    if disp is None:
+        return {"ok": False, "error": "no such model"}
     locked = model_lock.toggle(disp)
     return {"ok": True, "name": disp, "locked": bool(locked)}
 
@@ -668,6 +671,18 @@ async def api_phone_report_call() -> dict[str, Any]:
 # A chat is a boundary; a room is a subject. Rooms hold chats, and every chat
 # in a room inherits the room's brief — which is the part a title taken from
 # the first message can never carry.
+
+# The chat the user opened themselves: "+ New chat", a chat picked from the
+# list, a room entered. Room routing may file it into a room, but never moves
+# them out of it (see _route_room).
+_PICKED_CHAT: int | None = None
+
+
+def _user_picked_chat(sid: int) -> None:
+    global _PICKED_CHAT
+    _PICKED_CHAT = sid
+
+
 @app.get("/api/rooms")
 async def api_rooms() -> dict[str, Any]:
     from memory import store
@@ -724,6 +739,7 @@ async def api_room_enter(room_id: int) -> dict[str, Any]:
     if not store.get_room(room_id):
         return {"ok": False, "error": "no such room"}
     sid = store.enter_room(room_id)
+    _user_picked_chat(sid)
     try:
         from core import brain
         brain.reset_history()
@@ -763,6 +779,13 @@ async def api_chat_new(req: Request) -> dict[str, Any]:
     except Exception:  # noqa: BLE001 — an empty body is a perfectly good "new chat"
         body = {}
     sid = store.create_chat_session(str(body.get("title") or "") or None)
+    _user_picked_chat(sid)
+    # Same as switching chats: the in-RAM mirror is the old chat's.
+    try:
+        from core import brain
+        brain.reset_history()
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True, "id": sid, "chats": store.list_chat_sessions()}
 
 
@@ -798,6 +821,7 @@ async def api_chat_activate(chat_id: int) -> dict[str, Any]:
     from memory import store
     if not store.set_active_chat_session(chat_id):
         return {"ok": False, "error": "no such chat"}
+    _user_picked_chat(chat_id)
     # The in-RAM mirror belongs to the chat we just left; clearing it stops it
     # bleeding into the reopened one.
     try:
@@ -1143,9 +1167,11 @@ async def api_v3_build(req: Request) -> dict[str, Any]:
 async def api_status() -> dict[str, Any]:
     out: dict[str, Any] = {"mode": getattr(DIRECTOR, "mode", "CHAT")}
     try:
-        from core.ai_router import last_model_used, openrouter_status
+        from core.ai_router import keys_missing, last_model_used, openrouter_status
         out["openrouter"] = openrouter_status()
         out["last_model"] = last_model_used()
+        # No provider key at all: every chat turn answers with the setup line.
+        out["keys_missing"] = keys_missing()
     except Exception:  # noqa: BLE001
         pass
     return out
@@ -1201,9 +1227,14 @@ async def _run_streaming(ws: WebSocket, brain_call: Callable[..., str]) -> None:
         code_blocks.append(block)
         on_chunk(block)
 
-    def run() -> str:
+    def run() -> tuple[str, str]:
         try:
-            return brain_call(on_chunk, on_code)
+            # The chip names the model that answered THIS turn ("" for a
+            # shortcut, an error or the no-key line). It's tracked per thread,
+            # so start clean: this worker may have run an earlier turn.
+            from core.ai_router import set_turn_model, turn_model
+            set_turn_model("")
+            return brain_call(on_chunk, on_code), turn_model()
         finally:
             loop.call_soon_threadsafe(queue.put_nowait, _DONE)
 
@@ -1221,19 +1252,12 @@ async def _run_streaming(ws: WebSocket, brain_call: Callable[..., str]) -> None:
         await _send(ws, {"type": "chunk", "payload": {"text": item}})
 
     try:
-        full = await worker
+        full, model = await worker
     except Exception as exc:  # noqa: BLE001
         traceback.print_exc()
         await _send(ws, {"type": "error", "payload": {"message": str(exc)}})
         await _send(ws, {"type": "state", "payload": {"state": "idle"}})
         return
-
-    model = ""
-    try:
-        from core.ai_router import last_model_used
-        model = last_model_used()
-    except Exception:  # noqa: BLE001
-        pass
 
     done_text = (full or "") + "".join(code_blocks)
     await _send(ws, {"type": "done", "payload": {"text": done_text, "model": model}})
@@ -1304,7 +1328,18 @@ def _route_room(text: str) -> None:
     switch applied afterwards would answer in the new room using the old
     room's instructions. Failure here is never fatal — a router that cannot
     decide leaves you exactly where you were.
+
+    The message stays in the chat it was typed into. An unfiled chat (a fresh
+    "+ New chat" above all) is filed into the room rather than swapped for
+    that room's last chat and its history. A chat the user opened themselves
+    is never left. Only one they didn't (the chat still open from the last
+    run, or one AURA moved them into) can move to the room's chat, and then
+    the UI is sent that chat's transcript so the move is visible.
     """
+    # Slash commands and /prompt buffer lines are instructions, not what the
+    # conversation is about: "/code" must not move anyone.
+    if text.strip().startswith("/") or getattr(DIRECTOR, "mode", "") == "PROMPT":
+        return
     try:
         from core import room_router
         from memory import store
@@ -1312,17 +1347,30 @@ def _route_room(text: str) -> None:
         d = room_router.route(text)
         if not d.get("switch"):
             return
-        sid = store.enter_room(d["room_id"])
-        try:
-            from core import brain
-            brain.reset_history()
-        except Exception:  # noqa: BLE001
-            pass
-        broadcast({"type": "room", "payload": {
+        here = store.active_session_id()
+        if d.get("from_room_id") is None:
+            store.set_session_room(here, d["room_id"])
+            sid, note = here, room_router.file_note(d["room"])
+        elif here == _PICKED_CHAT:
+            return
+        else:
+            sid, note = store.enter_room(d["room_id"]), d.get("note", "")
+        payload = {
             "room_id": d["room_id"], "chat_id": sid,
             "from_room_id": d.get("from_room_id"),
-            "auto": True, "note": d.get("note", ""),
-        }})
+            "auto": True, "moved": sid != here, "note": note,
+        }
+        if sid != here:
+            try:
+                from core import brain
+                brain.reset_history()
+            except Exception:  # noqa: BLE001
+                pass
+            # Taken before this turn is saved, so the UI can swap the
+            # transcript without the message it just showed appearing twice.
+            payload["messages"] = [{"role": r, "text": m, "created_at": t}
+                                   for r, m, t in store.get_session_messages(sid)]
+        broadcast({"type": "room", "payload": payload})
     except Exception as e:  # noqa: BLE001
         print(f"[AURA bridge] room routing skipped: {e}")
 
@@ -1347,7 +1395,7 @@ async def _dispatch(ws: WebSocket, text: str) -> None:
 
     if DIRECTOR is None:
         # Fallback: raw brain if the Director failed to init.
-        await _run_streaming(ws, lambda oc, occ: process_streaming(text, on_chunk=oc, on_code=occ))
+        await _run_streaming(ws, lambda oc, occ: process_streaming(text, on_chunk=oc, on_code=occ, user_text=text))
         return
 
     try:
@@ -1367,18 +1415,39 @@ async def _dispatch(ws: WebSocket, text: str) -> None:
         return
 
     if kind == "llm_once":
-        await _run_streaming(
-            ws,
-            lambda oc, occ: process_streaming(
-                directive.user, on_chunk=oc, on_code=occ, system_prompt=directive.system),
-        )
+        # The /prompt_end build is one clean call (call_groq_raw: no persona,
+        # no 2-sentence limit, no reply cleaning, the long-form token budget),
+        # not a chat turn. Through process_streaming it was CASUAL chat: the
+        # leak filter cut every sentence about "the user" and the composer
+        # kept two sentences. The built prompt goes back to the Director, so
+        # "run" executes it and /prompt save stores it instead of the notes.
+        def build_prompt(oc: Callable[[str], None], occ: Callable[[str, str], None]) -> str:
+            from core.ai_router import GROQ_MODEL, NO_KEY_MSG, call_groq_raw, has_key, set_turn_model
+            from memory import store
+            if not has_key():
+                oc(NO_KEY_MSG)
+                return NO_KEY_MSG
+            built = call_groq_raw(directive.user, directive.system, max_tokens=2048)
+            if not built or built in ("RATE_LIMIT", "CONNECTION_ERROR"):
+                out = ("Hit my rate limit — give me a moment." if built == "RATE_LIMIT"
+                       else "Connection trouble — one sec.")
+                oc(out)
+                return out
+            DIRECTOR.note_prompt_result(built)
+            store.save_conversation("user", directive.user)
+            store.save_conversation("aura", built)
+            set_turn_model(GROQ_MODEL)   # call_groq_raw's default model built it
+            oc(built)
+            return built
+        await _run_streaming(ws, build_prompt)
         return
 
     if kind in ("execute_prompt", "generate"):
         await _run_streaming(
             ws,
             lambda oc, occ: process_streaming(
-                directive.text, on_chunk=oc, on_code=occ, intent_hint="CODING"),
+                directive.text, on_chunk=oc, on_code=occ, intent_hint="CODING",
+                user_text=text),
         )
         return
 
@@ -1406,15 +1475,16 @@ async def _dispatch(ws: WebSocket, text: str) -> None:
             return process_streaming(
                 res.prompt, on_chunk=oc, on_code=occ,
                 system_prompt=res.system_prompt, model=res.model_id,
-                intent_hint=intent,
+                intent_hint=intent, user_text=text,
             )
         await _run_streaming(ws, run_plan)
         return
 
-    # "chat" - normal streaming conversation
+    # "chat" - normal streaming conversation. `body` may be the Director's
+    # wrapped payload; chat shortcuts read only `text`, what the user typed.
     intent = getattr(directive, "intent", "") or None
     body = getattr(directive, "text", "") or text
-    await _run_streaming(ws, lambda oc, occ: process_streaming(body, on_chunk=oc, on_code=occ, intent_hint=intent))
+    await _run_streaming(ws, lambda oc, occ: process_streaming(body, on_chunk=oc, on_code=occ, intent_hint=intent, user_text=text))
 
 
 async def _say_locally(ws: WebSocket, text: str, source: str) -> None:

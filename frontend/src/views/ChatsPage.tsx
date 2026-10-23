@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, Chat, ChatMessage, Room } from "../api";
 import { renderMarkdown } from "../components/Markdown";
+import type { RoomEvent } from "../types";
 
 // ============================================================================
 // Chats — rooms on the left, the open chat on the right.
@@ -24,9 +25,11 @@ const BLANK: Partial<Room> = {
 interface Props {
   /** Send a message on the shared socket — one conversation, two places. */
   onSend?: (text: string) => void;
+  /** AURA filed or moved the chat on her own; re-read rooms and the open chat. */
+  roomEvent?: RoomEvent | null;
 }
 
-export default function ChatsPage({ onSend }: Props) {
+export default function ChatsPage({ onSend, roomEvent }: Props) {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeRoom, setActiveRoom] = useState<number | null>(null);
@@ -54,6 +57,7 @@ export default function ChatsPage({ onSend }: Props) {
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => { if (roomEvent) refresh(); }, [roomEvent, refresh]);
 
   // Whichever chat is active, show its transcript.
   useEffect(() => {
@@ -165,7 +169,8 @@ export default function ChatsPage({ onSend }: Props) {
         <h2>Chats</h2>
         <p>
           Rooms say what a conversation is about — every chat inside one
-          inherits its brief, and AURA moves you when the subject changes.
+          inherits its brief, and AURA files a new chat into the room it's
+          about, saying so when she does.
         </p>
       </header>
 

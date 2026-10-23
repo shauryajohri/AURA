@@ -1657,6 +1657,8 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
 .setov__label { flex: 1; font-size: 13px; color: rgba(230, 226, 255, 0.85); text-transform: capitalize; }
 .setov__slider { width: 200px; }
 .setov__val { width: 28px; text-align: right; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.setov__row--soon { opacity: 0.5; }
+.setov__soon { font-size: 10.5px; color: var(--muted); letter-spacing: 0.5px; }
 
 /* layout editor */
 .setov__minimap {

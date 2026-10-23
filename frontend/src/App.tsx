@@ -68,7 +68,7 @@ const LEGACY: Record<string, string> = {
 const PAGES = ["home", "chats", "memory", "tasks", "models", "themes", "settings", "labs"];
 
 export default function App() {
-  const { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, activity, send,
+  const { status, auraState, presence, mode, activeModelId, turns, v3Events, questEvent, roomEvent, activity, send,
           loadTurns, clearTurns } = useAuraSocket();
   useBuddyRelay(status, auraState, presence, turns, send);
   const [collapsed, setCollapsed] = useLocalStorage<boolean>("aura.sidebarMin", false);
@@ -111,7 +111,7 @@ export default function App() {
     switch (view) {
       case "chats":
         // Same socket as the dock — one conversation, two places to see it.
-        return <ChatsPage onSend={send} />;
+        return <ChatsPage onSend={send} roomEvent={roomEvent} />;
       case "memory":
         return <MemoryPage />;
       case "tasks":
@@ -162,7 +162,7 @@ export default function App() {
               <HomeStatusCard status={status} activeModelId={activeModelId} mode={mode} />
             </div>
             <ChatDock status={status} turns={turns} onSend={send} auraState={auraState}
-                      onLoadTurns={loadTurns} onClearTurns={clearTurns} />
+                      onLoadTurns={loadTurns} onClearTurns={clearTurns} roomEvent={roomEvent} />
           </div>
         ) : (
           <div className="os-page page-fade" key={view}>

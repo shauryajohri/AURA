@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { api, Settings } from "../../api";
+import { withDefaults } from "../../stores/settingsStore";
 import { Layout, ColId, Size, CARD_TITLES, DEFAULT_LAYOUT } from "./layoutTypes";
 import MicCheck from "../MicCheck";
 import VoicePicker from "./VoicePicker";
@@ -27,16 +28,16 @@ export const CATEGORY_META: Record<SettingsCategory, { icon: string; title: stri
   blackhole: { icon: "◉", title: "Blackhole", desc: "The core — glow, particles, rotation" },
   planets: { icon: "◍", title: "Planets", desc: "The constellation — orbits, rings, labels" },
   orbits: { icon: "◌", title: "Orbit Lines", desc: "The rings around the core — style, brightness, width" },
-  animations: { icon: "≈", title: "Animations", desc: "Motion intensity across the whole OS" },
-  wallpaper: { icon: "❖", title: "Wallpaper", desc: "The living cosmos behind everything" },
+  animations: { icon: "≈", title: "Animations", desc: "Motion intensity across the whole OS — not active yet" },
+  wallpaper: { icon: "❖", title: "Wallpaper", desc: "The living cosmos behind everything — not active yet" },
   voice: { icon: "♪", title: "Voice", desc: "Which voice she speaks with, plus mic and wake word" },
   autochat: { icon: "✦", title: "Auto-chat", desc: "How chatty AURA is on her own" },
   phone: { icon: "☏", title: "Phone Report", desc: "AURA calls you with progress, meetings and what needs your approval" },
   privacy: { icon: "⛨", title: "Privacy", desc: "What AURA may see and store" },
-  behavior: { icon: "◎", title: "Behavior", desc: "When she speaks up, when she stays quiet" },
+  behavior: { icon: "◎", title: "Behavior", desc: "When she speaks up, when she stays quiet — not active yet" },
   keys: { icon: "⚿", title: "API Keys", desc: "Which providers are connected" },
-  developer: { icon: "⌥", title: "Developer", desc: "Logs, intents, diagnostics" },
-  experimental: { icon: "⚗", title: "Experimental", desc: "Unfinished features — here be dragons" },
+  developer: { icon: "⌥", title: "Developer", desc: "Logs, intents, diagnostics — not active yet" },
+  experimental: { icon: "⚗", title: "Experimental", desc: "Unfinished features — not active yet" },
   layout: { icon: "▦", title: "Layout", desc: "Size & position of your sanctuary cards" },
 };
 
@@ -63,6 +64,18 @@ const KEYS: Record<Exclude<SettingsCategory, "layout" | "keys">, string[]> = {
   developer: ["dev.verbose_logs", "dev.show_intents"],
   experimental: ["experimental.plugins", "experimental.cloud_sync"],
 };
+
+// Saved, but nothing in AURA reads them yet (grep before taking a key out).
+// Their rows say so and can't be changed, rather than pretending to work.
+const NOT_WIRED = new Set([
+  "general.launch_on_boot", "general.start_minimized",
+  "anim.enabled", "anim.intensity", "anim.reduced_motion",
+  "wallpaper.video", "wallpaper.dim",
+  "voice.sensitivity", "voice.wake_word", "voice.noise_suppression",
+  "behavior.proactive", "behavior.interrupt_work",
+  "dev.verbose_logs", "dev.show_intents",
+  "experimental.plugins", "experimental.cloud_sync",
+]);
 
 // Providers AURA can talk to. Keys live in .env on the machine — this panel
 // only reports what's wired, it never displays or edits secrets.
@@ -92,7 +105,10 @@ export default function SettingsOverlay({
   const meta = CATEGORY_META[category];
 
   // ---- drafts --------------------------------------------------------------
-  const [draft, setDraft] = useState<Settings>(() => ({ ...settings }));
+  // The backend leaves unset keys out, so the draft starts from the defaults:
+  // a switch nobody has touched is still a switch, and still on if it's on.
+  const base = useMemo(() => withDefaults(settings), [settings]);
+  const [draft, setDraft] = useState<Settings>(() => ({ ...base }));
   const [layoutDraft, setLayoutDraft] = useState<Layout>(() => ({
     cols: { left: [...layout.cols.left], center: [...layout.cols.center], right: [...layout.cols.right] },
     hidden: [...layout.hidden],
@@ -122,7 +138,7 @@ export default function SettingsOverlay({
       // "keys" is read-only (secrets live in .env) — nothing to persist.
       const patch: Settings = {};
       for (const k of KEYS[category]) {
-        if (draft[k] !== settings[k]) patch[k] = draft[k];
+        if (draft[k] !== base[k]) patch[k] = draft[k];
       }
       if (Object.keys(patch).length) onSaveSettings(patch);
     }
@@ -319,6 +335,21 @@ export default function SettingsOverlay({
           </div>
         );
       }
+      case "privacy":
+        return (
+          <div className="setov__stage setov__stage--short">
+            <div className="setov__genicon">{meta.icon}</div>
+            <p className="setov__hint">
+              {b("privacy.screen_reading")
+                ? "She may read your screen and clipboard to help."
+                : "No screenshots, OCR or clipboard — she only sees window titles."}
+              {" "}
+              {b("privacy.store_conversations")
+                ? "Chats are saved to your history."
+                : "New messages aren't saved; she remembers this chat until you switch chats or restart."}
+            </p>
+          </div>
+        );
       case "keys":
         return (
           <div className="setov__stage setov__stage--short">
@@ -342,7 +373,6 @@ export default function SettingsOverlay({
       case "phone":
       case "animations":
       case "wallpaper":
-      case "privacy":
       case "behavior":
       case "developer":
       case "experimental":
@@ -442,9 +472,11 @@ export default function SettingsOverlay({
       <div className="setov__controls">
         {KEYS[category].filter((k) => k !== "voice.name").map((k) => {
           const v = draft[k];
+          const soon = NOT_WIRED.has(k);
           return (
-            <div key={k} className="setov__row">
+            <div key={k} className={"setov__row" + (soon ? " setov__row--soon" : "")}>
               <span className="setov__label">{label(k)}</span>
+              {soon && <span className="setov__soon">not active yet</span>}
               {k === "orbits.style" ? (
                 <span className="setov__stylepick">
                   {ORBIT_STYLES.map((st) => (
@@ -458,7 +490,7 @@ export default function SettingsOverlay({
                   ))}
                 </span>
               ) : typeof v === "boolean" ? (
-                <button className={"san-toggle" + (v ? " san-toggle--on" : "")} onClick={() => set(k, !v)}>
+                <button className={"san-toggle" + (v ? " san-toggle--on" : "")} onClick={() => set(k, !v)} disabled={soon}>
                   <span className="san-toggle__knob" />
                 </button>
               ) : (
@@ -468,6 +500,7 @@ export default function SettingsOverlay({
                     type="range" min={0} max={100}
                     value={Number(v) || 0}
                     onChange={(e) => set(k, Number(e.target.value))}
+                    disabled={soon}
                   />
                   <span className="setov__val">{Number(v) || 0}</span>
                 </>

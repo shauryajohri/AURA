@@ -1,7 +1,7 @@
 /**
  * The fixed glass sidebar — AURA OS navigation.
  *
- * Six destinations. "Aura Domain" is special: it doesn't swap the page, it
+ * One entry per page. "Aura Domain" is special: it doesn't swap the page, it
  * crosses the portal into the dedicated coding workspace. Collapsed mode is
  * icons-only; the width animates (CSS) and labels fade out, nothing snaps.
  * The bottom is reserved for identity: profile, version, plan.
@@ -22,6 +22,7 @@ const NAV: NavItem[] = [
   { id: "memory", label: "Memory", icon: "❋", hint: "Timeline · search · bookmarks" },
   { id: "tasks", label: "Tasks", icon: "✓", hint: "Today · projects · quests" },
   { id: "models", label: "Models", icon: "◈", hint: "Planets · routing · orbits" },
+  { id: "themes", label: "Themes", icon: "✺", hint: "Skins · skies · cores" },
   { id: "settings", label: "Settings", icon: "⚙", hint: "Appearance · voice · keys" },
   { id: "labs", label: "Labs", icon: "⚗", hint: "What's coming next" },
 ];

@@ -172,6 +172,31 @@ One rung at a time, and the capabilities above the current rung are genuinely di
 
 ---
 
+## Skins
+
+A skin is a whole design: which black hole sits at the core, what fills the full-screen background, and the colours everything else wears (glass borders, highlights, particles, the cursor, the Domain). Change it from **Themes** in the sidebar, the **Skin** menu in the Home top bar, or **Settings → Skins**. Themes and Settings both show the gallery: a live preview you can switch between Idle, Thinking and Speaking, plus mix-and-match: any background with any core.
+
+| Skin | Core | Background |
+|---|---|---|
+| **Aura** (default) | Horizon: violet ring, filaments, lens blade | Universe video |
+| **Event Horizon** | Filmed horizon: the Higgsfield black hole, played as film | Nebula plate |
+| **Milky Way** | Filmed horizon | Milky Way plate |
+| **Gargantua** | Accretion disk lensed over the shadow | Gargantua film (Deep field if missing) |
+| **Totality** | Eclipse: corona and a diamond-ring flare | Void |
+| **Quasar** | Disk with twin relativistic jets | Warp drive |
+| **Supernova** | Crimson horizon | Supernova film (Nebula if missing) |
+| **Borealis** | Emerald accretion disk | Borealis film (Aurora if missing) |
+| **Wormhole** | Rings falling into a tunnel | Cosmic web |
+| **Abyss** | Monochrome horizon | Void |
+
+The three films are seamless loops generated with Higgsfield and live in `frontend/public/skins/` (see the README there). A skin whose film is missing or won't play falls back to its live procedural sky, so the files are optional. The same goes for the two still plates and for the filmed horizon, the black hole from the Sep 19 Event Horizon redesign: without its file the drawn horizon stands in. Worn by a skin of another colour, the filmed horizon is tinted to that skin's hue.
+
+Every core and every background reacts to AURA's state: thinking spins and speeds things up, speaking pulses with her voice. Each design does that in its own way: the quasar's jets flare, the warp field jumps to light speed, the aurora ripples.
+
+**Adding a skin** is one object in `frontend/src/skins/skins.ts` (`SKINS`): a core form, a background, a core palette, four sky hues and four UI colours. New core forms go in `skins/coreForms.ts` and new skies in `skins/backdrops.ts`; both are plain canvas code that is told its size and colours, so the gallery previews come for free. The choice is saved as `skin.id` / `skin.core` / `skin.backdrop` in `/api/settings` and cached in localStorage, so the right skin paints on launch even with the brain offline.
+
+---
+
 ## API
 
 All on `http://127.0.0.1:8760`. WebSocket chat at `/ws`.
@@ -293,6 +318,7 @@ frontend/src/
   domainApi.ts         Domain machine-half client
   brainApi.ts          Project Brain client
   stores/              domainStore · brainStore · settingsStore · planetStore
+  skins/               skin catalogue · core forms · procedural backgrounds
   views/               Memory · Tasks · Quests · Models · Intelligence · Skills
   components/Domain/   shell, nav, header, chat
     brain/             Projects · Research · Dashboard · Tasks · Graph ·

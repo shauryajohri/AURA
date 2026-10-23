@@ -4,35 +4,28 @@ import { useCoreStore } from "../stores/coreStore";
 import { usePlanetStore } from "../stores/planetStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { MODELS } from "../data/models";
+import { useSkin } from "../skins/useSkin";
+import { rgba } from "../skins/skins";
+import { createCore, type CoreFrame, type OrbState } from "../skins/coreForms";
 
 // ============================================================================
-// AURA CORE — Black Hole, built 1:1 from the design spec:
-//   Event horizon 240px · 12 orbital guides · Main #7D3CFF · Inner #A76DFF
-//   Photon ring #F3D9FF · Disk: purple/pink/blue/orange · 90s/revolution
-//   Subtle pulse · 20% soft purple bloom · gravitational lens arcs
-// Layer order: bloom → guides → lens → REAR disk → inner glow →
-//              event horizon (pure black) → photon ring → FRONT disk
+// AURA CORE — the black hole at the centre of Home, and the planets (AI
+// models) that orbit it.
+//
+// The core itself is painted by a FORM from skins/coreForms (the original
+// violet horizon, Gargantua's disk, an eclipse, a quasar, a wormhole) in the
+// active skin's colours. This component owns everything around it: the
+// canvas, the state clock, orbit guides, planets, and edit-mode dragging.
+// Layer order: deep backing → guides → core form → planets
 // ============================================================================
 
-// Monochrome violet palette — matched to the reference still: a black void,
-// one white-hot ring wrapped in electric purple, and nothing else in the way.
-const MAIN = "125,60,255";    // #7D3CFF electric purple
-const INNER = "167,109,255";  // #A76DFF inner glow
-const PHOTON = "243,217,255"; // #F3D9FF near-white ring light
-const SOFT = "196,150,255";   // pale violet wisps
-const DEEP = "139,101,255";   // #8B65FF
-const WHITE = "255,252,255";  // white-hot sparks / beam core
-const CYAN = "56,225,255";
 // Realistic ring dust — neutral space tones (sand, grey ice, white sparkle),
-// NOT the planet's color. Like the real thing.
+// NOT the planet's color or the skin's. Like the real thing.
 const DUST_SAND = "218,208,186";
 const DUST_GREY = "198,200,212";
 const DUST_ICE = "255,250,240";
 const DUST_ALPHAS = [0.26, 0.37, 0.48, 0.59]; // midpoints of 0.2–0.65 in four bins
 
-const rgba = (c: string, a: number) => `rgba(${c},${a < 0 ? 0 : a > 1 ? 1 : a})`;
-
-type OrbState = "idle" | "listening" | "thinking" | "speaking" | "focus" | "alert";
 const SPIN: Record<OrbState, number> = { idle: 1, listening: 1.6, thinking: 5, speaking: 2.4, focus: 0.7, alert: 7 };
 const GLOW: Record<OrbState, number> = { idle: 0.55, listening: 0.72, thinking: 0.95, speaking: 0.85, focus: 0.45, alert: 1 };
 
@@ -55,11 +48,6 @@ interface Props {
   paused?: boolean;
 }
 
-/** One crackling electric wisp swirling around the void. */
-interface Filament {
-  r: number; a0: number; len: number; w: number; c: string;
-  al: number; sp: number; ph: number; amp: number;
-}
 interface Node { ring: number; a: number; tw: number; big: boolean; }
 
 export default function BlackHole({ state, size: sizeProp, activeModelId = null, paused = false }: Props) {
@@ -128,6 +116,13 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null,
   const setCfg = useCoreStore((s) => s.set);
   const glowMulRef = useRef(1);
   glowMulRef.current = glowPct / 100;
+
+  // The skin decides which core form is drawn and every colour it uses.
+  // Colours are read per frame (a recolour is instant); the form is a real
+  // dependency of the scene, since each form sizes its own particles.
+  const { skin, core: coreForm } = useSkin();
+  const palRef = useRef(skin.pal);
+  palRef.current = skin.pal;
 
   const [stageMin, setStageMin] = useState<number>(sizeProp ?? MAX);
   const stageDims = useRef({ w: sizeProp ?? MAX, h: sizeProp ?? MAX });
@@ -207,33 +202,8 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null,
     const dens = Math.max(0.1, Math.min(1.8, density));
     const N = (base: number) => Math.max(4, Math.round(base * dens));
 
-    // ---- Electric filaments — the crackling violet wisps of the reference.
-    // No accretion disk, no rainbow: just lightning-like plasma threads
-    // hugging the ring, thinning out with distance. Each one is a curved arc
-    // whose radius wobbles with two sine frequencies, so it reads as a
-    // living electric tendril rather than a clean circle.
-    const filaments: Filament[] = [];
-    for (let i = 0; i < N(110); i++) {
-      const rn = 1.05 + Math.pow(Math.random(), 1.8) * 0.95; // 1.05–2.0 R, dense near the ring
-      const roll = Math.random();
-      filaments.push({
-        r: rn,
-        a0: Math.random() * Math.PI * 2,
-        len: 0.5 + Math.random() * 2.3,
-        w: roll > 0.85 ? 0.4 + Math.random() * 0.5 : 0.6 + Math.random() * 1.3,
-        c: roll > 0.92 ? WHITE : roll > 0.62 ? INNER : roll > 0.28 ? MAIN : SOFT,
-        al: (0.08 + Math.random() * 0.26) + Math.max(0, 1.55 - rn) * 0.22,
-        sp: 0.22 / rn + 0.07,
-        ph: Math.random() * Math.PI * 2,
-        amp: 0.015 + Math.random() * 0.05,
-      });
-    }
-
-    // Faint concentric swirl echoes — the ghost circles around the still.
-    const echoes = Array.from({ length: 6 }, (_, i) => ({
-      r: 1.28 + i * 0.17 + Math.random() * 0.05,
-      al: 0.055 - i * 0.007,
-    }));
+    // ---- The core form (skin) — owns its own particles, sized by density.
+    const renderCore = createCore(coreForm, N);
 
     // ---- Planet system: AI models orbiting AURA in harmonic synchrony ------
     // Per the design sheet: equal angular spacing, own orbit + color + nature,
@@ -480,10 +450,11 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null,
       }
     }
 
-    // The ring's glow layer reaches the widest thing in it — the speaking
-    // ring at 1.12× (or the halo's 34·s blur) — at the fullest breath.
-    const ringGlow = glowLayer();
-    const ringHalf = R * 1.03 * 1.015 * 1.12 + 73 * s + 2;
+    // The core form's glows (its ring and their shadows) go through one glow
+    // layer centred on the core; the form says how far out its group reaches.
+    const coreGlow = glowLayer();
+    const coreWithGlow = (half: number, paint: (g: CanvasRenderingContext2D) => void) =>
+      withGlow(coreGlow, cx, cy, half, paint);
 
     // ---- Cached layers: parts of the scene that only change with a setting
     // (the backing, the orbit guides, the slot orbits). Each is painted once,
@@ -520,7 +491,9 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null,
       const os: OrbState = (stateRef.current as OrbState) in SPIN ? (stateRef.current as OrbState) : "idle";
       const baseW = (Math.PI * 2) / 90; // spec: 90 s per revolution
       const w = baseW * SPIN[os] * rotationMulRef.current;
-      rot = (rot + w * dt) % (Math.PI * 2);
+      // Unwrapped on purpose: forms turn features at fractional multiples of
+      // rot (0.05×, 0.4×, 1.6×…), and wrapping at 2π made those jump.
+      rot += w * dt;
       glow += (GLOW[os] * glowMulRef.current - glow) * Math.min(1, dt * 4);
       pulse += dt * (os === "speaking" ? 2.6 : os === "thinking" ? 1.8 : 0.9);
       const breathe = 1 + 0.015 * Math.sin(pulse); // spec: subtle pulse
@@ -533,7 +506,7 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null,
         0.05 * Math.sin(pulse * 12.7 + 1.3) +
         0.04 * Math.sin(pulse * 2.3 + 0.7);
 
-      for (const f of filaments) f.a0 = (f.a0 + w * dt * f.sp * 6) % (Math.PI * 2);
+      const pal = palRef.current;
 
       ctx.clearRect(0, 0, D, D);
 
@@ -543,8 +516,8 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null,
         ocfg.style === "solid" ? [] :
         ocfg.style === "dotted" ? [1.5 * s, 7 * s] : [5 * s, 9 * s];
       // The backing and the guides never move — one cached layer, repainted
-      // only when an Orbit Lines setting changes.
-      cachedLayer(backLayer, `${ocfg.style}|${ocfg.mul}|${ocfg.wmul}`, cx, cy,
+      // only when an Orbit Lines setting or the skin's guide colour changes.
+      cachedLayer(backLayer, `${ocfg.style}|${ocfg.mul}|${ocfg.wmul}|${pal.inner}`, cx, cy,
                   Math.max(R * 3.6, rMax + ocfg.wmul) + 4, (g) => {
         // Deep black backing — the core lives in true darkness, like the still.
         // This buries the busy universe video around the ring so the flare and
@@ -563,7 +536,7 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null,
           for (let i = 0; i < RINGS; i++) {
             g.beginPath();
             g.arc(cx, cy, guideR[i], 0, Math.PI * 2);
-            g.strokeStyle = rgba(INNER, (0.035 + (i % 4 === 0 ? 0.02 : 0)) * ocfg.mul);
+            g.strokeStyle = rgba(pal.inner, (0.035 + (i % 4 === 0 ? 0.02 : 0)) * ocfg.mul);
             g.lineWidth = 1 * ocfg.wmul;
             g.stroke();
           }
@@ -576,182 +549,26 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null,
         const tw = 0.5 + 0.5 * Math.sin(pulse * 1.4 + n.tw);
         if (n.big) {
           const g = ctx.createRadialGradient(x, y, 0, x, y, 9 * s);
-          g.addColorStop(0, rgba(PHOTON, 0.7 * tw));
-          g.addColorStop(0.35, rgba(DEEP, 0.35 * tw));
-          g.addColorStop(1, rgba(DEEP, 0));
+          g.addColorStop(0, rgba(pal.photon, 0.7 * tw));
+          g.addColorStop(0.35, rgba(pal.deep, 0.35 * tw));
+          g.addColorStop(1, rgba(pal.deep, 0));
           ctx.fillStyle = g;
           ctx.beginPath(); ctx.arc(x, y, 9 * s, 0, Math.PI * 2); ctx.fill();
         }
-        ctx.fillStyle = rgba(PHOTON, 0.18 + 0.22 * tw);
+        ctx.fillStyle = rgba(pal.photon, 0.18 + 0.22 * tw);
         ctx.beginPath(); ctx.arc(x, y, (n.big ? 1.8 : 1.2) * s, 0, Math.PI * 2); ctx.fill();
       }
 
-      ctx.globalCompositeOperation = "lighter";
-
-      // ---- Faint concentric swirl echoes — breathing, not frozen: each one
-      // slowly swells and dims on its own phase.
-      for (let ei = 0; ei < echoes.length; ei++) {
-        const e = echoes[ei];
-        const er = R * e.r * (1 + 0.025 * Math.sin(pulse * 0.7 + ei * 1.9));
-        ctx.beginPath();
-        ctx.arc(cx, cy, er, 0, Math.PI * 2);
-        ctx.strokeStyle = rgba(
-          MAIN,
-          Math.max(0, e.al) * (0.5 + 0.6 * glow) * (0.6 + 0.5 * Math.sin(pulse * 1.1 + ei)),
-        );
-        ctx.lineWidth = 1 * s;
-        ctx.stroke();
-      }
-
-      // ---- Electric filaments — crackling violet plasma threads swirling
-      // the void. Radius wobbles on two frequencies so each thread reads as
-      // living lightning, not a clean circle. They rotate with the core.
-      ctx.lineCap = "round";
-      for (const f of filaments) {
-        ctx.beginPath();
-        const STEPS = 16;
-        for (let k = 0; k <= STEPS; k++) {
-          const t = k / STEPS;
-          const ang = f.a0 + rot * 0.4 + f.len * t;
-          const wob =
-            1 +
-            f.amp * Math.sin(ang * 7 + f.ph + pulse * 0.7) +
-            f.amp * 0.6 * Math.sin(ang * 17 + f.ph * 2.3);
-          const rr = f.r * wob * R;
-          const px = cx + rr * Math.cos(ang);
-          const py = cy + rr * Math.sin(ang);
-          if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-        }
-        // twinkle: every filament surges and fades on its own rhythm, so the
-        // swirl constantly crackles instead of holding one exposure
-        const tw = 0.55 + 0.45 * Math.sin(pulse * (1.3 + f.sp * 5) + f.ph * 3.1);
-        ctx.strokeStyle = rgba(f.c, f.al * (0.4 + 0.7 * glow) * (0.5 + tw));
-        ctx.lineWidth = f.w * s * (0.85 + 0.3 * tw);
-        ctx.stroke();
-      }
-
-      // ---- Soft violet bloom breathing around the whole core
-      const bloom = ctx.createRadialGradient(cx, cy, R * 0.8, cx, cy, R * 2.7);
-      bloom.addColorStop(0, rgba(MAIN, 0.15 * glow + 0.04));
-      bloom.addColorStop(0.5, rgba(MAIN, 0.05 * glow));
-      bloom.addColorStop(1, rgba(MAIN, 0));
-      ctx.fillStyle = bloom;
-      ctx.beginPath(); ctx.arc(cx, cy, R * 2.7, 0, Math.PI * 2); ctx.fill();
-      ctx.globalCompositeOperation = "source-over";
-
-      // ---- Event horizon: pure, textureless black that absorbs everything
-      const edge = ctx.createRadialGradient(cx, cy, R * 0.9 * breathe, cx, cy, R * 1.1 * breathe);
-      edge.addColorStop(0, "rgba(0,0,0,1)");
-      edge.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = edge;
-      ctx.beginPath(); ctx.arc(cx, cy, R * 1.1 * breathe, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "#000";
-      ctx.beginPath(); ctx.arc(cx, cy, R * breathe, 0, Math.PI * 2); ctx.fill();
-
-      // ---- THE ring — matched to the reference: a white-hot filament
-      // wrapped in electric violet, hugging the void tightly.
-      const ringR = R * 1.03 * breathe;
-      ctx.globalCompositeOperation = "lighter";
-      withGlow(ringGlow, cx, cy, ringHalf, (g) => {
-        // wide outer violet halo
-        g.shadowColor = rgba(MAIN, 1);
-        g.shadowBlur = 34 * s;
-        g.strokeStyle = rgba(MAIN, 0.45 * glow + 0.18);
-        g.lineWidth = 9 * s;
-        g.beginPath(); g.arc(cx, cy, ringR * 1.06, 0, Math.PI * 2); g.stroke();
-        // bright violet band
-        g.shadowColor = rgba(INNER, 1);
-        g.shadowBlur = 24 * s;
-        g.strokeStyle = rgba(INNER, 0.7 * glow + 0.22);
-        g.lineWidth = 4.5 * s;
-        g.beginPath(); g.arc(cx, cy, ringR, 0, Math.PI * 2); g.stroke();
-        // white-hot inner filament — brightness rides the flicker
-        g.shadowColor = rgba(PHOTON, 1);
-        g.shadowBlur = 15 * s;
-        g.strokeStyle = rgba(PHOTON, (0.72 + 0.28 * glow) * flicker);
-        g.lineWidth = 2.1 * s;
-        g.beginPath(); g.arc(cx, cy, ringR * 0.985, 0, Math.PI * 2); g.stroke();
-        // shimmer arcs — three hot segments racing around the ring at
-        // different speeds/directions, so the ring is never the same twice.
-        // Thinking spins the core fast, and these whip around with it.
-        for (let si2 = 0; si2 < 3; si2++) {
-          const dir2 = si2 % 2 ? -1 : 1;
-          const sa = rot * (1.6 + si2 * 0.7) * dir2 + si2 * 2.3;
-          const alen = 0.7 + 0.35 * Math.sin(pulse * 1.7 + si2 * 2.1);
-          g.shadowBlur = 20 * s;
-          g.strokeStyle = rgba(PHOTON, (0.2 + 0.22 * Math.sin(pulse * 2.4 + si2 * 1.4)) * glow + 0.05);
-          g.lineWidth = 2.6 * s;
-          g.beginPath(); g.arc(cx, cy, ringR, sa, sa + alen); g.stroke();
-        }
-        if (os === "speaking") {
-          g.shadowBlur = 0;
-          g.strokeStyle = rgba(CYAN, 0.18 + 0.18 * Math.sin(pulse * 2));
-          g.lineWidth = 1.8 * s;
-          g.beginPath(); g.arc(cx, cy, ringR * 1.12, 0, Math.PI * 2); g.stroke();
-        }
-      });
-
-      // ---- Twin hotspots — the two blinding points where the beam pierces
-      // the ring at the horizontal, exactly like the reference.
-      for (const side of [-1, 1] as const) {
-        const hx = cx + side * ringR;
-        // real flicker: two incommensurate sines + the global life signal
-        const flick =
-          (1 + 0.13 * Math.sin(pulse * 3.2 + side * 1.7) + 0.07 * Math.sin(pulse * 8.9 + side * 0.6)) *
-          (0.75 + 0.35 * flicker);
-        const hr = R * 0.6 * flick;
-        const g1 = ctx.createRadialGradient(hx, cy, 0, hx, cy, hr);
-        g1.addColorStop(0, rgba(WHITE, (0.9 * glow + 0.1) * flicker));
-        g1.addColorStop(0.16, rgba(PHOTON, (0.55 * glow + 0.1) * flicker));
-        g1.addColorStop(0.45, rgba(INNER, 0.22 * glow + 0.03));
-        g1.addColorStop(1, rgba(MAIN, 0));
-        ctx.fillStyle = g1;
-        ctx.beginPath(); ctx.arc(hx, cy, hr, 0, Math.PI * 2); ctx.fill();
-      }
-
-      // ---- The horizontal lens-flare beam — a razor of light across space,
-      // layered from a wide violet haze down to a 1px white core.
-      // The beam breathes: length swells slowly, brightness rides the
-      // flicker, and while she SPEAKS it visibly pulses with her voice.
+      // ---- The core — whichever form the skin wears. While she SPEAKS,
+      // `talk` rides her voice; each form decides what that pulses.
       const talk = os === "speaking" ? 0.25 * Math.sin(pulse * 6) : 0;
-      const beamLen =
-        Math.min(D * 0.46, R * 6.5) * (0.9 + 0.12 * Math.sin(pulse * 0.8) + talk * 0.3);
-      const beam = (h: number, a0: number, cStr: string) => {
-        const aa = a0 * flicker * (1 + talk);
-        for (const side of [-1, 1] as const) {
-          const hx = cx + side * ringR * 0.88;
-          const g = ctx.createLinearGradient(hx, 0, hx + side * beamLen, 0);
-          g.addColorStop(0, rgba(cStr, aa * (0.55 + 0.55 * glow)));
-          g.addColorStop(0.3, rgba(cStr, aa * 0.4 * (0.55 + 0.55 * glow)));
-          g.addColorStop(1, rgba(cStr, 0));
-          ctx.fillStyle = g;
-          ctx.fillRect(side === -1 ? hx - beamLen : hx, cy - h / 2, beamLen, h);
-        }
+      const frame: CoreFrame = {
+        ctx, cx, cy, R, s, D, rot, w, glow, pulse, flicker, breathe, talk,
+        dt, now, os, pal, withGlow: coreWithGlow,
       };
-      const bh = 1 + 0.18 * (flicker - 0.84) + talk; // thickness lives too
-      beam(30 * s * bh, 0.09, MAIN);    // wide violet haze
-      beam(11 * s * bh, 0.26, INNER);   // mid glow
-      beam(3.4 * s * bh, 0.85, PHOTON); // bright blade
-      beam(1.4 * s, 1.0, WHITE);        // razor core stays razor
-
-      // ---- Occasional gravitational pulse — every ~9s one luminous wave
-      // rolls outward from the horizon and dissolves. Subtle, not a siren.
-      {
-        const period = 9;
-        const gp = ((now / 1000) % period) / period; // 0..1
-        if (gp < 0.55) {
-          const t = gp / 0.55;
-          const rr = R * (1.15 + t * 3.2);
-          const a = 0.2 * (1 - t) * (1 - t) * (0.5 + 0.5 * glow);
-          ctx.strokeStyle = rgba(INNER, a);
-          ctx.lineWidth = (3 - 2 * t) * s;
-          ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.stroke();
-          ctx.strokeStyle = rgba(PHOTON, a * 0.5);
-          ctx.lineWidth = 1.2 * s;
-          ctx.beginPath(); ctx.arc(cx, cy, rr * 0.94, 0, Math.PI * 2); ctx.stroke();
-        }
-      }
+      renderCore(frame);
       ctx.globalCompositeOperation = "source-over";
+      ctx.lineCap = "butt";
 
       // ---- Planet system ------------------------------------------------
       const activeId = activeRef.current;
@@ -767,7 +584,7 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null,
       // changes.
       if (orbitsOn || editMode) {
         const hov = planetDragRef.current !== null ? dragSlotRef.current ?? -1 : -1;
-        cachedLayer(slotLayer, `${editMode}|${hov}|${pcfg.orbit}|${ocfg.style}|${ocfg.mul}|${ocfg.wmul}`,
+        cachedLayer(slotLayer, `${editMode}|${hov}|${pcfg.orbit}|${ocfg.style}|${ocfg.mul}|${ocfg.wmul}|${pal.inner}|${pal.accent}`,
                     cx, cy, slotR(SLOT_FRACS.length - 1) + 2 * Math.max(1, ocfg.wmul) + 4, (g) => {
           for (let si = 0; si < SLOT_FRACS.length; si++) {
             const rr = slotR(si);
@@ -776,8 +593,8 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null,
             g.beginPath();
             g.arc(cx, cy, rr, 0, Math.PI * 2);
             g.strokeStyle = hovered
-              ? rgba(CYAN, 0.65)
-              : rgba(INNER, editMode ? 0.45 : Math.min(0.6, 0.22 * ocfg.mul));
+              ? rgba(pal.accent, 0.65)
+              : rgba(pal.inner, editMode ? 0.45 : Math.min(0.6, 0.22 * ocfg.mul));
             g.lineWidth = hovered ? 1.8 : 1.2 * (editMode ? 1 : ocfg.wmul);
             g.stroke();
           }
@@ -974,9 +791,9 @@ export default function BlackHole({ state, size: sizeProp, activeModelId = null,
       cancelAnimationFrame(raf);
       resumeRef.current = () => {};
     };
-    // `density` is a real dependency: particle arrays are sized once at setup,
-    // so changing it has to rebuild the scene rather than just re-render.
-  }, [size, density]);
+    // `density` and `coreForm` are real dependencies: particle arrays are
+    // sized once at setup, so changing either rebuilds the scene.
+  }, [size, density, coreForm]);
 
   useEffect(() => {
     if (!paused) resumeRef.current();

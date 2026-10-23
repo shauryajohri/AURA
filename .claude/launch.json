@@ -8,6 +8,12 @@
       "port": 8760
     },
     {
+      "name": "aura-web",
+      "runtimeExecutable": "venv\\Scripts\\python.exe",
+      "runtimeArgs": ["web_api.py"],
+      "port": 8770
+    },
+    {
       "name": "aura-frontend",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "frontend", "run", "dev:vite"],

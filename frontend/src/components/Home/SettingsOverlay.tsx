@@ -96,7 +96,7 @@ const ORBIT_STYLES = ["dashed", "solid", "dotted", "hidden"] as const;
 // Mirrors core/persona.py MODES. The backend owns the actual prompt text; this
 // is only what the picker shows.
 const PERSONA_MODES = [
-  { id: "buddy", label: "Buddy", blurb: "A sharp, close friend. Teases, notices things, keeps it real." },
+  { id: "buddy", label: "Buddy", blurb: "AURA as herself: flirty, strict and a proper nerd. Teases you, keeps you honest, geeks out with you." },
   { id: "assistant", label: "Assistant", blurb: "A capable chief of staff. Warm, efficient, a step ahead." },
   { id: "mentor", label: "Mentor", blurb: "Helps you get better, not just get answers. Hints first, honest feedback." },
   { id: "custom", label: "Custom", blurb: "Describe exactly who you want AURA to be." },

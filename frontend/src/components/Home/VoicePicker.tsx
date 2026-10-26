@@ -36,6 +36,10 @@ export default function VoicePicker({ value, onChange }: Props) {
   const goneRef = useRef(false);
 
   useEffect(() => {
+    // Reset on (re)mount: StrictMode runs this effect, its cleanup, then the
+    // effect again on the same refs, and a flag left at true from that first
+    // cleanup kept the list on "Loading voices…" forever.
+    goneRef.current = false;
     api
       .getVoices()
       .then((r) => {

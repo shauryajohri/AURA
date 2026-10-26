@@ -6,7 +6,7 @@ python-dotenv
 
 # Voice. pygame-ce is the maintained pygame fork: same `import pygame`, and it
 # has wheels for current Pythons (pygame has none for 3.14 on Windows).
-edge-tts
+edge-tts>=7.3.1  # older builds get a 403 from the speech service
 pygame-ce
 SpeechRecognition
 

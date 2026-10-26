@@ -62,7 +62,9 @@ check("a name can't span lines",
 
 print("\n[the default is the original AURA]")
 p = system_prompt()
-check("buddy voice by default", "Donna Paulsen" in p)
+check("buddy voice by default", "unapologetic nerd" in p)
+check("the default is flirty, strict and nerdy",
+      all(w in p for w in ("Flirty:", "Strict:", "Nerdy:")))
 check("output rules are still there", "ABSOLUTE OUTPUT RULES" in p)
 check("identity is still there", "You ARE AURA" in p)
 check("no name → no name line", "The person you're talking to is" not in p)
@@ -71,7 +73,7 @@ check("no name → no name line", "The person you're talking to is" not in p)
 print("\n[each mode speaks as itself]")
 save(mode="assistant")
 p = system_prompt()
-check("assistant role", "chief of staff" in p and "Donna Paulsen" not in p)
+check("assistant role", "chief of staff" in p and "unapologetic nerd" not in p)
 save(mode="mentor")
 p = system_prompt()
 check("mentor role", "You are AURA, a mentor" in p)
@@ -79,7 +81,7 @@ check("mentor may ask a guiding question", "Mentor exception" in p)
 save(mode="custom", custom="Be my gym coach. Short and loud.")
 p = system_prompt()
 check("custom role uses their words", "Be my gym coach. Short and loud." in p)
-check("custom role is not buddy", "Donna Paulsen" not in p)
+check("custom role is not buddy", "unapologetic nerd" not in p)
 
 
 print("\n[the user's name]")
@@ -95,7 +97,7 @@ check("creator gets the project note", "Working on AURA" in system_prompt())
 print("\n[the web demo ignores the saved persona]")
 save(mode="custom", custom="SECRET OWNER ROLE", user_name="Riya")
 web = system_prompt(use_saved=False)
-check("demo uses buddy", "Donna Paulsen" in web)
+check("demo uses buddy", "unapologetic nerd" in web)
 check("demo never sees the owner's role", "SECRET OWNER ROLE" not in web)
 check("demo never sees the owner's name", "Riya" not in web)
 
@@ -111,7 +113,7 @@ def _boom():
 mstore._connect = _boom
 persona.invalidate()
 try:
-    check("falls back to buddy", "Donna Paulsen" in system_prompt())
+    check("falls back to buddy", "unapologetic nerd" in system_prompt())
 finally:
     mstore._connect = _good
     persona.invalidate()

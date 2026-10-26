@@ -237,7 +237,7 @@ skip link "Skip to content".
   them, not research.
 - Sessions must be issued by the server; a chat without a valid session is refused (fixes QA M13).
 - 50 messages per session, a per-IP daily ceiling so opening new tabs does not reset the budget, a per-IP per-minute rate limit, input capped at 1,200 characters, and a global daily ceiling that protects the API keys.
-- A `/tts` endpoint using AURA's real voice (Ava, tone-matched rate and pitch from `modules/voice_output.py`), length capped and rate limited.
+- A `/tts` endpoint using AURA's real voice (Ava, in the steady per-voice tuning from `modules/voice_output.py`), length capped and rate limited.
 - CORS limited to the site's own origin through an environment variable.
 
 ## 9. The copy gate

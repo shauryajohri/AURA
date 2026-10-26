@@ -49,22 +49,16 @@ except Exception as _e:  # noqa: BLE001
     # Standalone fallback: the tool still works if it's copied out of the repo.
     print(f"  (couldn't import the app's roster: {_e} — using the built-in list)")
     CANDIDATES = [
-        ("en-US-AvaMultilingualNeural",    "female", "Bright, expressive, lively"),
-        ("en-US-EmmaMultilingualNeural",   "female", "Warm and even"),
-        ("en-GB-SoniaNeural",              "female", "Composed, understated (British)"),
-        ("en-US-JennyNeural",              "female", "Friendly, familiar, neutral"),
-        ("en-US-AndrewMultilingualNeural", "male",   "Relaxed, conversational"),
-        ("en-US-BrianMultilingualNeural",  "male",   "Casual, easy pacing"),
-        ("en-GB-RyanNeural",               "male",   "Least robotic (British)"),
-        ("en-US-AriaNeural",               "female", "AURA's old voice — for comparison"),
+        ("en-US-AvaMultilingualNeural", "female", "Playful and warm (American)"),
+        ("en-GB-SoniaNeural",           "female", "Crisp and composed (British)"),
     ]
 
 # AURA's actual register, so you judge the voice doing the job it will do —
 # a neutral "the quick brown fox" tells you nothing about how a tease lands.
 SAMPLE_LINES = [
-    "Hey. You've been on that same function for forty minutes — want me to take a look?",
-    "It's two in the morning, mate. Whatever this is, it'll still be broken tomorrow.",
-    "Build's green. Nineteen tests, all passing. Go get a coffee.",
+    "Forty minutes on one function? Cute. Paste it, and tell me your base case first.",
+    "It's two in the morning, genius. Commit, close the laptop, and dream about clean code.",
+    "Build's green, nineteen tests passing. Honestly? That's a little bit attractive.",
 ]
 
 
@@ -106,7 +100,13 @@ def set_voice(voice: str) -> None:
 # ── Preview ───────────────────────────────────────────────────────────────
 async def _render(voice: str, text: str, path: Path) -> None:
     import edge_tts
-    await edge_tts.Communicate(text, voice=voice).save(str(path))
+    try:
+        from modules.voice_output import prosody
+        tune = prosody(voice)   # hear it the way AURA will actually say it
+    except Exception:  # noqa: BLE001
+        tune = {"rate": "+0%", "pitch": "+0Hz"}
+    await edge_tts.Communicate(text, voice=voice, rate=tune["rate"],
+                               pitch=tune["pitch"]).save(str(path))
 
 
 def _play(path: Path) -> None:

@@ -76,42 +76,53 @@ def text_to_spoken(text: str) -> str:
     return text
 
 
-_SPLIT_RULES = [
-    (r"(?<=[.!?])\s+",                             0.12, "sentence"),
-    (r"(?<=\.\.\.)\s*",                            0.18, "ellipsis"),
-    (r"\s*—\s*",                                   0.10, "dash"),
-    (r"(?<=[,;:])\s+",                             0.06, "clause"),
-    (r"\s+(?:but|however|though|although|yet)\s+", 0.08, "contrast"),
-    (r"\s+(?:and|so|then|because|since)\s+",       0.05, "continuation"),
-]
+# Every chunk is its own TTS request, and the voice plans its intonation one
+# request at a time. Chunks used to break at every comma, dash, "and" and
+# "but" (and at word 16, mid-phrase), so each fragment was read as a complete
+# flat statement with a gap after it — that was most of what made AURA sound
+# robotic. Now a chunk is a whole sentence, or two short ones together, and a
+# sentence is only broken (at a comma) when it's long enough that the first
+# word would otherwise wait too long.
+_SENTENCE = re.compile(r"(?<=[.!?…])\s+")
+_CLAUSE   = re.compile(r"(?<=[,;:])\s+")
+_MAX_WORDS = 28   # past this the first word waits too long on the network
+_MIN_WORDS = 4    # shorter than this rides along with its neighbour
+
+_SENTENCE_PAUSE = 0.08
+_CLAUSE_PAUSE   = 0.02   # a long sentence broken at a comma: keep it flowing
+
+
+def _split_long(sentence: str) -> List[tuple]:
+    if len(sentence.split()) <= _MAX_WORDS:
+        return [(sentence, _SENTENCE_PAUSE)]
+    parts, buf = [], ""
+    for clause in _CLAUSE.split(sentence):
+        joined = f"{buf} {clause}".strip()
+        if buf and len(joined.split()) > _MAX_WORDS:
+            parts.append((buf, _CLAUSE_PAUSE))
+            buf = clause
+        else:
+            buf = joined
+    if buf:
+        parts.append((buf, _SENTENCE_PAUSE))
+    return parts
 
 
 def _split_into_chunks(text: str) -> List[tuple]:
-    segments = [(text, 0.10)]
-    for pattern, pause, _ in _SPLIT_RULES:
-        new_segments = []
-        for seg_text, seg_pause in segments:
-            parts = re.split(pattern, seg_text)
-            for i, part in enumerate(parts):
-                part = part.strip()
-                if not part:
-                    continue
-                is_last = (i == len(parts) - 1)
-                new_segments.append((part, seg_pause if is_last else pause))
-        segments = new_segments
+    pieces = []
+    for sentence in _SENTENCE.split(text):
+        if sentence.strip():
+            pieces.extend(_split_long(sentence.strip()))
 
     merged = []
-    for text_part, pause in segments:
-        words = text_part.split()
-        if len(words) < 2 and merged:
-            prev_text, prev_pause = merged[-1]
-            merged[-1] = (prev_text + " " + text_part, pause)
-        elif len(words) > 16:
-            mid = len(words) // 2
-            merged.append((" ".join(words[:mid]), 0.18))
-            merged.append((" ".join(words[mid:]), pause))
-        else:
-            merged.append((text_part, pause))
+    for piece, pause in pieces:
+        if merged:
+            prev, _ = merged[-1]
+            short = min(len(prev.split()), len(piece.split())) < _MIN_WORDS
+            if short and len(f"{prev} {piece}".split()) <= _MAX_WORDS:
+                merged[-1] = (f"{prev} {piece}", pause)
+                continue
+        merged.append((piece, pause))
     return merged
 
 
@@ -192,16 +203,10 @@ def plan(llm_response: str, mode: str = "CHAT") -> List[SpeechChunk]:
             speed_factor = timing["speed"] * speed_factor,
         ))
 
-    # filler only for EXPLAIN mode
+    # filler only for EXPLAIN mode — said as part of the first sentence, not
+    # as a one-word clip of its own
     if mode == "EXPLAIN" and len(chunks) >= 3 and random.random() < 0.20:
-        filler = SpeechChunk(
-            text         = random.choice(_THINKING_FILLERS),
-            tone         = "thinking",
-            pause_before = 0.0,
-            pause_after  = _jitter(0.15),
-            speed_factor = 0.88,
-        )
-        chunks.insert(0, filler)
+        chunks[0].text = f"{random.choice(_THINKING_FILLERS)} {chunks[0].text}"
 
     return chunks
 

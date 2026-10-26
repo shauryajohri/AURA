@@ -976,7 +976,7 @@ async def api_voices() -> dict[str, Any]:
     from modules import voice_output
     selected = ""
     try:
-        selected = voice_output.resolve_voice("normal")
+        selected = voice_output.resolve_voice()
     except Exception:  # noqa: BLE001
         selected = voice_output.FALLBACK_VOICE
     return {

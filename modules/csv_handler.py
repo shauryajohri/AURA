@@ -99,4 +99,9 @@ def _process(trigger: str) -> str:
         from modules.tasks import handle_what_to_do
         return handle_what_to_do("")
 
+    if response.upper() == "EXIT":
+        # Nothing here acts on EXIT, but it still has a goodbye line to say —
+        # returning the action name made "bye" answer with "EXIT".
+        return entry["response"] or response
+
     return response

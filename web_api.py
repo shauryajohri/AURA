@@ -990,14 +990,13 @@ async def web_tts(request: Request, payload: dict = Body(...),
     _rate_limit(ip)
     _require_session(x_aura_session)
 
-    # Written for the ear (see _speakable), with the desktop voice's tone table
-    # picking rate and pitch from the mood of the line.
-    from modules.voice_output import TONE_SETTINGS, detect_tone
+    # Written for the ear (see _speakable), in the voice's own steady tuning —
+    # the same rule as the desktop voice: no pitch jumps from line to line.
+    from modules.voice_output import prosody
     text = _speakable(str(payload.get("text") or "")[:4000])
     if not text.strip(" ."):
         raise HTTPException(400, "nothing to say")
-    tone = detect_tone(text)
-    key = hashlib.sha1(f"{VOICE}|{tone}|{text}".encode()).hexdigest()
+    key = hashlib.sha1(f"{VOICE}|{text}".encode()).hexdigest()
 
     audio = _TTS_CACHE.get(key)
     if audio is None:
@@ -1009,7 +1008,7 @@ async def web_tts(request: Request, payload: dict = Body(...),
             clips.append(now)
         try:
             import edge_tts
-            tune = TONE_SETTINGS.get(tone, TONE_SETTINGS["normal"])
+            tune = prosody(VOICE)
             speech = edge_tts.Communicate(text, voice=VOICE, rate=tune["rate"], pitch=tune["pitch"])
             buf = bytearray()
             async for chunk in speech.stream():

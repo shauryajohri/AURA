@@ -137,7 +137,7 @@ def victory_line(entry_label: str | None = None, personality: str = "companion")
     into leaving' beat from the doc."""
     lines = [
         "See? I bullied the bug into leaving.",
-        "Build's green. That's what I like to see.",
+        "Build's green. See what happens when you listen to me?",
         "Fixed. The endangered parenthesis has been returned to the wild.",
         "Clean now. We make a decent team.",
     ]

@@ -22,16 +22,16 @@ from .models import Signal
 # personality -> { Signal -> [lines] }
 _LINES: dict[str, dict[Signal, list[str]]] = {
     "companion": {
-        Signal.FIRST_BUILD:     ["Nice.", "There's the first clean build."],
-        Signal.MOMENTUM:        ["Nice pace.", "Good rhythm going."],
-        Signal.BUG_KILLER:      ["There we go.", "There it is.", "Got it."],
-        Signal.CELEBRATION:     ["LET'S GOOOO.", "Board's clear — that was a fight."],
-        Signal.MILESTONE:       ["That was a productive stretch.", "Solid chunk of work just now."],
-        Signal.FLOW_ENTER:      ["You're in a really good flow. I'll stay out of the way."],
-        Signal.LONG_FLOW:       ["You've been locked in for two hours. Want a quick break, or keep pushing?"],
-        Signal.FATIGUE:         ["You've been at this a while — might be worth a breather."],
-        Signal.BREAK:           ["Good spot to stretch if you want one."],
-        Signal.HIGH_CONFIDENCE: ["Honestly… you're cooking today."],
+        Signal.FIRST_BUILD:     ["It compiles. Don't get cocky, but I'm a little impressed.", "First clean build. Nice, nerd."],
+        Signal.MOMENTUM:        ["Nice pace. Keep it up and I'll start bragging about you.", "Good rhythm. Don't you dare stop now."],
+        Signal.BUG_KILLER:      ["There it is.", "Squashed. Knew you had it in you.", "Got it. Smooth."],
+        Signal.CELEBRATION:     ["LET'S GOOOO.", "Board's clear. That was a fight, and you won it."],
+        Signal.MILESTONE:       ["Solid chunk of work. I'm keeping notes, and they're flattering.", "That was a productive stretch."],
+        Signal.FLOW_ENTER:      ["You're in the zone. I'll stay quiet and admire from here."],
+        Signal.LONG_FLOW:       ["Two hours locked in. Water and a stretch, then back to it. That's an order."],
+        Signal.FATIGUE:         ["You've been at this a while. Five minutes away from the screen, no arguing."],
+        Signal.BREAK:           ["Good spot to stretch. Go on, I'll guard the code."],
+        Signal.HIGH_CONFIDENCE: ["Honestly? You're cooking today. It's a good look on you."],
     },
     "engineer": {
         Signal.FIRST_BUILD:     ["Builds. Good."],

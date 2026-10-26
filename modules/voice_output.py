@@ -24,112 +24,96 @@ except ModuleNotFoundError:
 # time; the others simply wait their turn.
 _audio_lock = threading.Lock()
 
-# ── Voice map ─────────────────────────────────────────────────────────────────
+# ── AURA's voices ─────────────────────────────────────────────────────────────
 # edge-tts voices live on Microsoft's servers — there is no model to download
-# and no file to manage, so the voice is just a name string and is therefore
-# configurable rather than hard-coded.
+# and no file to manage, so the voice is just a name string.
 #
-# Default is Ava (en-US-AvaMultilingualNeural): the Multilingual generation is
-# audibly smoother than en-US-AriaNeural, which is what AURA used to speak with
-# and which is now several generations old.
+# AURA has ONE character (flirty, strict, nerdy — see core/persona.py) and two
+# voices that carry it, picked by ear from a wider audition: Ava for the
+# playful side, Sonia for the strict side. Each comes with its own tuning — a
+# touch slower and lower than stock, which is the difference between a
+# newsreader and someone teasing you. The tuning belongs to the voice and
+# never changes mid-reply: shifting pitch per line is what made her sound like
+# several different robots taking turns.
 #
-# Override per install with AURA_TTS_VOICE in .env (see tools/voice_preview.py,
-# which auditions the candidates and writes the winner for you). A single tone
-# can be overridden on its own with AURA_TTS_VOICE_SERIOUS and friends, if you
-# ever want her to sound different when something has actually broken.
+# This list is the single source of truth: server.py serves it to the UI and
+# tools/voice_preview.py imports it, so there is exactly one place to edit.
+# Override per install with AURA_TTS_VOICE in .env; a voice outside this list
+# speaks with stock tuning.
 try:
     from dotenv import load_dotenv as _load_dotenv
     _load_dotenv()
 except Exception:  # noqa: BLE001 — .env is optional; the default still works
     pass
 
-FALLBACK_VOICE = "en-US-AvaMultilingualNeural"
-DEFAULT_VOICE = os.getenv("AURA_TTS_VOICE") or FALLBACK_VOICE
-
-VOICE_MAP = {
-    "normal":  os.getenv("AURA_TTS_VOICE_NORMAL")  or DEFAULT_VOICE,
-    "tease":   os.getenv("AURA_TTS_VOICE_TEASE")   or DEFAULT_VOICE,
-    "happy":   os.getenv("AURA_TTS_VOICE_HAPPY")   or DEFAULT_VOICE,
-    "serious": os.getenv("AURA_TTS_VOICE_SERIOUS") or DEFAULT_VOICE,
-}
-
-# ── The roster the Settings picker shows ──────────────────────────────────────
-# Curated, not the full 300+ edge-tts catalogue: a wall of names nobody can
-# tell apart is worse than eight you can actually choose between. The
-# *Multilingual* voices are Microsoft's newer generation and are audibly
-# smoother than the older ones — Aria is kept only as the "what AURA used to
-# sound like" reference.
-#
-# This list is the single source of truth: server.py serves it to the UI and
-# tools/voice_preview.py imports it, so there is exactly one place to edit.
 VOICES = [
     {"id": "en-US-AvaMultilingualNeural", "name": "Ava", "gender": "female",
-     "accent": "American", "character": "Bright, expressive, lively"},
-    {"id": "en-US-EmmaMultilingualNeural", "name": "Emma", "gender": "female",
-     "accent": "American", "character": "Warm and even — the steady one"},
+     "accent": "American", "character": "Playful and warm — the tease lands",
+     "rate": "-6%", "pitch": "-6Hz"},
     {"id": "en-GB-SoniaNeural", "name": "Sonia", "gender": "female",
-     "accent": "British", "character": "Composed, understated"},
-    {"id": "en-US-JennyNeural", "name": "Jenny", "gender": "female",
-     "accent": "American", "character": "Friendly, familiar, neutral"},
-    {"id": "en-US-AndrewMultilingualNeural", "name": "Andrew", "gender": "male",
-     "accent": "American", "character": "Relaxed, conversational, low-key"},
-    {"id": "en-US-BrianMultilingualNeural", "name": "Brian", "gender": "male",
-     "accent": "American", "character": "Casual, easy pacing"},
-    {"id": "en-GB-RyanNeural", "name": "Ryan", "gender": "male",
-     "accent": "British", "character": "Least robotic, occasionally over-stresses a word"},
-    {"id": "en-US-AriaNeural", "name": "Aria", "gender": "female",
-     "accent": "American", "character": "AURA's old voice — kept for comparison"},
+     "accent": "British", "character": "Crisp and composed — the strict one",
+     "rate": "-4%", "pitch": "-2Hz"},
 ]
 
 VOICE_IDS = {v["id"] for v in VOICES}
 
+FALLBACK_VOICE = VOICES[0]["id"]
+DEFAULT_VOICE = os.getenv("AURA_TTS_VOICE") or FALLBACK_VOICE
+
+_STOCK = {"rate": "+0%", "pitch": "+0Hz"}
+
 # What a voice says when you press play in Settings — she introduces herself,
 # so you're judging the voice as AURA rather than as a neutral sample.
-PREVIEW_LINE = ("Hi, I'm AURA. This is how I'll sound when I talk to you.")
+PREVIEW_LINE = ("Hi, I'm AURA. I'm sharp, I'm a little bit of a nerd, and I "
+                "don't let you slack off. Lucky for you, I happen to like you.")
 
 
-def resolve_voice(tone: str = "normal") -> str:
+def prosody(voice: str) -> dict:
+    """{'rate', 'pitch'} for `voice`: its own tuning, or stock if it's not
+    one of AURA's."""
+    for v in VOICES:
+        if v["id"] == voice:
+            return {"rate": v["rate"], "pitch": v["pitch"]}
+    return dict(_STOCK)
+
+
+def resolve_voice() -> str:
     """The voice AURA should speak with right now.
 
     Precedence, most specific first:
       1. `voice.name` in app_settings — what the Settings picker writes. It
          wins because it is the control the user can actually see.
-      2. AURA_TTS_VOICE / AURA_TTS_VOICE_<TONE> in .env — for anyone who
-         prefers configuring by file.
+      2. AURA_TTS_VOICE in .env — for anyone who prefers configuring by file.
       3. FALLBACK_VOICE.
+
+    A saved name that isn't in VOICES (a pick from the old, longer roster) is
+    ignored rather than honoured, so the picker always shows what she's
+    actually using.
 
     Resolved per utterance rather than frozen at import, so changing the voice
     in Settings takes effect on the next thing she says — no restart.
     """
     # .strip() again here rather than trusting the caller: a settings row of
-    # "   " must mean "not chosen", not a voice named three spaces (which
-    # edge-tts would reject and AURA would go silent on).
+    # "   " must mean "not chosen", not a voice named three spaces.
     chosen = str(_voice_settings().get("name") or "").strip()
-    if chosen:
+    if chosen in VOICE_IDS:
         return chosen
-    return (VOICE_MAP.get(tone) or DEFAULT_VOICE or FALLBACK_VOICE)
-
-# ── Tone detection ────────────────────────────────────────────────────────────
-def detect_tone(text: str) -> str:
-    t = text.lower()
-    if any(w in t for w in ["error", "fail", "crash", "warning"]):
-        return "serious"
-    if any(w in t for w in ["great", "done", "saved", "added", "perfect"]):
-        return "happy"
-    if any(w in t for w in ["dumb", "stupid", "bruh"]):
-        return "tease"
-    return "normal"
-
-# ── Rate/pitch per tone ───────────────────────────────────────────────────────
-TONE_SETTINGS = {
-    "normal":  {"rate": "+0%",  "pitch": "+0Hz"},
-    "tease":   {"rate": "+8%",  "pitch": "+5Hz"},
-    "happy":   {"rate": "+5%",  "pitch": "+8Hz"},
-    "serious": {"rate": "-5%",  "pitch": "-3Hz"},
-}
+    return DEFAULT_VOICE or FALLBACK_VOICE
 
 # ── Text cleaner ──────────────────────────────────────────────────────────────
-def clean_text(text: str) -> str:
+# Sentence ends only — splitting on every "." read "Python 3.12" as "Python
+# three. Twelve." and dropped the "?" off questions.
+_SENTENCE_END = re.compile(r"(?<=[.!?…])\s+")
+# The voice reads emoji out by name — a wink in the text became "smirking
+# face" in her mouth. Same set web_api._speakable strips.
+_EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿️‍]")
+
+
+def clean_text(text: str, max_sentences: int | None = 2) -> str:
+    """Make `text` speakable. `max_sentences=None` keeps every sentence —
+    speak_chunks uses that, since a chunk is already a slice of a reply the
+    planner has sized."""
+    text = re.sub(r'(?<=\w)_(?=\w)', ' ', text)   # snake_case → "snake case"
     text = re.sub(r'\*\*|__|\*|_|~~|`', '', text)
     text = re.sub(r'http\S+', '', text)
     text = re.sub(r'[#\[\]{}|<>]', '', text)
@@ -139,12 +123,17 @@ def clean_text(text: str) -> str:
     text = re.sub(r'User asks:.*', '', text, flags=re.DOTALL)
     text = re.sub(r'Screen content:.*', '', text, flags=re.DOTALL)
     text = re.sub(r'"', '', text)
-    # keep 2 sentences max
-    sentences = [s.strip() for s in text.split('.') if s.strip()]
-    text = '. '.join(sentences[:2])
-    if text and not text.endswith('.'):
+    text = _EMOJI.sub('', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    sentences = [s for s in _SENTENCE_END.split(text) if s]
+    if max_sentences:
+        sentences = sentences[:max_sentences]
+    text = ' '.join(sentences).strip()
+    # Close an open sentence so it lands, but leave a clause that ends on a
+    # comma alone: a full stop there drops her voice mid-thought.
+    if text and text[-1].isalnum():
         text += '.'
-    return text.strip()
+    return text
 
 # ── User voice settings (Sanctuary → Voice) ───────────────────────────────────
 # These live in the app_settings table and were previously saved but never
@@ -180,14 +169,14 @@ def _voice_settings() -> dict:
     return out
 
 
-def _rate_offset(rate_pct: int, tone_rate: str) -> str:
-    """Fold the user's 0–100 speed preference into the tone's own rate shift.
+def _rate_offset(rate_pct: int, voice_rate: str) -> str:
+    """Fold the user's 0–100 speed preference into the voice's own rate.
 
-    55 is the stored default and means "leave the tone alone"; the ends of the
-    slider map to roughly -40%..+40% on top of it.
+    55 is the stored default and means "leave the voice alone"; the ends of
+    the slider map to roughly -40%..+40% on top of it.
     """
     try:
-        base = int(tone_rate.rstrip("%"))
+        base = int(voice_rate.rstrip("%"))
     except ValueError:
         base = 0
     user = round((max(0, min(100, rate_pct)) - 55) * 0.8)
@@ -196,20 +185,20 @@ def _rate_offset(rate_pct: int, tone_rate: str) -> str:
 
 
 # ── TTS generation ────────────────────────────────────────────────────────────
-async def _generate(text: str, tone: str, path: str, voice: str | None = None):
+async def _generate(text: str, path: str, voice: str | None = None):
     if edge_tts is None:
         raise RuntimeError("edge_tts is not installed")
 
     # `voice` is only passed by the Settings preview, which has to render a
     # voice the user has NOT chosen yet. Everything else resolves live, so a
     # change in the picker applies to the very next thing AURA says.
-    voice = voice or resolve_voice(tone)
-    settings = TONE_SETTINGS.get(tone, TONE_SETTINGS["normal"])
+    voice = voice or resolve_voice()
+    tune = prosody(voice)
     communicate = edge_tts.Communicate(
         text,
         voice=voice,
-        rate=_rate_offset(_voice_settings()["rate_pct"], settings["rate"]),
-        pitch=settings["pitch"]
+        rate=_rate_offset(_voice_settings()["rate_pct"], tune["rate"]),
+        pitch=tune["pitch"]
     )
     await communicate.save(path)
 
@@ -229,7 +218,7 @@ def render_preview(voice: str, text: str | None = None) -> bytes:
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as f:
             tmp_path = f.name
-        asyncio.run(_generate(text or PREVIEW_LINE, "normal", tmp_path, voice=voice))
+        asyncio.run(_generate(text or PREVIEW_LINE, tmp_path, voice=voice))
         with open(tmp_path, "rb") as fh:
             return fh.read()
     finally:
@@ -258,7 +247,7 @@ def _synth(text: str) -> str | None:
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as f:
             tmp_path = f.name
-        asyncio.run(_generate(text, detect_tone(text), tmp_path))
+        asyncio.run(_generate(text, tmp_path))
         return tmp_path
     except Exception as e:  # noqa: BLE001
         print(f"[AURA TTS Error] synth: {e}")
@@ -346,13 +335,13 @@ def speak_chunks(chunks):
     # shouldn't leave half the chunks rendered and half silent.
     if not _voice_settings()["enabled"]:
         for chunk in chunks:
-            cleaned = clean_text(chunk.text)
+            cleaned = clean_text(chunk.text, max_sentences=None)
             if cleaned:
                 print(f"[AURA] {cleaned}  (voice off)")
         return
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        cleaned = [clean_text(c.text) for c in chunks]
+        cleaned = [clean_text(c.text, max_sentences=None) for c in chunks]
         # Kick the first render off immediately — nothing to overlap it with.
         pending = pool.submit(_synth, cleaned[0]) if cleaned[0] else None
 
